@@ -21,6 +21,15 @@ namespace Spacewars.Simulation
         }
         private NavPolygon(NavPolygon source,OwnedBuffers storage)
         {owned=storage;vertices=storage.Points.ReadOnlyBacking;triangles=storage.Indices.ReadOnlyBacking;Vertices=storage.Points;Triangles=storage.Indices;MinX=source.MinX;MaxX=source.MaxX;MinZ=source.MinZ;MaxZ=source.MaxZ;}
+        private NavPolygon(NavPolygon source)
+        {
+            vertices=(NavPoint[])source.vertices.Clone();
+            triangles=(int[])source.triangles.Clone();
+            Vertices=Array.AsReadOnly(vertices);Triangles=Array.AsReadOnly(triangles);
+            MinX=source.MinX;MaxX=source.MaxX;MinZ=source.MinZ;MaxZ=source.MaxZ;
+        }
+        internal NavPolygon Detached()=>owned==null?this:new NavPolygon(this);
+
         internal static NavPolygon CopyOwned(NavPolygon source,INavStorageReservation reservation)
         {
             if(source==null||reservation==null)throw new ArgumentNullException();

@@ -10,11 +10,54 @@ namespace Spacewars.Presentation
 {
     internal sealed class ResultGraph:VisualElement
     {
+        internal const int EventIconSize=48;
+        private const int StackFrameInset=2;
+
         internal sealed class Line
         {
             internal readonly PlayableOwner Owner;internal readonly int Slot;internal readonly Color Color;internal readonly List<Vector2> Points;
             internal Line(PlayableOwner owner,int slot,Color color,List<Vector2> points){Owner=owner;Slot=slot;Color=color;Points=points;}
-            internal double Value(double seconds){double value=0;foreach(var point in Points){if(point.x>seconds+1e-6)break;value=point.y;}return value;}
+            private int cachedColumns;
+            private List<Vector2> overview;
+
+            internal double Value(double seconds)
+            {
+                int lo=0,hi=Points.Count;
+                while(lo<hi)
+                {
+                    int mid=(lo+hi)/2;
+                    if(Points[mid].x<=seconds+1e-6)lo=mid+1;else hi=mid;
+                }
+                return lo==0?0:Points[lo-1].y;
+            }
+
+            internal List<Vector2> Overview(int columns,double duration)
+            {
+                if(Points.Count<=columns)return Points;
+                if(cachedColumns==columns)return overview;
+                cachedColumns=columns;
+                overview=new List<Vector2>();
+                int Column(Vector2 point)=>(int)(point.x/duration*columns);
+                for(int first=0;first<Points.Count;)
+                {
+                    int column=Column(Points[first]);
+                    int min=first,max=first,next=first+1;
+                    while(next<Points.Count&&Column(Points[next])==column)
+                    {
+                        if(Points[next].y<Points[min].y)min=next;
+                        if(Points[next].y>Points[max].y)max=next;
+                        next++;
+                    }
+                    // Preserve the range and chronology of each pixel column.
+                    overview.Add(Points[first]);
+                    int early=Math.Min(min,max),late=Math.Max(min,max),last=next-1;
+                    if(early>first&&early<last)overview.Add(Points[early]);
+                    if(late>early&&late<last)overview.Add(Points[late]);
+                    if(last>first)overview.Add(Points[last]);
+                    first=next;
+                }
+                return overview;
+            }
         }
         internal sealed class EventStack
         {
@@ -26,10 +69,12 @@ namespace Spacewars.Presentation
         private readonly Action<VisualElement,IReadOnlyList<MatchFact>> openEvents;
         private readonly MatchFact[] exits;private readonly Func<MatchFact,string> exitLabel;
         internal readonly List<EventStack> Stacks=new();
+        internal readonly int Metric;
         internal double Cursor;internal bool HideEvents;
-        internal ResultGraph(List<Line> lines,HashSet<PlayableOwner> visible,double duration,double maximum,Action<double,Vector2?> inspect,MatchFact[] events,Func<MatchFact,double> eventValue,Func<MatchFact,VisualElement> icon,Action<VisualElement,IReadOnlyList<MatchFact>> openEvents,MatchFact[] exits=null,Func<MatchFact,string> exitLabel=null)
+        internal ResultGraph(int metric,List<Line> lines,HashSet<PlayableOwner> visible,double duration,double maximum,Action<double,Vector2?> inspect,MatchFact[] events,Func<MatchFact,double> eventValue,Func<MatchFact,VisualElement> icon,Action<VisualElement,IReadOnlyList<MatchFact>> openEvents,MatchFact[] exits=null,Func<MatchFact,string> exitLabel=null)
         {
-            this.lines=lines;this.visible=visible;this.duration=Math.Max(1,duration);this.maximum=Math.Max(1,maximum);this.events=events;this.eventValue=eventValue;this.icon=icon;this.openEvents=openEvents;this.exits=exits??Array.Empty<MatchFact>();this.exitLabel=exitLabel??(f=>f.Kind.ToString());
+            Metric=metric;
+            this.lines=lines;this.visible=visible;this.duration=duration>0?duration:1;this.maximum=Math.Max(1,maximum);this.events=events;this.eventValue=eventValue;this.icon=icon;this.openEvents=openEvents;this.exits=exits??Array.Empty<MatchFact>();this.exitLabel=exitLabel??(f=>f.Kind.ToString());
             generateVisualContent+=Draw;RegisterCallback<PointerMoveEvent>(e=>inspect(Math.Max(0,Math.Min(duration,e.localPosition.x/Math.Max(1,contentRect.width)*duration)),e.localPosition));
             RegisterCallback<GeometryChangedEvent>(_=>RefreshEvents());style.backgroundColor=PostMatchResultsView.GraphPanel;style.overflow=Overflow.Visible;style.borderLeftWidth=1;style.borderLeftColor=Color.clear;
         }
@@ -47,46 +92,86 @@ namespace Spacewars.Presentation
                 var stack=new EventStack{Anchor=band,Bounds=new Rect(x,0,6,contentRect.height)};stack.Facts.Add(fact);Stacks.Add(stack);band.userData=(Action)(()=>openEvents(band,stack.Facts));Add(band);
             }
             if(HideEvents)return;
-            foreach(var f in events.Where(f=>visible.Contains(f.Owner)).OrderBy(f=>f.Seconds).ThenBy(f=>f.Sequence))
+            bool showRelayLoss=visible.Count==1;
+            foreach(var f in events.Where(f=>visible.Contains(f.Owner)&&(showRelayLoss||f.Kind!=MatchFactKind.RelayNeutralized))
+                .OrderBy(f=>f.Seconds).ThenBy(f=>f.Sequence))
             {
-                var pt=Point(new Vector2((float)f.Seconds,(float)eventValue(f)));var bounds=new Rect(Mathf.Clamp(pt.x-9,0,Math.Max(0,contentRect.width-43)),pt.y+7,43,23);
-                var overlaps=Stacks.Where(s=>s.Anchor==null&&s.Bounds.Overlaps(bounds)).ToArray();var stack=overlaps.FirstOrDefault();
+                var pt=EventPoint(f);
+                const int footprint=EventIconSize+2*StackFrameInset;
+                var bounds=new Rect(pt.x-footprint/2f,pt.y-footprint/2f,footprint,footprint);
+                // Only visible marker footprints block space. Dense runs of events
+                // must not merge into a single stack that spans the whole timeline.
+                var stack=Stacks.FirstOrDefault(s=>s.Anchor==null&&s.Bounds.Overlaps(bounds));
                 if(stack==null){stack=new EventStack{Bounds=bounds};Stacks.Add(stack);}
-                else{stack.Bounds=Union(stack.Bounds,bounds);foreach(var merge in overlaps.Skip(1)){stack.Facts.AddRange(merge.Facts);stack.Bounds=Union(stack.Bounds,merge.Bounds);Stacks.Remove(merge);}}
                 stack.Facts.Add(f);
             }
             foreach(var stack in Stacks.Where(s=>s.Anchor==null))
             {
-                stack.Facts.Sort((a,b)=>a.Sequence.CompareTo(b.Sequence));var anchor=icon(stack.Facts[0]);stack.Anchor=anchor;anchor.name="result-event-stack-"+stack.Facts[0].Sequence;anchor.AddToClassList("result-event-marker");anchor.style.position=Position.Absolute;anchor.style.left=stack.Bounds.x;anchor.style.top=stack.Bounds.y;
-                if(stack.Facts.Count>1)
-                {
-                    for(int i=2;i>=1;i--){var plate=new VisualElement{pickingMode=PickingMode.Ignore};plate.style.position=Position.Absolute;plate.style.left=i*3;plate.style.top=i*3;plate.style.width=18;plate.style.height=18;plate.style.backgroundColor=PostMatchResultsView.GraphPanel;plate.style.borderBottomWidth=plate.style.borderRightWidth=1;plate.style.borderBottomColor=plate.style.borderRightColor=OrbitalTheme.Muted;anchor.Insert(0,plate);}
-                    var count=new Label(stack.Facts.Count.ToString()){pickingMode=PickingMode.Ignore,name="result-stack-count"};count.style.position=Position.Absolute;count.style.right=-8;count.style.top=-9;count.style.fontSize=9;count.style.backgroundColor=OrbitalTheme.Panel;count.style.color=OrbitalTheme.Ink;anchor.Add(count);
-                }
+                stack.Facts.Sort((a,b)=>a.Tick!=b.Tick?a.Tick.CompareTo(b.Tick):a.Sequence.CompareTo(b.Sequence));
+                var first=stack.Facts[0];
+                var anchor=icon(first);
+                stack.Anchor=anchor;
+                anchor.name="result-event-stack-"+first.Sequence;
+                anchor.AddToClassList("result-event-marker");
+                anchor.style.position=Position.Absolute;
+                var pt=EventPoint(first);
+                anchor.style.left=pt.x-EventIconSize/2f;
+                anchor.style.top=pt.y-EventIconSize/2f;
+                if(stack.Facts.Count>1)StyleEventStack(anchor);
                 anchor.userData=(Action)(()=>openEvents(anchor,stack.Facts));anchor.RegisterCallback<PointerEnterEvent>(_=>openEvents(anchor,stack.Facts));Add(anchor);
             }
         }
-        private static Rect Union(Rect a,Rect b)=>Rect.MinMaxRect(Math.Min(a.xMin,b.xMin),Math.Min(a.yMin,b.yMin),Math.Max(a.xMax,b.xMax),Math.Max(a.yMax,b.yMax));
+        private Vector2 EventPoint(MatchFact fact)
+            =>Point(new Vector2((float)fact.Seconds,(float)eventValue(fact)));
+
+        private static void StyleEventStack(VisualElement anchor)
+        {
+            var outline=new Color(.58f,.70f,.75f);
+            var frame=new VisualElement{name="result-stack-frame",pickingMode=PickingMode.Ignore};
+            frame.style.position=Position.Absolute;
+            frame.style.left=frame.style.top=-StackFrameInset;
+            frame.style.width=frame.style.height=EventIconSize+2*StackFrameInset;
+            frame.style.borderTopWidth=frame.style.borderRightWidth=frame.style.borderBottomWidth=frame.style.borderLeftWidth=1.5f;
+            TintStackPlate(frame,outline);
+            anchor.Add(frame);
+            anchor.RegisterCallback<FocusInEvent>(_=>TintStackPlate(frame,OrbitalTheme.Cyan));
+            anchor.RegisterCallback<FocusOutEvent>(_=>TintStackPlate(frame,outline));
+        }
+
+        private static void TintStackPlate(VisualElement plate,Color color)
+        {
+            plate.style.borderTopColor=plate.style.borderRightColor=plate.style.borderBottomColor=plate.style.borderLeftColor=color;
+        }
+
         private void Draw(MeshGenerationContext context)
         {
             if(contentRect.width<=0||contentRect.height<=0)return;
             var p=context.painter2D;p.lineWidth=1;
             for(int i=0;i<5;i++){float y=i*(contentRect.height-4)/4+2;p.strokeColor=i%2==0?OrbitalTheme.Line:new Color(.12f,.19f,.23f);p.BeginPath();p.MoveTo(new Vector2(0,y));p.LineTo(new Vector2(contentRect.width,y));p.Stroke();}
+            int columns=Math.Max(1,Mathf.CeilToInt(contentRect.width));
             foreach(var line in lines.Where(l=>visible.Contains(l.Owner)).OrderByDescending(l=>l.Slot))
             {
-                p.strokeColor=line.Color;p.lineWidth=1.5f;
-                for(int i=1;i<line.Points.Count;i++){var from=Point(line.Points[i-1]);var to=Point(line.Points[i]);p.BeginPath();p.MoveTo(from);p.LineTo(new Vector2(to.x,from.y));p.LineTo(to);p.Stroke();}
-                // Slot-specific marks supplement ownership color, including overlapping curves.
-                int stride=Math.Max(1,line.Points.Count/12);
-                for(int i=line.Slot%stride;i<line.Points.Count;i+=stride)Marker(p,Point(line.Points[i]),line.Color,line.Slot,2);
-                Marker(p,Point(new Vector2((float)Cursor,(float)line.Value(Cursor))),line.Color,line.Slot,3.5f);
+                var points=line.Overview(columns,duration);
+                if(points.Count<2)continue;
+                p.strokeColor=line.Color;p.lineWidth=1.65f;
+                // Painter2D allocates one mesh per stroke. Bound its vertex count
+                // and start each piece at the previous piece's endpoint.
+                const int stepsPerStroke=256;
+                for(int start=0;start<points.Count-1;start+=stepsPerStroke)
+                {
+                    var from=Point(points[start]);p.BeginPath();p.MoveTo(from);
+                    int end=Math.Min(points.Count-1,start+stepsPerStroke);
+                    for(int i=start+1;i<=end;i++)
+                    {
+                        var to=Point(points[i]);
+                        if(to.x!=from.x)p.LineTo(new Vector2(to.x,from.y));
+                        if(to.y!=from.y)p.LineTo(to);
+                        from=to;
+                    }
+                    p.Stroke();
+                }
             }
             p.strokeColor=OrbitalTheme.Cyan;p.lineWidth=1;p.BeginPath();float x=(float)(Cursor/duration)*contentRect.width;p.MoveTo(new Vector2(x,0));p.LineTo(new Vector2(x,contentRect.height));p.Stroke();
-        }
-        private static void Marker(Painter2D p,Vector2 center,Color color,int slot,float size)
-        {
-            p.fillColor=color;p.BeginPath();int sides=slot%3==0?8:slot%3==1?4:3;
-            for(int i=0;i<sides;i++){float angle=(float)(i*Math.PI*2/sides-Math.PI/2);var v=center+new Vector2(Mathf.Cos(angle),Mathf.Sin(angle))*size;if(i==0)p.MoveTo(v);else p.LineTo(v);}p.ClosePath();p.Fill();
         }
     }
 }

@@ -87,7 +87,7 @@ namespace Spacewars.Runtime
             foreach(var owner in scheduler.Owners)owner.ReconcileBudget(domain);
             domain.ApplyBalance(gameplay);scheduler.Rebind(gameplay);if(ai!=null)scheduler.Rebind(ai);return null;
         }
-        public void Stop(){domain.Navigation.RoutePort.CancelResultPreparation();domain.StopCombatMotionAuthority();scheduler.Stop(domain.Tick);PerformanceProfile.Flush();}
+        public void Stop(){domain.Navigation.RoutePort.CancelResultPreparation();domain.GroundReplay?.Dispose();domain.GroundReplay=null;domain.StopCombatMotionAuthority();scheduler.Stop(domain.Tick);PerformanceProfile.Flush();}
     }
     public sealed partial class PlayableRuntime
     {
@@ -108,9 +108,14 @@ namespace Spacewars.Runtime
             Dictionary<string,long> watermarks;
             lock(gate){
                 if(captureRequest==null)return;
-                request=captureRequest;captureRequest=null;
-                if(inbox.Count!=0||humanActions.Count!=0||campaignTutorialControls.Count!=0||finishRequested!=0||requestedBalance!=null||requestedAiProfile!=null){
+                request=captureRequest;
+                if(inbox.Count!=0||humanActions.Count!=0||campaignTutorialControls.Count!=0||finishRequested!=0||requestedSurrenders.Count!=0||requestedBalance!=null||requestedAiProfile!=null){
+                    captureRequest=null;aiScheduler.HoldReviewForCapture=false;
                     request.SetException(new InvalidOperationException("Capture requires an empty command/profile/tutorial ingress barrier."));return;}
+                aiScheduler.HoldReviewForCapture=true;
+                if(!aiScheduler.ReviewIdle || !domain.ObservedPathsReadyForCapture)return;
+                aiScheduler.HoldReviewForCapture=false;
+                captureRequest=null;
                 capturedPause=paused!=0;capturedMenuPause=menuPaused!=0;accepted=lastAcceptedSequence;capturedOutstanding=outstanding;ordinal=receiptOrdinal;
                 queued=receipts.ToArray();history=receiptHistory.ToArray();offline=offlineReceipts.ToArray();
                 watermarks=offlineConfiguration==null?new Dictionary<string,long>{{PlayableDomain.PlayerId,lastAcceptedSequence}}:new Dictionary<string,long>(acceptedByOwner);
@@ -119,17 +124,18 @@ namespace Spacewars.Runtime
             // belongs after this checkpoint; do not read its live watermarks or ledger.
             try{
                 byte[] bytes;
-                aiScheduler.DrainReviewsForCapture(domain,id=>watermarks.TryGetValue(id,out var value)?value:0,()=>IsStopRequested);
-                domain.DrainObservedPathsForCapture(()=>IsStopRequested);
+                aiScheduler.SettleReviewForCapture(domain,id=>watermarks.TryGetValue(id,out var value)?value:0,capturedPause);
                 var port=domain.Navigation.RoutePort;
                 using(port.AcquireCapture(()=>IsStopRequested)){
                     BeforeCaptureSerialization?.Invoke();
                     if(IsStopRequested)throw new OperationCanceledException("Capture stopped before serialization.");
                     using(var state=authorityTick.CaptureWorldState(snapshotSequence,id=>watermarks.TryGetValue(id,out var value)?value:0)){
                         state.SetTransportCapture(w=>{
-                            w.Write(5);w.Write(capturedMenuPause);w.Write(capturedPause);w.Write(accepted);w.Write(capturedOutstanding);w.Write(ordinal);
+                            bool activeRecast = domain.Navigation.HasActiveRecastQuery;
+                            w.Write(activeRecast ? 6 : 5);w.Write(capturedMenuPause);w.Write(capturedPause);w.Write(accepted);w.Write(capturedOutstanding);w.Write(ordinal);
                             WorldWire.Array(w,queued,x=>WorldWire.Write(w,x));WorldWire.Array(w,history,x=>WorldWire.Write(w,x));
                             WorldWire.Array(w,offline,x=>{w.Write(x.Ordinal);WorldWire.Write(w,x.Receipt);});domain.WriteObservedPathState(w);w.Write(aiScheduler.NextReviewOwnerForCapture);
+                            if (activeRecast) domain.Navigation.WriteActiveRecastQueries(w);
                         });bytes=state.Encode();
                     }
                     port.ThrowIfHostFailed();
@@ -170,13 +176,14 @@ namespace Spacewars.Runtime
         {
             var state=PlayableWorldState.Decode(bytes);AiStateWire.Require(state.RuntimeTransport.Length>0,"missing runtime transport state");
             domain=restored.Domain;aiScheduler=restored.Scheduler;authorityTick=restored;offlineConfiguration=config;
+            if(domain.ProvingOpeningPending){provingGroundStart=2;provingResetSetup=domain.CaptureProvingSetup();}
             if(config?.CampaignOpening==true&&domain.CampaignNeedsCheckpoint){campaignCheckpoint=(byte[])bytes.Clone();campaignCheckpointStage=domain.CampaignCheckpointStage;}
             seed=state.Seed;Generation=state.Generation;snapshotSequence=restored.PublicationSequence;NativeAiProfile=ai;NativeAiCatalog=AiRosterCatalog.Initial;
             ownerAi=aiScheduler.Owners.SingleOrDefault(o=>o.OwnerId==PlayableDomain.PlayerId);enemyAi=aiScheduler.Owners.SingleOrDefault(o=>o.OwnerId=="enemy-1");
             openingCompositionAuthority=new PlayableAiOpeningCompositionAuthority();openingCompositionAuthority.Initialize(seed,PlayableDomain.PlayerId,aiProfile:ai);OpeningComposition=ownerAi?.Checkpoint.Opening??PlayableAiOpeningComposition.Initialize(seed,PlayableDomain.PlayerId,aiProfile:ai);
             EnemyAiConfig=new AiOwnerConfig("enemy-1",enemyAi?.Checkpoint.Difficulty??AiDifficulty.Fighter,seed,ai);
             Unpack(state.RuntimeTransport,r=>{
-                int schema=r.ReadInt32();AiStateWire.Require(schema==1||schema==2||schema==3||schema==4||schema==5,"unsupported runtime schema");
+                int schema=r.ReadInt32();AiStateWire.Require(schema==1||schema==2||schema==3||schema==4||schema==5||schema==6,"unsupported runtime schema");
                 if(schema==1){bool effective=Boolean(r);campaignTutorialPauseHeld=domain.CampaignTutorialPauseHeld?1:0;menuPaused=effective&&campaignTutorialPauseHeld==0?1:0;paused=effective?1:0;}
                 else{menuPaused=Boolean(r)?1:0;bool effective=Boolean(r);campaignTutorialPauseHeld=domain.CampaignTutorialPauseHeld?1:0;AiStateWire.Require(effective==(menuPaused!=0||campaignTutorialPauseHeld!=0),"runtime pause ownership mismatch");paused=effective?1:0;}
                 lastAcceptedSequence=r.ReadInt64();outstanding=r.ReadInt32();receiptOrdinal=r.ReadInt64();
@@ -185,6 +192,7 @@ namespace Spacewars.Runtime
                 offlineReceipts.AddRange(WorldWire.Array(r,()=>new OfflineReceipt(r.ReadInt64(),ReadPlayableCommandReceipt(r))));
                 if(schema>=3)domain.ReadObservedPathState(r,schema>=4);
                 if(schema>=5)aiScheduler.RestoreReviewCursor(r.ReadInt32());
+                if(schema>=6)domain.Navigation.ReadActiveRecastQueries(r, domain.RoutingProfile);
                 AiStateWire.Require(lastAcceptedSequence>=0&&outstanding>=0&&outstanding<=MaxOutstandingCommands&&outstanding==receipts.Count(x=>x.Status!=PlayableCommandStatus.Accepted)+domain.CaptureRallyIntents().Count(i=>restored.HumanWatermarks.Any(h=>h.Value>0&&domain.OwnerFor(h.Key)==i.Owner&&i.Sequence<=h.Value))&&receiptHistory.Count<=512&&offlineReceipts.Count<=512&&receiptOrdinal>=0&&receipts.Concat(receiptHistory).All(x=>x!=null&&x.Sequence>0&&x.AppliedTick<=state.Tick),"runtime receipt ledger");return true;
             });
             foreach(var p in restored.HumanWatermarks)acceptedByOwner.Add(p.Key,p.Value);

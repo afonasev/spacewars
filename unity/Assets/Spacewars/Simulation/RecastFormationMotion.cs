@@ -9,7 +9,8 @@ namespace Spacewars.Simulation
         internal int TargetLeg;
         internal double ForwardLimit,DirectionalBankReach;
         internal byte Flags;
-        internal const byte Guide=1,Wait=2,Bound=4,PolicyWait=8,StagingFeed=16,PreEntry=32,Directional=64;
+        internal bool DirectArrival,SingleMoveDirect;
+        internal const byte Guide=1,Wait=2,Bound=4,PolicyWait=8,StagingFeed=16,PreEntry=32,Directional=64,StrictBankEntry=128;
     }
     internal static class RecastFormationMotion
     {
@@ -105,7 +106,7 @@ namespace Spacewars.Simulation
                     // an already displaced incoming body can hit an artificial
                     // one-step barrier while aligning. The separate ORIGINAL
                     // core span below still requires full-footprint alignment.
-                    if(!bankEntryRecovery||before>=first)return false;
+                    if(!bankEntryRecovery||before>=first||(hint.Flags&NavFormationFrameHint.StrictBankEntry)!=0)return false;
                     if(lateral<low)return next>lateral&&next<=high+1e-9;
                     if(lateral>high)return next<lateral&&next>=low-1e-9;
                     return false;

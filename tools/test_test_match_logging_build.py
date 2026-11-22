@@ -1,6 +1,8 @@
 """Exercise channel propagation through the actual release-build CLI without Unity."""
 import contextlib,importlib.util,io,json,pathlib,sys,tempfile,unittest
 from unittest.mock import patch
+
+from tools.test_release_pipeline import write_release_profile_fixture
 spec=importlib.util.spec_from_file_location('logging_build',pathlib.Path(__file__).parent/'native-release/build.py');build=importlib.util.module_from_spec(spec);spec.loader.exec_module(build)
 class TestBuildLoggingChannel(unittest.TestCase):
  def run_build(self,channel=None,extra=None):
@@ -9,6 +11,7 @@ class TestBuildLoggingChannel(unittest.TestCase):
    dll=player.parent/build.WINDOWS_RECAST;dll.parent.mkdir(parents=True);dll.write_bytes((pathlib.Path(__file__).resolve().parents[1]/'unity/Assets/Spacewars/Plugins/x86_64/spacewars_recast.dll').read_bytes())
    calls=[]
    def run(command,**kwargs):
+    write_release_profile_fixture(root, kwargs['env']['SPACEWARS_RELEASE_VERSION'])
     calls.append(kwargs['env']);(root/'.local/bound-build-windows-x64.log').write_text('NATIVE_RELEASE_BUILD_PASS\n');return type('Exit',(),{'returncode':0})()
    argv=['build.py','--version','0.6.99','--platform','windows-x64','--release-date','2026-10-29']+(['--channel',channel] if channel else [])+(extra or [])
    def git(*args):return b'abc\n' if args==('rev-parse','HEAD') else b''

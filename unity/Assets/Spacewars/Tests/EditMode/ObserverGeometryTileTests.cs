@@ -116,8 +116,9 @@ namespace Spacewars.Tests.EditMode
                 Assert.AreEqual(Newtonsoft.Json.JsonConvert.SerializeObject(warm.RouteProofs),Newtonsoft.Json.JsonConvert.SerializeObject(again.RouteProofs));
                 for(int i=0;i<warm.RouteProofs.Count;i++)Assert.AreNotSame(warm.RouteProofs[i],again.RouteProofs[i],"Reuse predicates, never a prior proof object");
                 // Replace only derived routers with the pre-change constructor on the exact same world/requests.
-                var table=domain.GetType().GetField("observedRouteCaches",BindingFlags.Static|BindingFlags.NonPublic).GetValue(null);var lookup=new object[]{domain,null};Assert.True((bool)table.GetType().GetMethod("TryGetValue").Invoke(table,lookup));
-                foreach(System.Collections.IList pool in ((System.Collections.IDictionary)lookup[1]).Values)foreach(var entry in pool){
+                var workPool=domain.GetType().GetField("observedPathPool",Private).GetValue(domain);
+                var caches=(System.Collections.IDictionary)typeof(ObservedPathWorkPool).GetField("caches",Private).GetValue(workPool);Assert.Greater(caches.Count,0);
+                foreach(System.Collections.IList pool in caches.Values)foreach(var entry in pool){
                     object Get(string name)=>entry.GetType().GetField(name,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).GetValue(entry);
                     var basis=(NavigationProfile)Get("Profile");var original=new SharedFlowRouter((NavGeometry)Get("Geometry"),basis.ForUnit((double)Get("Radius"),(double)Get("Speed"),(double)Get("Turn")),null);
                     entry.GetType().GetField("Router",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).SetValue(entry,original);

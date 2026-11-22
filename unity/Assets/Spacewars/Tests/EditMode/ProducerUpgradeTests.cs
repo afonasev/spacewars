@@ -80,6 +80,23 @@ namespace Spacewars.Tests.EditMode
             Assert.False(Building(id).RefineryUpgraded,"Producer upgrade must not become refinery income state");
             Roundtrip();Assert.True(Building(id).ProducerUpgraded);
         }
+        [Test] public void IdleAiProducerUpgradePaysOnceAndSurvivesExactRestore()
+        {
+            int factory=Build(PlayableBuildingKind.Factory,1),center=Build(PlayableBuildingKind.ScientificCenter,2);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueResearch,center,research:PlayableResearchKind.ScientificCenterUpgrade));
+            Call("AdvanceResearch",p.ScientificCenterUpgradeSeconds);
+            Assert.True(Building(center).ScientificCenterUpgraded);
+            double bank=View().ExactCredits;
+            var command=new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.UpgradeProducer,new[]{factory},
+                origin:PlayableOrderOrigin.Ai,source:PlayableAiOpeningComposition.SourceIdentity,jobId:1,actionId:1);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",command,null));
+            Assert.True(State(factory).Orders.Single().Active);
+            Assert.AreEqual(bank-p.ProducerUpgradeCost(PlayableBuildingKind.Factory),View().ExactCredits);
+            Roundtrip();Advance(p.ProducerUpgradeSeconds(PlayableBuildingKind.Factory));
+            Assert.True(Building(factory).ProducerUpgraded);
+            Assert.AreEqual(bank-p.ProducerUpgradeCost(PlayableBuildingKind.Factory),View().ExactCredits);
+        }
+
         [Test] public void CompletedProducerInvalidatesDomainVisionInputCache()
         {
             int id=Build(PlayableBuildingKind.Factory,1);Build(PlayableBuildingKind.ScientificCenter,2);

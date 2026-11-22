@@ -53,6 +53,77 @@ public sealed class GameplayAudioPlaybackTests
             }
         }
     }
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(2)]
+    [TestCase(3)]
+    [TestCase(4)]
+    public void ShkvalImpactMixImportsAtAuthoredRateAndPeak(int count)
+    {
+        var clip=Resources.Load<AudioClip>("Sfx/Hybrid/shkval-impact-"+count+"-1");
+        Assert.NotNull(clip);
+        Assert.AreEqual(1,clip.channels);
+        Assert.AreEqual(48000,clip.frequency);
+        var samples=new float[clip.samples];
+        Assert.IsTrue(clip.GetData(samples,0));
+        Assert.That(samples.Max(x=>Math.Abs(x)),Is.InRange(.30f,.69f));
+    }
+    [TestCase("hawk-rocket-launch-1")]
+    [TestCase("hawk-rocket-launch-2")]
+    [TestCase("hawk-rocket-launch-3")]
+    [TestCase("hawk-rocket-launch-4")]
+    [TestCase("hawk-rocket-impact-1")]
+    public void HawkApprovedClipsImportWithoutNormalizing(string key)
+    {
+        var clip=Resources.Load<AudioClip>("Sfx/Hybrid/"+key);
+        Assert.NotNull(clip);
+        Assert.AreEqual(1,clip.channels);
+        Assert.AreEqual(48000,clip.frequency);
+        var samples=new float[clip.samples];
+        Assert.IsTrue(clip.GetData(samples,0));
+        Assert.That(samples.Max(x=>Math.Abs(x)),Is.InRange(.68f,.88f));
+    }
+    [Test] public void VeprBuildingImpactImportsApprovedMonoClip()
+    {
+        var clip=Resources.Load<AudioClip>("Sfx/Hybrid/vepr-building-impact-1");
+        Assert.NotNull(clip);
+        Assert.AreEqual(1,clip.channels);
+        Assert.AreEqual(48000,clip.frequency);
+        Assert.AreEqual(25920,clip.samples);
+        var samples=new float[clip.samples];
+        Assert.IsTrue(clip.GetData(samples,0));
+        Assert.That(samples.Max(x=>Math.Abs(x)),Is.InRange(.70f,.73f));
+    }
+    [TestCase("sentry-turret-shot",4,8539)]
+    [TestCase("gauss-tower-shot",1,81231)]
+    public void ApprovedTowerShotsImportAsSingleReports(string bank,int takes,int frames)
+    {
+        for(int i=1;i<=takes;i++)
+        {
+            var clip=Resources.Load<AudioClip>("Sfx/Hybrid/"+bank+"-"+i);
+            Assert.NotNull(clip);
+            Assert.AreEqual(1,clip.channels);
+            Assert.AreEqual(32000,clip.frequency);
+            Assert.AreEqual(frames,clip.samples);
+        }
+    }
+    [TestCase("vepr-shot",4,2,43200)]
+    [TestCase("vepr-unit-impact",8,1,7728)]
+    [TestCase("explorer-burst-shot",4,1,8064)]
+    public void ApprovedGroundWeaponBanksImportWithTheirAuthoredLevels(string bank,int takes,int channels,int frames)
+    {
+        for(int i=1;i<=takes;i++)
+        {
+            var clip=Resources.Load<AudioClip>("Sfx/Hybrid/"+bank+"-"+i);
+            Assert.NotNull(clip,bank+"-"+i);
+            Assert.AreEqual(channels,clip.channels);
+            Assert.AreEqual(48000,clip.frequency);
+            Assert.AreEqual(frames,clip.samples);
+            var samples=new float[clip.samples*channels];
+            Assert.IsTrue(clip.GetData(samples,0));
+            Assert.That(samples.Max(x=>Math.Abs(x)),Is.InRange(.40f,.93f));
+        }
+    }
     [UnityTest] public IEnumerator SharedPoolPlaysOnceAdvancesAndResetsWithoutOldSounds()
     {
         var p=Player();var frame=Frame(1,new[]{Shot(1,1)});

@@ -20,20 +20,20 @@ namespace Spacewars.Tests.PlayMode
         private const BindingFlags Flags=BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public;
         private readonly Dictionary<string,float> floats=new Dictionary<string,float>();private readonly Dictionary<string,int> ints=new Dictionary<string,int>();
         private readonly List<GameObject> hosts=new List<GameObject>();private readonly List<PanelSettings> panels=new List<PanelSettings>();
-        private Color ambient;private AmbientMode ambientMode;private float shadowDistance;
+        private Color ambient;private AmbientMode ambientMode;private float shadowDistance,renderScale;
         private static T Get<T>(object obj,string name)=>(T)obj.GetType().GetField(name,Flags).GetValue(obj);
         private static void Call(object obj,string name,params object[] values)=>obj.GetType().GetMethod(name,Flags).Invoke(obj,values);
         [SetUp] public void Setup()
         {
             Assert.IsNotEmpty(Environment.GetEnvironmentVariable("SPACEWARS_GRAPHICS_PREFS_NAMESPACE"),"QA must isolate device preferences");
             floats.Clear();ints.Clear();foreach(var key in NativeGraphicsSettings.PreferenceKeys){if(PlayerPrefs.HasKey(key)){if(key.EndsWith("Enabled"))ints[key]=PlayerPrefs.GetInt(key);else floats[key]=PlayerPrefs.GetFloat(key);}PlayerPrefs.DeleteKey(key);}PlayerPrefs.Save();
-            ambient=RenderSettings.ambientLight;ambientMode=RenderSettings.ambientMode;shadowDistance=UniversalRenderPipeline.asset.shadowDistance;
+            ambient=RenderSettings.ambientLight;ambientMode=RenderSettings.ambientMode;shadowDistance=UniversalRenderPipeline.asset.shadowDistance;renderScale=UniversalRenderPipeline.asset.renderScale;
         }
         [TearDown] public void Cleanup()
         {
             foreach(var host in hosts)if(host)UnityEngine.Object.DestroyImmediate(host);hosts.Clear();foreach(var panel in panels)if(panel)UnityEngine.Object.DestroyImmediate(panel);panels.Clear();
             foreach(var key in NativeGraphicsSettings.PreferenceKeys){if(ints.TryGetValue(key,out int i))PlayerPrefs.SetInt(key,i);else if(floats.TryGetValue(key,out float f))PlayerPrefs.SetFloat(key,f);else PlayerPrefs.DeleteKey(key);}PlayerPrefs.Save();
-            RenderSettings.ambientLight=ambient;RenderSettings.ambientMode=ambientMode;UniversalRenderPipeline.asset.shadowDistance=shadowDistance;
+            RenderSettings.ambientLight=ambient;RenderSettings.ambientMode=ambientMode;UniversalRenderPipeline.asset.shadowDistance=shadowDistance;UniversalRenderPipeline.asset.renderScale=renderScale;
         }
         private static IEnumerable<SurfaceParameter> Effective()=>CameraAntialiasingProfile.Load().Parameters().Concat(ContactOcclusionProfile.Load().Parameters()).Concat(ActorMaterialProfile.Load().Parameters()).Concat(IndustrialLightingProfile.Load().Parameters()).Concat(IndustrialLightingProfile.Load("three-crossings-greybox-v1").Parameters());
         private static void Legacy(string path,float value)=>PlayerPrefs.SetFloat(NativeGraphicsSettings.PreferenceKeys.Single(k=>k.EndsWith(path)),value);
@@ -42,7 +42,7 @@ namespace Spacewars.Tests.PlayMode
             var parameters=NativeGraphicsSettings.Parameters;Assert.AreEqual(47,parameters.Count);Assert.AreEqual(47,parameters.Select(p=>p.Path).Distinct().Count());
             var resources=new[]{"CameraAntialiasingProfile","ContactOcclusionProfile","ActorMaterialProfile","IndustrialLightingProfile","ThreeCrossingsLightingProfile"};var originals=resources.Select(x=>Resources.Load<TextAsset>(x).text).ToArray();
             foreach(var p in parameters){Assert.IsNotEmpty(NativeGraphicsSettings.Label(p));Assert.IsNotEmpty(NativeGraphicsSettings.Group(p));Assert.Greater(p.Step,0);
-                if(p.Path!=NativeGraphicsSettings.AaPath){Legacy(p.Path,p.Maximum);Assert.Throws<ArgumentException>(()=>NativeGraphicsSettings.Set(p.Path,p.Maximum));Assert.AreEqual(p.Read(),NativeGraphicsSettings.Read(p));}}
+                if(p.Path!=NativeGraphicsSettings.AaPath&&p.Path!=NativeGraphicsSettings.RenderScalePath){Legacy(p.Path,p.Maximum);Assert.Throws<ArgumentException>(()=>NativeGraphicsSettings.Set(p.Path,p.Maximum));Assert.AreEqual(p.Read(),NativeGraphicsSettings.Read(p));}}
             foreach(var p in Effective())Assert.AreEqual(parameters.Single(x=>x.Path==p.Path).Read(),p.Read(),p.Path+" authored Lab values win over legacy player tuning");
             var aa=parameters.Single(p=>p.Path==NativeGraphicsSettings.AaPath);NativeGraphicsSettings.Set(aa.Path,2);Assert.AreEqual(2,CameraAntialiasingProfile.Load().mode);
             Assert.Throws<ArgumentOutOfRangeException>(()=>NativeGraphicsSettings.Set(aa.Path,float.NaN));Assert.Throws<ArgumentOutOfRangeException>(()=>NativeGraphicsSettings.Set(aa.Path,3));Assert.Throws<ArgumentOutOfRangeException>(()=>NativeGraphicsSettings.Set(aa.Path,.5f));Legacy(aa.Path,float.NaN);Assert.AreEqual(aa.Read(),NativeGraphicsSettings.Read(aa));
@@ -59,6 +59,30 @@ namespace Spacewars.Tests.PlayMode
             NativeGraphicsSettings.BloomEnabled=true;NativeGraphicsSettings.OcclusionEnabled=true;Assert.AreEqual(.16f,ActorMaterialProfile.Load().bloomIntensity);Assert.AreEqual(3,ContactOcclusionProfile.Load().intensity);
             float music=NativeAudioSettings.Music;NativeGraphicsSettings.Reset();Assert.AreEqual(music,NativeAudioSettings.Music);Assert.AreEqual(1,CameraAntialiasingProfile.Load().mode);Assert.AreEqual(.16f,ActorMaterialProfile.Load().bloomIntensity);Assert.AreEqual(3,ContactOcclusionProfile.Load().intensity);
         }
+        [Test] public void RenderScaleHasNamedBoundsValidatesPersistsAndResetsWithoutChangingOtherPreferences()
+        {
+            var field=NativeGraphicsSettings.Parameters.Single(p=>p.Path==NativeGraphicsSettings.RenderScalePath);
+            Assert.AreEqual(.5f,field.Minimum);Assert.AreEqual(1,field.Maximum);Assert.AreEqual(.05f,field.Step);Assert.IsNotEmpty(field.Description);
+            NativeGraphicsSettings.Set(field.Path,.75f);Assert.AreEqual(.75f,NativeGraphicsSettings.RenderScale);Assert.AreEqual(.75f,UniversalRenderPipeline.asset.renderScale);Assert.AreEqual(.75f,CameraAntialiasingProfile.Load().renderScale);
+            foreach(float bad in new[]{float.NaN,float.PositiveInfinity,.49f,1.01f,.73f})Assert.Throws<ArgumentOutOfRangeException>(()=>NativeGraphicsSettings.Set(field.Path,bad));
+            NativeGraphicsSettings.Reset();Assert.AreEqual(1,NativeGraphicsSettings.RenderScale);Assert.AreEqual(1,UniversalRenderPipeline.asset.renderScale);
+        }
+        [UnityTest] public IEnumerator RenderScaleChangesRealTargetsForFourViewportsWithoutResizingOutput()
+        {
+            NativeGraphicsSettings.Set(NativeGraphicsSettings.AaPath,0);NativeGraphicsSettings.Set(NativeGraphicsSettings.RenderScalePath,.75f);
+            var target=new RenderTexture(800,600,24);target.Create();var cameras=new List<Camera>();
+            try{
+                for(int i=0;i<4;i++){
+                    var host=new GameObject("Render Scale viewport "+i);hosts.Add(host);var camera=host.AddComponent<Camera>();cameras.Add(camera);camera.targetTexture=target;camera.rect=new Rect((i%2)*.5f,(i/2)*.5f,.5f,.5f);camera.clearFlags=CameraClearFlags.SolidColor;camera.cullingMask=0;
+                    host.AddComponent<CameraAntialiasing>().Configure(CameraAntialiasingProfile.Load());
+                }
+                for(int n=0;n<8;n++)yield return null;
+                foreach(var camera in cameras){var actual=CameraAntialiasingDiagnostics.TargetSize(camera);Assert.That(actual.x,Is.EqualTo(camera.pixelWidth*.75f).Within(1));Assert.That(actual.y,Is.EqualTo(camera.pixelHeight*.75f).Within(1));}
+                Assert.AreEqual(800,target.width);Assert.AreEqual(600,target.height);
+                NativeGraphicsSettings.Reset();for(int n=0;n<8;n++)yield return null;
+                foreach(var camera in cameras){var actual=CameraAntialiasingDiagnostics.TargetSize(camera);Assert.AreEqual(camera.pixelWidth,actual.x);Assert.AreEqual(camera.pixelHeight,actual.y);}
+            }finally{foreach(var camera in cameras)camera.targetTexture=null;target.Release();UnityEngine.Object.DestroyImmediate(target);}
+        }
         private static string Output(){var path=Environment.GetEnvironmentVariable("SPACEWARS_GRAPHICS_EVIDENCE")??Path.GetFullPath("../.local/graphics-settings/captures");Directory.CreateDirectory(path);return path;}
         private static Texture2D Read(RenderTexture target){var previous=RenderTexture.active;try{RenderTexture.active=target;var image=new Texture2D(target.width,target.height,TextureFormat.RGB24,false);image.ReadPixels(new Rect(0,0,target.width,target.height),0,0);image.Apply();return image;}finally{RenderTexture.active=previous;}}
         private static void Save(RenderTexture target,string name){var image=Read(target);try{File.WriteAllBytes(Path.Combine(Output(),name+".png"),image.EncodeToPNG());}finally{UnityEngine.Object.Destroy(image);}}
@@ -67,17 +91,17 @@ namespace Spacewars.Tests.PlayMode
             var host=new GameObject("Player graphics settings UI");hosts.Add(host);var panel=ScriptableObject.CreateInstance<PanelSettings>();panels.Add(panel);panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");var doc=host.AddComponent<UIDocument>();doc.panelSettings=panel;OrbitalTheme.ConfigurePanel(panel,doc.rootVisualElement);
             var target=new RenderTexture(800,620,0);target.Create();panel.targetTexture=target;using(var nav=new NativeMenuNavigation(doc.rootVisualElement)){
             try{
-                var page=NativeSettingsView.Open(doc.rootVisualElement,nav,()=>{},new NativeLocalControlSettings());nav.ActivateElement(page.Q<Button>("settings-tab-Графика"));yield return null;yield return null;
-                Assert.IsNull(page.Q("settings-graphics-advanced"));Assert.Zero(page.Query<Slider>().ToList().Count(s=>s.name.StartsWith("settings-graphics-")),"No fine graphics tuning in player menu");
+                var page=NativeSettingsView.Open(doc.rootVisualElement,nav,()=>{},new NativeLocalControlSettings());nav.ActivateElement(page.Q<Button>("settings-tab-Видео"));yield return null;yield return null;
+                Assert.IsNull(page.Q("settings-graphics-advanced"));Assert.AreEqual(1,page.Query<Slider>().ToList().Count(s=>s.name.StartsWith("settings-graphics-")),"Only Render Scale is a player graphics slider");
                 var aa=page.Q<DropdownField>("settings-graphics-aa");CollectionAssert.AreEqual(new[]{"Выключено","MSAA 4×","SMAA · высокое качество"},aa.choices);Assert.AreEqual(1,aa.index);aa.index=0;
-                page.Q<Toggle>("settings-graphics-ssao").value=false;page.Q<Toggle>("settings-graphics-bloom").value=false;page.Q<Toggle>("settings-graphics-trails").value=false;
-                nav.Back();page=NativeSettingsView.Open(doc.rootVisualElement,nav,()=>{},new NativeLocalControlSettings());nav.ActivateElement(page.Q<Button>("settings-tab-Графика"));yield return null;yield return null;
-                Assert.Zero(page.Q<DropdownField>("settings-graphics-aa").index);Assert.False(page.Q<Toggle>("settings-graphics-ssao").value);Assert.False(page.Q<Toggle>("settings-graphics-bloom").value);Assert.False(page.Q<Toggle>("settings-graphics-trails").value);
+                page.Q<Toggle>("settings-graphics-ssao").value=false;page.Q<Toggle>("settings-graphics-bloom").value=false;page.Q<Toggle>("settings-graphics-trails").value=false;page.Q<Toggle>("settings-graphics-wrecks").value=false;page.Q<Slider>("settings-graphics-render-scale").value=75;
+                nav.Back();page=NativeSettingsView.Open(doc.rootVisualElement,nav,()=>{},new NativeLocalControlSettings());nav.ActivateElement(page.Q<Button>("settings-tab-Видео"));yield return null;yield return null;
+                Assert.Zero(page.Q<DropdownField>("settings-graphics-aa").index);Assert.False(page.Q<Toggle>("settings-graphics-ssao").value);Assert.False(page.Q<Toggle>("settings-graphics-bloom").value);Assert.False(page.Q<Toggle>("settings-graphics-trails").value);Assert.False(page.Q<Toggle>("settings-graphics-wrecks").value);Assert.AreEqual(75,page.Q<Slider>("settings-graphics-render-scale").value);
                 foreach(var size in new[]{new Vector2Int(800,620),new Vector2Int(1280,800)}){
                     panel.targetTexture=null;target.Release();target.width=size.x;target.height=size.y;target.Create();panel.targetTexture=target;yield return null;yield return null;
-                    var bloom=page.Q<Toggle>("settings-graphics-bloom");bloom.Focus();page.Q<ScrollView>("settings-scroll").ScrollTo(bloom);yield return null;yield return null;nav.Activate();Assert.True(bloom.value);nav.Activate();Assert.False(bloom.value);Save(target,"player-graphics-"+size.x+"x"+size.y);
+                    var bloom=page.Q<Toggle>("settings-graphics-bloom");bloom.Focus();page.Q<ScrollView>("settings-scroll").ScrollTo(bloom);yield return null;yield return null;nav.Activate();Assert.True(bloom.value);nav.Activate();Assert.False(bloom.value);var wrecks=page.Q<Toggle>("settings-graphics-wrecks");wrecks.Focus();page.Q<ScrollView>("settings-scroll").ScrollTo(wrecks);yield return null;yield return null;nav.Activate();Assert.True(wrecks.value);Assert.True(NativeGraphicsSettings.UnitWrecksEnabled);nav.Activate();Assert.False(wrecks.value);Save(target,"player-graphics-"+size.x+"x"+size.y);var scale=page.Q<Slider>("settings-graphics-render-scale");scale.Focus();page.Q<ScrollView>("settings-scroll").ScrollTo(scale);yield return null;yield return null;Assert.AreEqual(scale.tooltip,page.Q<Label>("settings-help").text);Save(target,"render-scale-help-"+size.x+"x"+size.y);
                 }
-                var restore=NativePreferenceWriter.Capture();try {nav.ActivateElement(page.Q<Button>("settings-reset-all"));nav.ActivateElement(doc.rootVisualElement.Q<Button>("settings-confirm-accept"));nav.ActivateElement(doc.rootVisualElement.Q<Button>("settings-confirm-accept"));Assert.AreEqual(1,page.Q<DropdownField>("settings-graphics-aa").index);Assert.True(page.Q<Toggle>("settings-graphics-bloom").value);Assert.True(page.Q<Toggle>("settings-graphics-ssao").value);Assert.True(page.Q<Toggle>("settings-graphics-trails").value);}finally{restore();PlayerPrefs.Save();}
+                var restore=NativePreferenceWriter.Capture();try {nav.ActivateElement(page.Q<Button>("settings-reset-all"));nav.ActivateElement(doc.rootVisualElement.Q<Button>("settings-confirm-accept"));nav.ActivateElement(doc.rootVisualElement.Q<Button>("settings-confirm-accept"));Assert.AreEqual(1,page.Q<DropdownField>("settings-graphics-aa").index);Assert.True(page.Q<Toggle>("settings-graphics-bloom").value);Assert.True(page.Q<Toggle>("settings-graphics-ssao").value);Assert.True(page.Q<Toggle>("settings-graphics-trails").value);Assert.True(page.Q<Toggle>("settings-graphics-wrecks").value);Assert.AreEqual(100,page.Q<Slider>("settings-graphics-render-scale").value);}finally{restore();PlayerPrefs.Save();}
             }finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}}yield return null;
         }
         private static Color TeamPaint(PlayableWorld.Actor actor)

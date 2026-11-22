@@ -21,6 +21,7 @@ namespace Spacewars.Runtime
     internal sealed class NavigationAdmissionMemberStorage : NavOwnedStorage
     {
         private static readonly long Layout=NavStorageLayout.ObjectBytesBound(typeof(NavigationAdmissionMemberStorage))+NavStorageLayout.ObjectBytesBound(typeof(NavigationAdmissionMember));
+        internal static readonly long MemberCharge = NavStorageLayout.Charge(Layout);
         internal readonly NavigationAdmissionMember Value;
         private NavigationHostRequest request;private NavNameReference endpoint;
         internal override bool IsImmutableCaptureRoot=>false;
@@ -150,13 +151,33 @@ namespace Spacewars.Runtime
         private NavOwnedText provider;private NavRetainedArray<NavNameReference> terrainNames;
         internal override bool IsImmutableCaptureRoot=>false;
         private NavigationAdmissionStorage():base(Layout){Retain();}
+        // Admission roots publish their groups in strictly increasing GroupId order.
+        internal bool MatchesContactReplacement(NavigationAuthorityGroup replacement)
+        {
+            long id=replacement.Data.GroupId;
+            int low=0,high=Groups.Count-1;
+            while(low<=high){
+                int middle=low+(high-low)/2;
+                var group=(NavigationAdmissionGroupStorage)Groups[middle];
+                if(group.Value.GroupId==id)return MatchesReplacement(group,replacement);
+                if(group.Value.GroupId<id)low=middle+1;
+                else high=middle-1;
+            }
+            return false;
+        }
+        private bool MatchesReplacement(NavigationAdmissionGroupStorage group,NavigationAuthorityGroup replacement)
+        {
+#if UNITY_INCLUDE_TESTS
+            if(ContactPhaseQa.LegacyAdmission)return group.MatchesProjection(replacement,Requests);
+#endif
+            return group.MatchesPublishedReplacement(replacement);
+        }
         internal bool MatchesGroupReplacement(NavigationAuthorityGroup replacement)
         {
-            for(int i=0;i<Groups.Count;i++){var group=(NavigationAdmissionGroupStorage)Groups[i];if(group.Value.GroupId==replacement.Data.GroupId)return
-#if UNITY_INCLUDE_TESTS
-                ContactPhaseQa.LegacyAdmission?group.MatchesProjection(replacement,Requests):
-#endif
-                group.MatchesPublishedReplacement(replacement);}
+            for(int i=0;i<Groups.Count;i++){
+                var group=(NavigationAdmissionGroupStorage)Groups[i];
+                if(group.Value.GroupId==replacement.Data.GroupId)return MatchesReplacement(group,replacement);
+            }
             return false;
         }
         internal static NavigationAdmissionStorage PrepareOwned(long generation,long sequence,IPlayableTerrain terrain,string providerId,int surfaceVersion,NavGeometry geometry,NavigationProfile profile,NavRetainedArray<NavNameReference> terrainNames,NavRetainedArray<NavOwnedStorage> versions,NavRetainedArray<NavOwnedStorage> requests,long publication,NavigationAdmissionStorage previous,INavStorageReservation reservation)
@@ -241,6 +262,7 @@ namespace Spacewars.Runtime
         private NavigationAdmissionStorage PrepareAdmissionProjection(IDictionary<long,GroupOrderState> sourceGroups,IDictionary<int,NavigationRequest> sourcePending,
             long sequence,long publication,long operation,NavigationRetentionBudget.Scope scope,NavigationAdmissionStorage previous,NavigationAuthorityGroup replacement=null,NavigationAuthorityOwners targetCore=null,IDictionary<int,NavigationRequest> sourceProbes=null,RebindGroup[] rebindGroups=null,int rebindGroupCount=0)
         {
+            using var phaseTiming=Spacewars.Simulation.PerformanceProfile.Measure(Spacewars.Simulation.ProfileStage.NavAdmissionProjection);
             sourceProbes=sourceProbes??probes;
             if(targetCore!=null)NavStorageAdmission.RequireOwned(scope.OwnedReservation(),targetCore);
             int groupCount,requestCount;NavGeometry observedGeometry;NavigationProfile observedProfile;NavRetainedArray<NavNameReference> observedNames;

@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using Spacewars.Presentation;
 using Spacewars.Simulation;
 using Spacewars.Runtime;
 namespace Spacewars.Tests.EditMode
@@ -11,14 +12,18 @@ namespace Spacewars.Tests.EditMode
         [Test] public void ProvingGroundUnlocksOnlyImplementedAbilitiesWithIndependentExactCooldowns()
         {
             var p=PlayableProfile.Default.CopyData();var state=new OrbitalEscalationState(provingGround:true);
-            CollectionAssert.AreEqual(new[]{1,2,8,3},state.Snapshot(p).Abilities.Select(a=>a.Id));
+            CollectionAssert.AreEqual(new[]{1,2,8,3,OrbitalAbilities.Reinforcement,OrbitalAbilities.Stasis,OrbitalAbilities.RepairNanobots,OrbitalAbilities.AcceleratedProduction,OrbitalAbilities.NuclearStrike},state.Snapshot(p).Abilities.Select(a=>a.Id));
             Assert.Zero(state.PendingLevel);Assert.IsEmpty(state.Options());Assert.False(state.Choose(4));
-            foreach(int id in new[]{1,2,8,3}){Assert.True(state.CanUse(id));Assert.True(state.Use(id,p));Assert.False(state.CanUse(id));}
-            foreach(int id in new[]{4,5,6,7})Assert.False(state.Use(id,p));
+            foreach(int id in new[]{1,2,8,3,OrbitalAbilities.Reinforcement,OrbitalAbilities.Stasis,OrbitalAbilities.RepairNanobots,OrbitalAbilities.AcceleratedProduction,OrbitalAbilities.NuclearStrike}){Assert.True(state.CanUse(id));Assert.True(state.Use(id,p));Assert.False(state.CanUse(id));}
+            Assert.False(state.Use(7,p));
             Assert.Zero(state.CommonRemaining);Assert.True(state.Snapshot(p).Abilities.All(a=>a.Duration==5&&a.Remaining==5));
             state.Advance(4.999,p);Assert.True(state.Snapshot(p).Abilities.All(a=>a.Remaining>0));
             var restored=OrbitalEscalationState.Restore(state.Level,state.Progress,state.CommonRemaining,Enumerable.Range(0,5).Select(state.Choice).ToArray(),Enumerable.Range(0,5).Select(state.Recovery).ToArray(),p,provingGround:true);
-            restored.Advance(.001,p);foreach(int id in new[]{1,2,8,3})Assert.True(restored.CanUse(id));
+            restored.RestoreProvingGroundStasis(state.ProvingGroundStasisRecovery);
+            restored.RestoreProvingGroundRepair(state.ProvingGroundRepairRecovery);
+            restored.RestoreProvingGroundProduction(state.ProvingGroundProductionRecovery);
+            restored.RestoreProvingGroundNuclear(state.ProvingGroundNuclearRecovery);
+            restored.Advance(.001,p);foreach(int id in new[]{1,2,8,3,OrbitalAbilities.Reinforcement,OrbitalAbilities.Stasis,OrbitalAbilities.RepairNanobots,OrbitalAbilities.AcceleratedProduction,OrbitalAbilities.NuclearStrike})Assert.True(restored.CanUse(id));
             p.provingGroundOrbitalSeconds=7;Assert.True(restored.Use(8,p));Assert.AreEqual(7,restored.Snapshot(p).Abilities.Single(a=>a.Id==8).Remaining);
             var field=PlayableProfileMetadata.Fields.Single(f=>f.FieldName=="provingGroundOrbitalSeconds");Assert.AreEqual("с",field.Unit);
             p.provingGroundOrbitalSeconds=0;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(p));
@@ -61,8 +66,8 @@ namespace Spacewars.Tests.EditMode
             var p=new PlayableProfileData();var s=new OrbitalEscalationState();s.Damage(15750,p);
             Assert.AreEqual(1,s.PendingLevel);Assert.False(s.Choose(3));Assert.True(s.Choose(2));
             CollectionAssert.AreEqual(new[]{1,8},s.Options());Assert.False(s.Choose(2));Assert.True(s.Choose(8));
-            CollectionAssert.AreEqual(new[]{3,4,5},s.Options());Assert.True(s.Choose(4));CollectionAssert.AreEqual(new[]{3,5},s.Options());Assert.False(s.Choose(4));Assert.True(s.Choose(3));Assert.True(s.Choose(7));Assert.Zero(s.PendingLevel);Assert.False(s.Choose(1));
-            CollectionAssert.AreEqual(new[]{2,8,4,3,7},s.Snapshot(p).Abilities.Select(a=>a.Id));
+            CollectionAssert.AreEqual(new[]{3,4,5,OrbitalAbilities.RepairNanobots,OrbitalAbilities.AcceleratedProduction},s.Options());Assert.True(s.Choose(4));CollectionAssert.AreEqual(new[]{3,5,OrbitalAbilities.RepairNanobots,OrbitalAbilities.AcceleratedProduction},s.Options());Assert.False(s.Choose(4));Assert.True(s.Choose(3));CollectionAssert.AreEqual(new[]{OrbitalAbilities.NuclearStrike},s.Options());Assert.True(s.Choose(OrbitalAbilities.NuclearStrike));Assert.Zero(s.PendingLevel);Assert.False(s.Choose(1));
+            CollectionAssert.AreEqual(new[]{2,8,4,3,OrbitalAbilities.NuclearStrike},s.Snapshot(p).Abilities.Select(a=>a.Id));
         }
         [Test] public void IndependentAbilityTimersSharedIntervalAndOnlyMaxAcceleratesRecovery()
         {
@@ -77,7 +82,7 @@ namespace Spacewars.Tests.EditMode
         {
             var p=new PlayableProfileData();var s=new OrbitalEscalationState();s.Damage(1900.25,p);s.Choose(1);s.Choose(2);s.Use(2,p);s.Advance(.125,p);
             var restore=OrbitalEscalationState.Restore(s.Level,s.Progress,s.CommonRemaining,Enumerable.Range(0,5).Select(s.Choice).ToArray(),Enumerable.Range(0,5).Select(s.Recovery).ToArray(),p);
-            Assert.AreEqual(3,restore.PendingLevel);Assert.AreEqual(s.Progress,restore.Progress);Assert.AreEqual(s.CommonRemaining,restore.CommonRemaining);Assert.AreEqual(s.Recovery(1),restore.Recovery(1));CollectionAssert.AreEqual(new[]{3,4,5},restore.Options());
+            Assert.AreEqual(3,restore.PendingLevel);Assert.AreEqual(s.Progress,restore.Progress);Assert.AreEqual(s.CommonRemaining,restore.CommonRemaining);Assert.AreEqual(s.Recovery(1),restore.Recovery(1));CollectionAssert.AreEqual(new[]{3,4,5,OrbitalAbilities.RepairNanobots,OrbitalAbilities.AcceleratedProduction},restore.Options());
             Assert.Throws<ArgumentException>(()=>OrbitalEscalationState.Restore(3,0,0,new[]{1,1,3,0,0},new double[5],p));
             s.Damage(20000,p);foreach(int id in new[]{3,4,6})Assert.True(s.Choose(id));s.Advance(10,p);Assert.True(s.Use(6,p));
             restore=OrbitalEscalationState.Restore(s.Level,s.Progress,s.CommonRemaining,Enumerable.Range(0,5).Select(s.Choice).ToArray(),Enumerable.Range(0,5).Select(s.Recovery).ToArray(),p);
@@ -94,10 +99,59 @@ namespace Spacewars.Tests.EditMode
             credit.Invoke(domain,new object[]{(PlayableOwner?)PlayableOwner.Player,(PlayableOwner)2,300d});
             Assert.AreEqual(1,((OrbitalEscalationSnapshot)view.Invoke(domain,new object[]{PlayableOwner.Player})).Level);Assert.AreEqual(0,((OrbitalEscalationSnapshot)view.Invoke(domain,new object[]{PlayableOwner.Enemy})).Level);
         }
-        [Test] public void DomainCreditsActualHostileDamageAndRejectsInvalidUse()
+        [TestCase(18,1750)]
+        [TestCase(19,1250)]
+        public void PackagedDefaultUnlocksFourAbilitiesAtItsDamageMilestones(int revision,int secondMilestone)
+        {
+            var path=System.IO.Path.Combine(System.IO.Path.GetTempPath(),Guid.NewGuid()+".json");
+            var store=new NativeBalanceStore(PlayableProfile.Default,path,authoring:false,startOnRelease:true);
+            Assert.True(store.HasActive,store.ReleaseProblem);
+            var profile=store.Resolve(revision);
+            var data=profile.CopyData();
+            Assert.True(profile.UsesCompactOrbitalProgression);
+            Assert.False(store.Resolve(17).UsesCompactOrbitalProgression);
+            var state=new OrbitalEscalationState(compact:true);
+            var choices=new[]{OrbitalAbilities.ControlHack,OrbitalAbilities.Stasis,OrbitalAbilities.RepairNanobots,OrbitalAbilities.NuclearStrike};
+            var milestones=new[]{250,secondMilestone,secondMilestone+2000,secondMilestone+6000,secondMilestone+14000};
+            int total=0;
+            for(int i=0;i<milestones.Length;i++)
+            {
+                state.Damage(milestones[i]-total-1,data);
+                Assert.AreEqual(i,state.Level);
+                Assert.Zero(state.PendingLevel);
+                state.Damage(1,data);
+                Assert.AreEqual(i+1,state.Level);
+                total=milestones[i];
+                if(i==choices.Length)break;
+                CollectionAssert.AreEqual(new[]{OrbitalAbilities.Tier(choices[i])},state.Options().Select(OrbitalAbilities.Tier).Distinct().ToArray());
+                if(i==1)Assert.False(state.Choose(1));
+                if(i==2)Assert.False(state.Choose(choices[1]));
+                Assert.True(state.Choose(choices[i]));
+            }
+            Assert.True(state.Snapshot(data).IsMax);
+            Assert.False(state.Choose(2));
+            CollectionAssert.AreEqual(choices,state.Snapshot(data).Abilities.Select(a=>a.Id));
+            Assert.True(state.Use(choices[1],data));
+            state.Advance(.25,data);
+            var ids=Enumerable.Range(0,OrbitalEscalationState.StoredChoiceCount).Select(state.Choice).ToArray();
+            var recovery=Enumerable.Range(0,OrbitalEscalationState.StoredChoiceCount).Select(state.Recovery).ToArray();
+            Assert.Zero(ids.Last());
+            var restored=OrbitalEscalationState.Restore(state.Level,state.Progress,state.CommonRemaining,ids,recovery,data).Snapshot(data);
+            Assert.True(restored.IsMax);
+            Assert.AreEqual((data.orbitalAdvancedSeconds-.25*data.orbitalFinalSpeed)/data.orbitalFinalSpeed,restored.Abilities[1].Remaining,1e-9);
+            Assert.AreEqual(Math.Max(0,data.orbitalCommonSeconds-.25),restored.CommonRemaining,1e-9);
+            ids[4]=2;
+            Assert.Throws<ArgumentException>(()=>OrbitalEscalationState.Restore(5,0,0,ids,recovery,data));
+            Assert.AreEqual(OrbitalAbilities.Implemented.Count,new OrbitalEscalationState(provingGround:true,compact:true).Snapshot(data).Abilities.Count);
+        }
+
+        [TestCase(false)][TestCase(true)] public void DomainCreditsActualHostileDamageAndRejectsInvalidUse(bool compact)
         {
             var type=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain");const BindingFlags f=BindingFlags.NonPublic|BindingFlags.Instance;
-            var domain=Activator.CreateInstance(type,f,null,new object[]{PlayableProfile.Default,1L,false},null);
+            var data=PlayableProfile.Default.CopyData();
+            if(compact)data.orbitalProgressionVersion=OrbitalAbilities.CompactProgressionVersion;
+            var profile=PlayableProfile.Create(data);
+            var domain=Activator.CreateInstance(type,f,null,new object[]{profile,1L,false},null);
             PlayableSnapshot View()=>(PlayableSnapshot)type.GetMethod("Snapshot",f).Invoke(domain,new object[]{1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7});
             var snap=View();var own=snap.Entities.First(e=>e.Owner==PlayableOwner.Player);var enemy=snap.Entities.First(e=>e.Owner==PlayableOwner.Enemy);
             var damage=type.GetMethod("DamageWithOwner",f);
@@ -110,7 +164,7 @@ namespace Spacewars.Tests.EditMode
             type.GetMethod("AdvanceOrbital",f).Invoke(domain,new object[]{.125d});
             var before=View().Orbital;
             var bytes=(byte[])type.GetMethod("CaptureWorldBytes",f).Invoke(domain,new object[]{7,"orbital-escalation-test"});
-            var restored=type.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,PlayableProfile.Default,7,"orbital-escalation-test"});
+            var restored=type.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,profile,7,"orbital-escalation-test"});
             var after=((PlayableSnapshot)type.GetMethod("Snapshot",f).Invoke(restored,new object[]{1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7})).Orbital;
             Assert.AreEqual(before.Level,after.Level);Assert.AreEqual(before.Progress,after.Progress);Assert.AreEqual(before.CommonRemaining,after.CommonRemaining);Assert.AreEqual(before.Abilities[0].Recovery,after.Abilities[0].Recovery);
             CollectionAssert.AreEqual(bytes,(byte[])type.GetMethod("CaptureWorldBytes",f).Invoke(restored,new object[]{7,"orbital-escalation-test"}));

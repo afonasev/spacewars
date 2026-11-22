@@ -14,7 +14,8 @@ namespace Spacewars.Presentation
             public int SiteId;
             public PlayableBuildingKind Kind;
             public NavObstacle Outer,Inner;
-            public double Height;
+            public double Height,Heading,InnerRadius;
+            public NavPoint Center;
         }
         // Greybox material swatches; hue identifies site function, never ownership.
         public static readonly Color Edge=new Color(.13f,.19f,.21f);
@@ -24,11 +25,11 @@ namespace Spacewars.Presentation
             return map.Sites(profile).Select(site=>{
                 double radius=(site.Kind==PlayableBuildingKind.Headquarters?map.BaseYardRadius:site.Kind==PlayableBuildingKind.Outpost?map.OutpostYardRadius:map.MineYardRadius)*map.Scale*map.KeyPointPadScale;
                 NavObstacle Shape(double r){
-                    if(site.Kind==PlayableBuildingKind.Headquarters)return new NavObstacle(site.Position.X-r,site.Position.Z-r,site.Position.X+r,site.Position.Z+r);
-                    int corners=site.Kind==PlayableBuildingKind.Outpost?4:8; // Distinct minimal planar glyphs.
-                    return new NavObstacle(new NavPolygon(Enumerable.Range(0,corners).Select(i=>{double a=i*Math.PI*2/corners;return new NavPoint(site.Position.X+Math.Cos(a)*r,site.Position.Z+Math.Sin(a)*r);})));
+                    if(site.Kind==PlayableBuildingKind.Headquarters||site.Kind==PlayableBuildingKind.Outpost)return AntennaCityMap.AlignedYard(site.Position,r,map.SiteHeading(site.Id));
+                    const int corners=8; // Resource pads retain their octagonal silhouette.
+                    return new NavObstacle(new NavPolygon(Enumerable.Range(0,corners).Select(i=>{double a=map.SiteHeading(site.Id)+Math.PI/8+i*Math.PI*2/corners;return new NavPoint(site.Position.X+Math.Cos(a)*r,site.Position.Z+Math.Sin(a)*r);})));
                 }
-                return new Pad{SiteId=site.Id,Kind=site.Kind,Outer=Shape(radius),Inner=Shape(radius-map.KeyPointPadBorder*map.Scale),Height=map.SurfaceHeight(site.Position)};
+                return new Pad{SiteId=site.Id,Kind=site.Kind,Outer=Shape(radius),Inner=Shape(radius-map.KeyPointPadBorder*map.Scale),Height=map.SurfaceHeight(site.Position),Heading=map.SiteHeading(site.Id),Center=site.Position,InnerRadius=radius-map.KeyPointPadBorder*map.Scale};
             }).ToArray();
         }
         public static Color At(Pad pad,NavPoint point)=>pad.Inner.Contains(point)?Fill(pad.Kind):Edge;

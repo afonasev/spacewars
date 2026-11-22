@@ -169,6 +169,8 @@ namespace Spacewars.Tests.EditMode
             int air=Enemy(d,at,PlayableEntityKind.Hawk);bool physicalContact=false;
             for(int tick=0;tick<60;tick++){Step(d);physicalContact|=View(d).Sounds.Any(e=>e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Explorer&&e.Contact?.TargetId==air);}
             Assert.True(physicalContact,"Turret must cause an actual machine-gun contact on the aircraft without mobile weapon support");
+            var shot=View(d).Sounds.Last(e=>e.Kind==PlayableSoundKind.Shot&&e.UnitId==turret);
+            Assert.True(shot.Building);
             var b=View(d).Buildings.Single(x=>x.Id==turret);Assert.AreEqual(at,b.Position);Assert.AreEqual(air,b.Turret.TargetId);
             Assert.Greater(b.Turret.Pitch,Math.PI*.45);Assert.Greater(b.Turret.ShotSequence,0);
             Assert.Less(View(d).Entities.Single(e=>e.Id==air).Health,p.HawkHealth,"Physical anti-air shots must reduce the selected aircraft health");

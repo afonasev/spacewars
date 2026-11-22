@@ -1,4 +1,5 @@
 using System;
+using Spacewars.Simulation;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -17,17 +18,31 @@ namespace Spacewars.Presentation
         public static readonly Color Line = new Color(.23f,.33f,.39f);
         // One scale authority for installed menu routes and HUD, including Retina backing pixels.
         public static float ReadableScale(int width,int height)=>Mathf.Max(1f,Mathf.Min(width/1280f,height/800f));
-        private const float DeviceFpsWidth=64;
-        public static void ConfigurePanel(PanelSettings panel,VisualElement root)
+        private const float DeviceFpsWidth=64, DeviceTpsWidth=88;
+        internal static float SplitDiagnosticsInset()=>
+            ((NativeDevicePreferences.ShowFps?DeviceFpsWidth:0)+(NativeDevicePreferences.ShowTps?DeviceTpsWidth:0))/2;
+        private static Label DeviceCounter(VisualElement root,string name,float width)
+        {
+            var label=new Label{name=name,pickingMode=PickingMode.Ignore};
+            label.style.position=Position.Absolute;
+            label.style.display=DisplayStyle.None;
+            label.style.marginLeft=label.style.marginRight=label.style.marginTop=label.style.marginBottom=0;
+            label.style.paddingLeft=label.style.paddingRight=0;
+            label.style.width=width;
+            label.style.whiteSpace=WhiteSpace.NoWrap;
+            label.style.overflow=Overflow.Hidden;
+            label.style.color=Color.white;
+            label.style.fontSize=12;
+            label.style.textShadow=new TextShadow{color=Color.black,offset=new Vector2(0,1),blurRadius=2};
+            root.Add(label);
+            return label;
+        }
+        public static void ConfigurePanel(PanelSettings panel,VisualElement root,
+            Func<(PlayableSnapshot snapshot,double target)> tickSource=null)
         {
             panel.scaleMode=PanelScaleMode.ConstantPixelSize;
-            // A fixed device overlay gutter; no HUD panel or gameplay tuning belongs to the FPS label.
-            var fps=new Label(){name="device-fps",pickingMode=PickingMode.Ignore};
-            fps.style.position=Position.Absolute;fps.style.left=8;fps.style.top=8;fps.style.display=NativeDevicePreferences.ShowFps?DisplayStyle.Flex:DisplayStyle.None;
-            fps.style.marginLeft=fps.style.marginRight=fps.style.marginTop=fps.style.marginBottom=0;fps.style.paddingLeft=fps.style.paddingRight=0;
-            fps.style.width=DeviceFpsWidth;fps.style.whiteSpace=WhiteSpace.NoWrap;fps.style.overflow=Overflow.Hidden;
-            fps.style.color=Color.white;fps.style.fontSize=12;fps.style.unityTextAlign=TextAnchor.UpperLeft;
-            fps.style.textShadow=new TextShadow{color=Color.black,offset=new Vector2(0,1),blurRadius=2};root.Add(fps);
+            var fps=DeviceCounter(root,"device-fps",DeviceFpsWidth);
+            var tps=DeviceCounter(root,"device-tps",DeviceTpsWidth);
             void Resize()
             {
                 var target=panel.targetTexture;
@@ -36,41 +51,124 @@ namespace Spacewars.Presentation
                 if(!Mathf.Approximately(panel.scale,scale))panel.scale=scale;
                 LayoutDeviceDiagnostics(root);
             }
-            float last=Time.realtimeSinceStartup;int frames=Time.frameCount;
-            root.schedule.Execute(()=>{fps.style.display=NativeDevicePreferences.ShowFps?DisplayStyle.Flex:DisplayStyle.None;float now=Time.realtimeSinceStartup;fps.text=Mathf.RoundToInt((Time.frameCount-frames)/Mathf.Max(.001f,now-last))+" FPS";last=now;frames=Time.frameCount;fps.BringToFront();}).Every(500);
+            double lastFrameAt=Time.realtimeSinceStartupAsDouble;
+            int frames=Time.frameCount;
+            double sampleAt=0,sampleTarget=0;
+            long sampleTick=0,sampleGeneration=0;
+            void ReadCounters()
+            {
+                double now=Time.realtimeSinceStartupAsDouble;
+                fps.text=Mathf.RoundToInt((float)((Time.frameCount-frames)/Math.Max(.001,now-lastFrameAt)))+" FPS";
+                lastFrameAt=now;
+                frames=Time.frameCount;
+                var (snapshot,target)=NativeDevicePreferences.ShowTps&&tickSource!=null?tickSource():default;
+                if(snapshot==null||snapshot.Outcome!=PlayableMatchOutcome.Playing||
+                    (snapshot.Status!=RuntimeStatus.Running&&snapshot.Status!=RuntimeStatus.Paused))
+                {
+                    tps.text="";
+                    sampleTarget=0;
+                }
+                else if(snapshot.Paused||snapshot.Status==RuntimeStatus.Paused)
+                {
+                    tps.text="TPS: пауза";
+                    sampleTarget=0;
+                }
+                else if(sampleTarget!=target||sampleGeneration!=snapshot.Generation||snapshot.Tick<sampleTick)
+                {
+                    sampleAt=now;
+                    sampleTick=snapshot.Tick;
+                    sampleTarget=target;
+                    sampleGeneration=snapshot.Generation;
+                    tps.text="— TPS";
+                }
+                else if(now-sampleAt>=1)
+                {
+                    double measured=(snapshot.Tick-sampleTick)/(now-sampleAt);
+                    tps.text=Mathf.RoundToInt((float)measured)+" TPS";
+                    sampleAt=now;
+                    sampleTick=snapshot.Tick;
+                }
+                LayoutDeviceDiagnostics(root);
+                if(!root.ClassListContains("local-split-screen")){
+                    fps.BringToFront();
+                    tps.BringToFront();
+                }
+            }
+            root.schedule.Execute(ReadCounters).Every(500);
             fps.RegisterCallback<GeometryChangedEvent>(_=>LayoutDeviceDiagnostics(root));
+            tps.RegisterCallback<GeometryChangedEvent>(_=>LayoutDeviceDiagnostics(root));
             Resize();root.RegisterCallback<GeometryChangedEvent>(_=>Resize());root.schedule.Execute(Resize).Every(100);
         }
-        public static void LayoutDeviceDiagnostics(VisualElement root)
+        public static void LayoutDeviceDiagnostics(VisualElement root)=>LayoutDeviceDiagnostics(root,null,null);
+        internal static void LayoutDeviceDiagnostics(VisualElement root,VisualElement divider,VisualElement map)
         {
             if(root==null)return;
-            var fps=root.Q<Label>("device-fps");if(fps==null)return;
-            fps.style.display=NativeDevicePreferences.ShowFps?DisplayStyle.Flex:DisplayStyle.None;
-            fps.style.left=8;fps.style.top=8;fps.style.marginLeft=0;
-            fps.style.backgroundColor=Color.clear;fps.style.unityTextAlign=TextAnchor.UpperLeft;
-            if(root.ClassListContains("local-split-screen"))
+            var fps=root.Q<Label>("device-fps");
+            var tps=root.Q<Label>("device-tps");
+            if(fps==null||tps==null){divider?.BringToFront();map?.BringToFront();return;}
+            bool showFps=NativeDevicePreferences.ShowFps;
+            bool showTps=NativeDevicePreferences.ShowTps&&!string.IsNullOrEmpty(tps.text);
+            fps.style.display=showFps?DisplayStyle.Flex:DisplayStyle.None;
+            tps.style.display=showTps?DisplayStyle.Flex:DisplayStyle.None;
+            float fpsWidth=showFps?DeviceFpsWidth:0;
+            float countersWidth=fpsWidth+(showTps?DeviceTpsWidth:0);
+            const float gutter=8;
+            bool split=root.ClassListContains("local-split-screen");
+            void Place(Label label,float offset)
             {
-                fps.style.left=Length.Percent(50);fps.style.marginLeft=-DeviceFpsWidth/2;
-                fps.style.backgroundColor=new Color(Panel.r,Panel.g,Panel.b,1);fps.style.unityTextAlign=TextAnchor.MiddleCenter;
-                fps.BringToFront();return;
+                label.style.left=split?Length.Percent(50):new Length(gutter+offset);
+                var flag=root.Q("domination-flag");
+                float flagClearance=flag!=null&&flag.style.display.value!=DisplayStyle.None?35:0;
+                label.style.marginLeft=split?offset-(flagClearance>0?countersWidth+flagClearance:countersWidth/2):0;
+                label.style.top=gutter;
+                label.style.backgroundColor=split?new Color(Panel.r,Panel.g,Panel.b,1):Color.clear;
+                label.style.unityTextAlign=split?TextAnchor.MiddleCenter:TextAnchor.UpperLeft;
+            }
+            Place(fps,0);
+            Place(tps,fpsWidth);
+            if(split){
+                // Keep the same overlay order without removing/reinserting
+                // the same elements on each rendered frame.
+                int last=root.childCount-1;
+                bool ordered=root[last]==tps&&root[last-1]==fps;
+                if(ordered&&map!=null)ordered=root[last-2]==map;
+                if(ordered&&divider!=null)ordered=root[last-(map!=null?3:2)]==divider;
+                if(!ordered){divider?.BringToFront();map?.BringToFront();fps.BringToFront();tps.BringToFront();}
+                return;
             }
             var table=root.Q("spectator-summary");if(table==null||table.resolvedStyle.display==DisplayStyle.None||table.parent==null)return;
-            const float gutter=8;
-            var parent=table.parent;float width=parent.resolvedStyle.width;
-            table.style.left=gutter;table.style.top=gutter;
+            float width=table.parent.resolvedStyle.width;
+            var flagOverlay=root.Q("domination-flag");
+            table.style.left=gutter;
+            table.style.top=flagOverlay!=null&&flagOverlay.style.display.value!=DisplayStyle.None
+                ?flagOverlay.style.height.value.value+gutter:gutter;
             var resources=root.Q("match-header");
             float reserved=resources!=null&&resources.resolvedStyle.display!=DisplayStyle.None?Mathf.Max(0,resources.resolvedStyle.width)+gutter:0;
             if(width>0)table.style.maxWidth=Mathf.Max(220,width-2*gutter-reserved);
             var controls=table.Q("spectator-controls");if(controls==null)return;
-            fps.style.left=root.WorldToLocal(controls.worldBound.min).x+gutter;
-            // Reserve the same inner gutter before FPS and between FPS and speeds.
-            controls.style.paddingLeft=NativeDevicePreferences.ShowFps?DeviceFpsWidth+2*gutter:gutter;
-            if(NativeDevicePreferences.ShowFps&&controls.worldBound.height>0)
-                fps.style.top=root.WorldToLocal(controls.worldBound.center).y-fps.resolvedStyle.height/2;
+            float counterLeft=root.WorldToLocal(controls.worldBound.min).x+gutter;
+            float centerY=root.WorldToLocal(controls.worldBound.center).y;
             float rightPadding=gutter;
             if(resources!=null&&resources.resolvedStyle.display!=DisplayStyle.None&&resources.worldBound.height>0
                 &&resources.worldBound.Overlaps(controls.worldBound))
                 rightPadding=Mathf.Max(gutter,controls.worldBound.xMax-resources.worldBound.xMin+gutter);
+            bool stacked=false;
+            if(showFps&&showTps)
+            {
+                float controlsWidth=0;
+                foreach(var child in controls.Children())
+                    if(child is Button)controlsWidth+=child.style.width.value.value+child.style.marginRight.value.value;
+                stacked=controls.worldBound.width<controlsWidth+countersWidth+2*gutter+rightPadding;
+            }
+            fps.style.left=counterLeft;
+            tps.style.left=counterLeft+(stacked?0:fpsWidth);
+            if(controls.worldBound.height>0)
+            {
+                if(showFps)fps.style.top=centerY-fps.resolvedStyle.height*(stacked?1:.5f);
+                if(showTps)tps.style.top=centerY-(stacked?0:tps.resolvedStyle.height*.5f);
+            }
+            float diagnosticWidth=stacked?DeviceTpsWidth:countersWidth;
+            controls.style.paddingLeft=diagnosticWidth>0?diagnosticWidth+2*gutter:gutter;
             controls.style.paddingRight=rightPadding;
             if(resources!=null&&resources.resolvedStyle.display!=DisplayStyle.None)resources.BringToFront();
         }

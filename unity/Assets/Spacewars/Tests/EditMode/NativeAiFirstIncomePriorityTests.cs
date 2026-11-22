@@ -18,10 +18,10 @@ namespace Spacewars.Tests.EditMode
         private static object Call(object o,string name,params object[] args)
         {try{return (o is Type t?t:o.GetType()).GetMethod(name,F).Invoke(o is Type?null:o,args);}catch(TargetInvocationException e){throw e.InnerException;}}
         private static object Finance()=>Activator.CreateInstance(typeof(AiBudgetLedger).Assembly.GetType("Spacewars.Runtime.AiExpansionFinancial"),F,null,new object[]{"player-1",71L},null);
-        private static PlayableAiObservation View(long tick,int cash,bool busy=false,bool safe=true,bool known=true,ConstructionPhase? phase=null,bool center=false,double income=0,PlayableProfile p=null)
+        private static PlayableAiObservation View(long tick,int cash,bool busy=false,bool safe=true,bool known=true,ConstructionPhase? phase=null,bool center=false,double income=0,PlayableProfile p=null,PlayableAiObservation basic=null)
         {
             p=p??PlayableProfile.Default;
-            var basic=(PlayableAiObservation)Call(typeof(NativeAiTechnologyFundingTests),"View",tick,cash,income,center,1d,p,true,false,PlayableEntityKind.Tank,false);
+            basic=basic??(PlayableAiObservation)Call(typeof(NativeAiTechnologyFundingTests),"View",tick,cash,income,center,1d,p,true,false,PlayableEntityKind.Tank,false);
             var site=TerritoryRules.Sites(p).Single(s=>s.Id==4);
             var explorer=new PlayableEntitySnapshot(13,PlayableOwner.Player,PlayableEntityKind.Explorer,new NavPoint(site.Position.X+20,site.Position.Z),p.ExplorerHealth,busy,0,0,0);
             var units=basic.Entities.Concat(new[]{explorer}).Concat(safe?Array.Empty<PlayableEntitySnapshot>():new[]{new PlayableEntitySnapshot(99,PlayableOwner.Enemy,PlayableEntityKind.Tank,site.Position,p.TankHealth,false,0,0,0)}).ToArray();
@@ -41,6 +41,14 @@ namespace Spacewars.Tests.EditMode
             Call(f,"Observe",o,p,AiProfile.Initial,null,b,a,ex,old,protect,allowed);
             Call(f,"Validate",p,AiProfile.Initial,b,a,o.Tick,41,TerritoryRules.Sites(p),2);
             Call(tech,"Validate",o,p,b,a,Array.Empty<AiIntent>());
+        }
+        [TestCase(true,true)][TestCase(false,false)] public void AlreadyFundedMidgameMineGetsPriorityAfterStickyFirstIncomeCompletion(bool safe,bool expected)
+        {
+            var x=Start();Reconcile(x.f,x.a,HomeState(2,true,true));Assert.False((bool)Call(x.f,"FirstIncomePriorityActive",x.a));var basic=(PlayableAiObservation)Call(typeof(NativeAiTechnologyFundingTests),"View",100L,1000,0d,false,1d,PlayableProfile.Default,true,false,PlayableEntityKind.Tank,false,null,false);var o=View(100,1000,safe:safe,basic:basic);
+            Assert.Zero((int)Call(x.f,"PriorityCost",o,PlayableProfile.Default,AiProfile.Initial,x.a,x.ex,null,true),"First-income milestone is not reset");
+            int cost=TerritoryRules.Cost(PlayableProfile.Default,PlayableBuildingKind.Mine);
+            Assert.AreEqual(expected?cost:0,(int)Call(x.f,"FundedGrowthCost",o,PlayableProfile.Default,AiProfile.Initial,x.a,x.ex,null,true,(long)cost));
+            Assert.Zero((int)Call(x.f,"FundedGrowthCost",o,PlayableProfile.Default,AiProfile.Initial,x.a,x.ex,null,true,(long)cost-1),"No empty new saving promise");
         }
         private static (object f,AiTechnologyFunding tech,AiBudgetLedger b,AiDecisionArbiter a,AiExpansionPlanner ex) Start(bool bootstrap=true,bool homeReady=true)
         {

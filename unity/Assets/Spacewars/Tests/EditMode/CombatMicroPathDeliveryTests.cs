@@ -74,6 +74,31 @@ namespace Spacewars.Tests.EditMode
             }
             finally{Cleanup(d);}
         }
+        [TestCase(PlayableCommandKind.Move)]
+        [TestCase(PlayableCommandKind.AttackMove)]
+        public void LocalCombatMoveUsesTheRequestedFreeEndpointInsideFormationSlotSpacing(PlayableCommandKind kind)
+        {
+            var d=Domain(true);
+            try
+            {
+                var observation=View(d);
+                var patient=observation.Entities.Single(u=>u.Owner==observation.Owner&&u.Position.Equals(new NavPoint(-30,-4)));
+                var occupied=new NavPoint(-30,-6);
+                var endpoint=new NavPoint(-28.56,-4);
+                Assert.True(d.Geometry.IsFree(endpoint,P.TankCollisionRadius));
+                Assert.False(AiCombatMicroPolicy.WithdrawalSpaceFree(observation,P,patient,new[]{occupied}));
+                Assert.True(AiCombatMicroPolicy.WithdrawalSpaceFree(observation,P,patient,new[]{endpoint}));
+                Assert.AreNotEqual(endpoint,d.Navigation.AllocateArrivalSlots(endpoint,new[]{patient.Id}).Single());
+                var command=new PlayableCommand(Gen,1,observation.OwnerId,kind,new[]{patient.Id},endpoint,
+                    origin:PlayableOrderOrigin.Ai,source:PlayableAiOpeningComposition.SourceIdentity,jobId:1,actionId:1);
+                Assert.AreEqual(PlayableCommandStatus.Applied,d.ApplyLocalCombatMove(command,out var message),message);
+                var pending=d.Navigation.PendingRequestFor(patient.Id);
+                Assert.NotNull(pending);
+                Assert.AreEqual(endpoint,pending.Goal);
+            }
+            finally{Cleanup(d);}
+        }
+
         [Test]
         public void GroupedMoveBindsEachValidatedPathToItsActualFormationSlot()
         {

@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using NUnit.Framework;
 using Spacewars.Presentation;
 using Spacewars.Runtime;
@@ -32,7 +33,8 @@ namespace Spacewars.Tests.EditMode
         {
             int id=Factory(false);var first=Player(PlayableOwner.Player).Buildings.Single(b=>b.Id==id);
             Assert.AreEqual(0,first.Progress);Assert.AreEqual(profile.FactoryHealth*.25,first.ExactHealth.Value,1e-9);
-            Call("Damage",id,1);double damage=profile.ConstructionDamageMultiplier;
+            const double damage=2;
+            Call("Damage",id,1);
             Call("AdvanceBuildings",profile.FactoryBuildSeconds/2d);
             var half=Player(PlayableOwner.Player).Buildings.Single(b=>b.Id==id);
             Assert.AreEqual(.5,half.Progress,1e-9);Assert.AreEqual(profile.FactoryHealth*.625-damage,half.ExactHealth.Value,1e-9);
@@ -40,6 +42,8 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(ConstructionPhase.Constructing,Player(PlayableOwner.Player).Buildings.Single(b=>b.Id==id).Phase);
             Call("AdvanceBuildings",1d/30d);
             var final=Player(PlayableOwner.Player).Buildings.Single(b=>b.Id==id);Assert.AreEqual(ConstructionPhase.Ready,final.Phase);Assert.AreEqual(profile.FactoryHealth-damage,final.ExactHealth.Value,1e-8);
+            Call("Damage",id,1);
+            Assert.AreEqual(profile.FactoryHealth-damage-1,Player(PlayableOwner.Player).Buildings.Single(b=>b.Id==id).ExactHealth.Value,1e-8);
         }
         [Test] public void NewlyMaterializedFactorySurvivesAnOrdinaryTankHit()
         {
@@ -73,6 +77,68 @@ namespace Spacewars.Tests.EditMode
         {
             int id=Factory(false);Call("CancelBuilding",id,PlayableOwner.Player,null);
             Assert.IsEmpty(View().BuildingDestructions);Assert.AreEqual(PlayableCommandStatus.Applied,Build());
+        }
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SolidBuildingRemovalWaitsForTheRouteHostWithoutPartialEffects(bool sale)
+        {
+            int id=Factory(sale);
+            var d=(PlayableDomain)domain;
+            var footprint=View().Buildings.Single(b=>b.Id==id).Position;
+            Assert.IsFalse(d.Geometry.IsFree(footprint,0));
+            if(sale)
+            {
+                Assert.AreEqual(PlayableCommandStatus.Applied,Call("SellBuilding",id,PlayableOwner.Player,null));
+                Call("AdvanceBuildingLifecycle",(double)profile.BuildingSaleDemolitionSec-1d/60);
+            }
+            int mover=(int)Call("SpawnUnit",new NavPoint(-18,-14),PlayableOwner.Player,PlayableEntityKind.Tank);
+            Assert.AreEqual(PlayableCommandStatus.Applied,
+                d.Apply(new PlayableCommand(1,1,"player-1",PlayableCommandKind.Move,new[]{mover},new NavPoint(-8,-14)),out _));
+            Assert.Greater(d.Navigation.PendingCount,0);
+            var geometry=d.Geometry;
+            var before=d.CaptureWorldBytes(7,"building-removal-route-host");
+            double credits=(double)Call("Balance",PlayableOwner.Player);
+            int sounds=View().Sounds.Count(s=>s.Kind==PlayableSoundKind.ConstructionCancelled||s.Kind==PlayableSoundKind.Demolished);
+            Exception workerError=null;
+            using var entered=new ManualResetEventSlim();
+            using var release=new ManualResetEventSlim();
+            var host=new Thread(()=>{
+                try{
+                    long floor=d.Navigation.RoutePort.BeginHostAllocation();
+                    try{entered.Set();if(!release.Wait(5000))throw new TimeoutException("Release the route allocation boundary.");}
+                    finally{d.Navigation.RoutePort.EndHostAllocation(floor);}
+                }catch(Exception error){workerError=error;entered.Set();}
+            });
+            host.Start();
+            try
+            {
+                Assert.True(entered.Wait(5000));Assert.IsNull(workerError);
+                if(sale)Assert.DoesNotThrow(()=>Call("AdvanceBuildingLifecycle",1d/30));
+                else Assert.AreEqual(PlayableCommandStatus.Rejected,Call("CancelBuilding",id,PlayableOwner.Player,null));
+                Assert.AreSame(geometry,d.Geometry);
+                Assert.True(View().Buildings.Any(b=>b.Id==id));
+                Assert.AreEqual(credits,(double)Call("Balance",PlayableOwner.Player));
+                Assert.AreEqual(sounds,View().Sounds.Count(s=>s.Kind==PlayableSoundKind.ConstructionCancelled||s.Kind==PlayableSoundKind.Demolished));
+            }
+            finally{release.Set();Assert.True(host.Join(5000));}
+            Assert.IsNull(workerError);
+            CollectionAssert.AreEqual(before,d.CaptureWorldBytes(7,"building-removal-route-host"));
+            var restored=PlayableDomain.RestoreWorldBytes(before,profile,7,"building-removal-route-host");
+            try
+            {
+                CollectionAssert.AreEqual(before,restored.CaptureWorldBytes(7,"building-removal-route-host"));
+                if(sale)Call("AdvanceBuildingLifecycle",1d/30);
+                else Assert.AreEqual(PlayableCommandStatus.Applied,Call("CancelBuilding",id,PlayableOwner.Player,null));
+                Assert.IsFalse(View().Buildings.Any(b=>b.Id==id));
+                Assert.True(d.Geometry.IsFree(footprint,0));
+                Assert.AreEqual(geometry.Revision+1,d.Geometry.Revision);
+                Assert.AreEqual(sale?credits:credits+profile.FactoryCreditCost*profile.BuildingCancellationRefundRatio,
+                    (double)Call("Balance",PlayableOwner.Player),1e-9);
+                Call("AdvanceBuildingLifecycle",1d/30);
+                Assert.AreEqual(sounds+1,View().Sounds.Count(s=>s.Kind==PlayableSoundKind.ConstructionCancelled||s.Kind==PlayableSoundKind.Demolished));
+                Assert.AreEqual(geometry.Revision+1,d.Geometry.Revision);
+            }
+            finally{restored.DestroyOwnedNavigation();}
         }
         [Test] public void HiddenDestructionNeverAppearsInOpponentProjection()
         {

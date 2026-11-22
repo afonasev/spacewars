@@ -5,6 +5,34 @@ namespace Spacewars.Tests.EditMode
 {
  public sealed class GroundTrailJournalTests
  {
+  [Test] public void SharedEndpointQueriesMatchExactVisibilityThroughGapsReuseFogChangesAndExpiry()
+  {
+   var journal=new GroundTrailJournal();var vision=new PlayableVision(0,100,100,1,1);
+   var positions=new NavPoint[12];for(int i=0;i<positions.Length;i++)positions[i]=new NavPoint(i-6,-4);
+   for(int tick=1;tick<=210;tick++)for(int id=0;id<positions.Length;id++){
+    var from=positions[id];var to=new NavPoint(from.X+.01*(id+1),from.Z+.005*(id%3));
+    if(tick%37==0)to=from; // stopped segment and immediate restart
+    if(tick==100)to=new NavPoint(from.X+15,from.Z); // discarded large displacement leaves a gap
+    journal.Observe(id,PlayableEntityKind.Tank,from,to,.1*id,tick);positions[id]=to;
+   }
+   journal.RemoveMissing(new System.Collections.Generic.HashSet<int>());
+   journal.Observe(1,PlayableEntityKind.Explorer,new NavPoint(-5,-4),new NavPoint(-4.9,-4),0,211);
+   try{
+    PlayableGroundTrail[] retained=null;string oldValues=null;long referenceQueries=0,reusedQueries=0;
+    foreach(int tick in new[]{211,212,350,500,511})foreach(double x in new[]{0d,20d,40d}){
+     vision.Refresh(new[]{new VisionSource(new NavPoint(x,0),18),new VisionSource(new NavPoint(-5,-4),.1)},Array.Empty<KnownBuilding>());
+     var snapshot=vision.Snapshot();
+     GroundTrailJournal.DisableEndpointReuseForTests=true;GroundTrailJournal.VisibilityQueriesForTests=0;var expected=journal.Visible(tick,snapshot);referenceQueries+=GroundTrailJournal.VisibilityQueriesForTests;
+     GroundTrailJournal.DisableEndpointReuseForTests=false;GroundTrailJournal.VisibilityQueriesForTests=0;var actual=journal.Visible(tick,snapshot);reusedQueries+=GroundTrailJournal.VisibilityQueriesForTests;
+     CollectionAssert.AreEqual(expected,actual,"same sample identities and order at tick "+tick+", sight "+x);
+     Assert.AreEqual(journal.Count,journal.Visible(tick).Length,"overview keeps every unexpired sample");
+     if(retained!=null)Assert.AreEqual(oldValues,Newtonsoft.Json.JsonConvert.SerializeObject(retained));
+     retained=actual;oldValues=Newtonsoft.Json.JsonConvert.SerializeObject(actual);
+    }
+    Assert.Less(reusedQueries,referenceQueries);Assert.Zero(journal.Count);
+    TestContext.WriteLine("TRAIL_QUERIES reference="+referenceQueries+" reused="+reusedQueries);
+   }finally{GroundTrailJournal.DisableEndpointReuseForTests=false;GroundTrailJournal.VisibilityQueriesForTests=0;}
+  }
   [Test] public void UnobservedPassageIsRevealedWithOriginalAgeAndExpiresAtTenSeconds()
   {
    var journal=new GroundTrailJournal();var vision=new PlayableVision(0,50,50,1,1);

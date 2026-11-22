@@ -8,12 +8,13 @@ using NUnit.Framework;
 using Spacewars.Presentation;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.InputSystem;
 using UnityEngine.UIElements;
 
 public sealed class NativeDisplaySettingsTests
 {
     private readonly string[] ints={"spacewars.display.fullscreen","spacewars.display.shadows","spacewars.display.vsync","spacewars.display.width","spacewars.display.height"};
-    private readonly string[] floats={"spacewars.controls.cursorSpeed","spacewars.controls.cameraSpeed","spacewars.controls.cursorRecenterIdleMs",NativeCameraScrollSettings.EdgeKey,NativeCameraScrollSettings.ArrowKey};
+    private readonly string[] floats={"spacewars.controls.mapCursorSpeed","spacewars.controls.cameraSpeed",NativeCameraScrollSettings.EdgeKey,NativeCameraScrollSettings.ArrowKey};
     private readonly Dictionary<string,int> oldInts=new Dictionary<string,int>();
     private readonly Dictionary<string,float> oldFloats=new Dictionary<string,float>();
     private readonly Dictionary<Light,LightShadows> oldLights=new Dictionary<Light,LightShadows>();
@@ -84,6 +85,53 @@ public sealed class NativeDisplaySettingsTests
         NativeDisplaySettings.ConfigureSun(light);Assert.AreEqual(LightShadows.None,light.shadows);
         NativeDisplaySettings.Shadows=true;Assert.AreEqual(LightShadows.Soft,light.shadows);
     }
+    [UnityTest]
+    public IEnumerator DisabledShadowsSkipCoverageUntilReenabled()
+    {
+        host = new GameObject("Display shadow coverage");
+        var light = host.AddComponent<Light>();
+        light.type = LightType.Directional;
+        var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        cube.transform.SetParent(host.transform);
+        var camera = new GameObject("Display shadow camera").AddComponent<Camera>();
+        camera.transform.SetParent(host.transform);
+        camera.transform.position = Vector3.back * 4;
+        camera.enabled = false;
+        var target = new RenderTexture(96, 64, 24);
+        camera.targetTexture = target;
+        var coverage = camera.gameObject.AddComponent<VisibleShadowCoverage>();
+        var profile = IndustrialLightingProfile.Load();
+        coverage.Configure(host.transform, profile);
+        camera.gameObject.AddComponent<NativeGraphicsBinding>().Configure(null, null, light);
+        try
+        {
+            Assert.True(target.Create());
+            yield return null;
+            NativeDisplaySettings.Shadows = true;
+            camera.Render();
+            Assert.AreEqual(1, coverage.LastRendererCount);
+            float distance = coverage.LastRequiredDistance;
+            Assert.Positive(distance);
+
+            NativeDisplaySettings.Shadows = false;
+            camera.Render();
+            Assert.AreEqual(LightShadows.None, light.shadows);
+            Assert.Zero(coverage.LastRendererCount);
+            Assert.Zero(coverage.LastRequiredDistance);
+            Assert.Zero(coverage.LastCoverageMilliseconds);
+
+            NativeDisplaySettings.Shadows = true;
+            camera.Render();
+            Assert.AreEqual(LightShadows.Soft, light.shadows);
+            Assert.AreEqual(1, coverage.LastRendererCount);
+            Assert.AreEqual(distance, coverage.LastRequiredDistance);
+        }
+        finally
+        {
+            camera.targetTexture = null;
+            UnityEngine.Object.DestroyImmediate(target);
+        }
+    }
     [UnityTest] public IEnumerator ControlsPersistAndSettingsRemainNavigableAtSmallViewport()
     {
         host=new GameObject("Settings layout review");panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");
@@ -99,18 +147,18 @@ public sealed class NativeDisplaySettingsTests
             AssertColumns(page);
             var rail=page.Q("settings-tabs");var pane=page.Q<ScrollView>("settings-scroll");
             Assert.LessOrEqual(rail.worldBound.xMax,pane.worldBound.xMin,"Tabs stay to the left of the parameters");
-            foreach(var name in new[]{"Экран","Графика","Звук","Управление","Интерфейс"})
+            foreach(var name in new[]{"Видео","Звук","Управление","Интерфейс"})
             {
                 var tab=page.Q<Button>("settings-tab-"+name);Assert.NotNull(tab);
                 Assert.GreaterOrEqual(tab.worldBound.yMin,rail.worldBound.yMin);
                 Assert.LessOrEqual(tab.worldBound.yMax,pane.worldBound.yMax,"All tabs remain visible without scrolling");
                 navigation.SetScope(page,()=>{},tab);navigation.Activate();yield return null;
                 Assert.IsTrue(tab.ClassListContains("settings-tab-selected"));
-                foreach(var other in new[]{"Экран","Графика","Звук","Управление","Интерфейс"})
+                foreach(var other in new[]{"Видео","Звук","Управление","Интерфейс"})
                     Assert.AreEqual(other==name?DisplayStyle.Flex:DisplayStyle.None,page.Q("settings-group-"+other).resolvedStyle.display);
                 Assert.AreSame(tab,root.focusController.focusedElement,"Activation keeps focus on its tab");
             }
-            navigation.ActivateElement(page.Q<Button>("settings-tab-Экран"));
+            navigation.ActivateElement(page.Q<Button>("settings-tab-Видео"));
             navigation.SetScope(page,()=>{},page.Q("settings-resolution"));yield return null;
             var vsync=page.Q<Toggle>("settings-vsync");Assert.IsFalse(vsync.value);
             navigation.Move(Vector2.down);navigation.Move(Vector2.down);
@@ -122,15 +170,16 @@ public sealed class NativeDisplaySettingsTests
             var arrows=page.Q<Slider>("settings-camera-arrows");arrows.value=arrows.lowValue;
             Assert.AreEqual(edge.highValue,NativeCameraScrollSettings.EdgeSpeed(8));Assert.AreEqual(arrows.lowValue,NativeCameraScrollSettings.ArrowSpeed(12));
             navigation.ActivateElement(page.Q<Button>("settings-tab-Управление"));
-            var cursor=page.Q<Slider>("settings-pad-cursorSpeed");cursor.value=cursor.highValue;
+            Assert.IsNull(page.Q<Slider>("settings-pad-cursorSpeed"));
+            Assert.IsNull(page.Q<Slider>("settings-pad-cursorRecenterIdleMs"));
+            var mapCursor=page.Q<Slider>("settings-pad-mapCursorSpeed");mapCursor.value=mapCursor.highValue;
             var camera=page.Q<Slider>("settings-pad-cameraSpeed");camera.value=camera.lowValue;
-            var recenter=page.Q<Slider>("settings-pad-cursorRecenterIdleMs");Assert.NotNull(recenter);recenter.value=750;
-            var reloaded=new NativeLocalControlSettings();Assert.AreEqual(750,reloaded.CursorRecenterIdleMs);Assert.AreEqual(controls.CursorSpeed,reloaded.CursorSpeed);Assert.AreEqual(controls.CameraSpeed,reloaded.CameraSpeed);
-            navigation.ActivateElement(page.Q<Button>("settings-tab-Экран"));
+            var reloaded=new NativeLocalControlSettings();Assert.AreEqual(mapCursor.highValue,reloaded.MapCursorSpeed);Assert.AreEqual(controls.CameraSpeed,reloaded.CameraSpeed);
+            navigation.ActivateElement(page.Q<Button>("settings-tab-Видео"));
             page.Q<Toggle>("settings-fullscreen").value=false;
             Assert.IsTrue(NativeDisplaySettings.Fullscreen,"Unconfirmed preview must not be saved");
             navigation.ActivateElement(root.Q<Button>("settings-confirm-accept"));
-            navigation.ActivateElement(page.Q<Button>("settings-tab-Графика"));
+            navigation.ActivateElement(page.Q<Button>("settings-tab-Видео"));
             page.Q<Toggle>("settings-shadows").value=false;
             navigation.Back();page=NativeSettingsView.Open(root,navigation,()=>{},reloaded);
             yield return null;yield return null;
@@ -152,7 +201,7 @@ public sealed class NativeDisplaySettingsTests
             var back=page.Q<Button>("settings-back");Assert.GreaterOrEqual(back.worldBound.yMin,root.worldBound.yMin);Assert.LessOrEqual(back.worldBound.yMax,root.worldBound.yMax);
             if(!string.IsNullOrEmpty(directory))Capture(target,Path.Combine(directory,"settings-scrolled-800x620.png"));
             panel.targetTexture=null;target.Release();target.width=1280;target.height=800;target.Create();panel.targetTexture=target;
-            navigation.ActivateElement(page.Q<Button>("settings-tab-Экран"));navigation.SetScope(page,()=>{},page.Q<DropdownField>("settings-resolution"));scroll.scrollOffset=Vector2.zero;
+            navigation.ActivateElement(page.Q<Button>("settings-tab-Видео"));navigation.SetScope(page,()=>{},page.Q<DropdownField>("settings-resolution"));scroll.scrollOffset=Vector2.zero;
             yield return new WaitForSecondsRealtime(.3f);yield return null;
             AssertColumns(page);
             if(!string.IsNullOrEmpty(directory))Capture(target,Path.Combine(directory,"settings-1280x800.png"));
@@ -161,6 +210,93 @@ public sealed class NativeDisplaySettingsTests
         }
         finally{panel.targetTexture=null;UnityEngine.Object.DestroyImmediate(target);}
     }
+    [UnityTest] public IEnumerator SmallWindowAt125PercentFitsCaptionsAndGamepadGlyphs()
+    {
+        var restore=NativePreferenceWriter.Capture();
+        var pad=InputSystem.AddDevice<Gamepad>();
+        var target=new RenderTexture(800,620,0);
+        target.Create();
+        try
+        {
+            NativeDevicePreferences.UiScale=1.25f;
+            NativeDevicePreferences.ShowFps=false;
+            NativeDevicePreferences.ShowTps=false;
+            host=new GameObject("Small settings window");
+            panel=ScriptableObject.CreateInstance<PanelSettings>();
+            panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");
+            panel.targetTexture=target;
+            var document=host.AddComponent<UIDocument>();
+            document.panelSettings=panel;
+            var root=document.rootVisualElement;
+            OrbitalTheme.ConfigurePanel(panel,root);
+            navigation=new NativeMenuNavigation(root,()=>pad);
+            var page=NativeSettingsView.Open(root,navigation,()=>{},openHistory:_=>{});
+            yield return null;
+            yield return null;
+            Assert.AreEqual(1.25f,panel.scale);
+            string directory=Environment.GetEnvironmentVariable("SPACEWARS_SETTINGS_EVIDENCE");
+            foreach(bool gamepad in new[]{false,true,false,true})
+            {
+                if(gamepad)navigation.UseGamepad();else navigation.UseKeyboardMouse();
+                yield return null;
+                yield return null;
+                AssertCaptionBounds(page,root,gamepad);
+                var body=page.Q("settings-body");
+                var viewport=page.Q<ScrollView>("settings-scroll").contentViewport;
+                Assert.Greater(viewport.worldBound.height,140,"Room for multiple settings rows");
+                foreach(var tab in page.Query<Button>(className:"settings-tab").ToList())
+                    Assert.LessOrEqual(tab.worldBound.yMax,body.worldBound.yMax,"All tabs fit above help");
+                Assert.LessOrEqual(viewport.worldBound.yMax,page.Q("settings-help").worldBound.yMin);
+                Assert.LessOrEqual(page.Q("settings-status").worldBound.yMax,page.Q("settings-actions").worldBound.yMin);
+            }
+            if(!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+                Capture(target,Path.Combine(directory,"settings-800x620-scale125-gamepad.png"));
+            }
+            navigation.ActivateElement(page.Q<Button>("settings-reset-all"));
+            yield return null;
+            yield return null;
+            AssertCaptionBounds(root.Q("settings-confirm"),root,true);
+            if(!string.IsNullOrEmpty(directory))
+                Capture(target,Path.Combine(directory,"settings-800x620-scale125-confirm.png"));
+            navigation.Back();
+        }
+        finally
+        {
+            if(panel!=null)panel.targetTexture=null;
+            UnityEngine.Object.DestroyImmediate(target);
+            InputSystem.RemoveDevice(pad);
+            restore();
+            PlayerPrefs.Save();
+        }
+    }
+
+    private static void AssertCaptionBounds(VisualElement scope,VisualElement root,bool gamepad)
+    {
+        var buttons=scope.Query<Button>(className:"settings-action").ToList().Where(NativeMenuNavigation.Visible).ToArray();
+        Assert.IsNotEmpty(buttons);
+        foreach(var button in buttons)
+        {
+            var caption=button.Q<Label>("settings-action-caption");
+            var natural=caption.MeasureTextSize(caption.text,0,VisualElement.MeasureMode.Undefined,0,VisualElement.MeasureMode.Undefined);
+            Assert.GreaterOrEqual(caption.worldBound.width,natural.x-1,button.name);
+            Assert.That(caption.worldBound.height,Is.InRange(natural.y-1,natural.y+2),button.name);
+            Assert.GreaterOrEqual(caption.worldBound.xMin,button.worldBound.xMin,button.name);
+            Assert.LessOrEqual(caption.worldBound.xMax,button.worldBound.xMax,button.name);
+            Assert.GreaterOrEqual(button.worldBound.yMin,root.worldBound.yMin,button.name);
+            Assert.LessOrEqual(button.worldBound.yMax,root.worldBound.yMax,button.name);
+            var glyph=button.Q<NativeControllerGlyph>("menu-pad-glyph");
+            bool expectsGlyph=gamepad&&(button.name.EndsWith("-back")||button.name.EndsWith("-cancel")||button.name=="settings-reset-all");
+            Assert.AreEqual(expectsGlyph,glyph!=null,button.name);
+            if(glyph!=null)
+            {
+                Assert.LessOrEqual(caption.worldBound.xMax,glyph.worldBound.xMin,button.name);
+                Assert.LessOrEqual(glyph.worldBound.xMax,button.worldBound.xMax,button.name);
+            }
+        }
+    }
+
     private static void AssertColumns(VisualElement page)
     {
         float left=page.Q<DropdownField>("settings-resolution").Q(className:"unity-base-field__input").worldBound.xMin;

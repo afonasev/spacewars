@@ -60,6 +60,9 @@ namespace Spacewars.Runtime
         private Action pendingResolutionWake,pendingCommandResolutionWake;
         private bool resolutionFaulted;
         internal Func<long,bool> AllocationAdmission;
+#if UNITY_INCLUDE_TESTS
+        internal Action<string> BeforeMetadataAllocationForTests;
+#endif
         internal NavigationRetentionBudget(long committedBytes=0,long sequence=0)
         {
             if(committedBytes<0||committedBytes>LayeredNavigationScheduler.MaxRetainedBytes-RootBytes||sequence<0)
@@ -96,8 +99,9 @@ namespace Spacewars.Runtime
             resolvingRefusal=false;
             if(!Enum.IsDefined(typeof(NavigationPreparationKind),kind)||owner<0||publication<0)
                 throw new ArgumentException("Invalid navigation preparation identity.");
+            long token;
+            scope=null;
             lock(gate){
-                scope=null;
                 if(AllocationAdmission?.Invoke(ScopeBytes)==false)return false;
                 if(resolvingScopes!=0){
                     // Coalesce the already allocated host event snapshot. Only
@@ -114,8 +118,23 @@ namespace Spacewars.Runtime
                 }
                 if(ScopeBytes>LayeredNavigationScheduler.MaxRetainedBytes-committed-held-physical-(Background(kind)?ProtectedBytes():0)||sequence==long.MaxValue)return false;
                 // Charge the scope before its allocation; it owns its metadata.
-                held+=ScopeBytes;active++;sequence++;peak=Math.Max(peak,committed+held+physical);
-                scope=new Scope(this,kind,owner,publication,sequence){ActiveNext=activeHead};activeHead=scope;return true;
+                held+=ScopeBytes;active++;token=++sequence;peak=Math.Max(peak,committed+held+physical);
+            }
+            // Allocation can wait on the process-wide collector lock. Keep that
+            // wait outside the shared ledger gate: authority may need this ledger
+            // while holding transport. Admission and its paid credit already exist.
+            try{
+#if UNITY_INCLUDE_TESTS
+                BeforeMetadataAllocationForTests?.Invoke("scope");
+#endif
+                var created=new Scope(this,kind,owner,publication,token);
+                lock(gate){created.ActiveNext=activeHead;activeHead=created;scope=created;}
+                return true;
+            }catch{
+                lock(gate){held-=ScopeBytes;active--;}
+                // A concurrently admitted scope may already use the next token.
+                // Failed allocation consumes its token, but never its credit.
+                throw;
             }
         }
         internal sealed class Scope : IDisposable, INavStorageReservation, INavStorageScratchAllocator, INavStorageLedgerIdentity, INavStorageLocalBirthAllocator, INavStoragePreparationOwner
@@ -132,6 +151,7 @@ namespace Spacewars.Runtime
             {this.budget=budget;Kind=kind;Owner=owner;Publication=publication;Token=token;}
             internal NavigationPreparationKind Kind {get;}
             internal long Owner {get;} internal long Publication {get;} internal long Token {get;}
+            internal bool HasAllocationAdmission=>budget.AllocationAdmission!=null;
             // Scope accounting includes cumulative converted credits, even when
             // mutation-local births have died. Budget.PhysicalBytes is live retention.
             internal long HeldBytes {get{lock(budget.gate)return bytes+registered;}}
@@ -181,8 +201,14 @@ namespace Spacewars.Runtime
             {
                 lock(budget.gate){CheckOwner();CheckLive();
                     if(publishing||published||resolving||admittedBytes<NavStorageScratch.LeaseBytes||admittedBytes>bytes-ScopeBytes-scratchHeld)throw new InvalidOperationException("Scratch has no successful credit.");
-                    scratchHeld+=admittedBytes;return new ScratchLease(this,admittedBytes);
+                    scratchHeld+=admittedBytes;
                 }
+                try{
+#if UNITY_INCLUDE_TESTS
+                    budget.BeforeMetadataAllocationForTests?.Invoke("scratch");
+#endif
+                    return new ScratchLease(this,admittedBytes);
+                }catch{lock(budget.gate)scratchHeld-=admittedBytes;throw;}
             }
             private void ReturnScratch(long scratchBytes)
             {

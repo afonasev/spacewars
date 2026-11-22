@@ -28,7 +28,7 @@ namespace Spacewars.Runtime
         private readonly AiRosterCatalog catalog;
         public AiEconomyPlanner(AiRosterCatalog catalog=null){this.catalog=catalog??AiRosterCatalog.Initial;}
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
-        public IReadOnlyList<AiEconomyCandidate> InfrastructureRequests(PlayableAiObservation o,PlayableProfile p,InfrastructureRequest request)
+        public IReadOnlyList<AiEconomyCandidate> InfrastructureRequests(PlayableAiObservation o,PlayableProfile p,InfrastructureRequest request,AiProfile ai=null)
         {
             if(request==null)return Array.Empty<AiEconomyCandidate>();
             // A technology policy never chooses a physical build slot. S2 owns ordinary
@@ -36,7 +36,10 @@ namespace Spacewars.Runtime
             return o.Sites.Where(site=>site.Owner==o.Owner&&site.Ready&&!site.Contested).OrderBy(site=>site.Site.Id==o.HomeSiteId?0:1).ThenBy(site=>site.Site.Id)
                 .SelectMany(site=>site.Site.Slots.OrderBy(slot=>slot.Id).Select(slot=>{
                     var a=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:site.Site.Id,slotId:slot.Id,parentId:site.CenterId,buildingKind:request.Building,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
-                    return new AiEconomyCandidate("economy",a,AiEconomyAdmission.Reject(o,p,a,true,catalog));
+                    var reason=AiEconomyAdmission.Reject(o,p,a,true,catalog);
+                    if(reason==null||reason=="insufficient credits")
+                        reason=AiEconomicInvestmentPlanner.MixRejection(o,p,ai??AiProfile.Initial,a.BuildingKind,a.SiteId)??reason;
+                    return new AiEconomyCandidate("economy",a,reason);
                 })).ToArray();
         }
         public AiEconomyPlan Plan(PlayableAiObservation o,PlayableProfile profile,AiProductionDemand demand=null,AiProfile ai=null,long? available=null,bool recoveryExplorerDemand=false,PlayableEntityKind productionKind=PlayableEntityKind.Tank)
@@ -136,6 +139,60 @@ namespace Spacewars.Runtime
         internal static string IntentId(string policy,PlayableAiAction a)=>policy+":"+a.Kind+":"+string.Join(",",a.EntityIds.OrderBy(x=>x))+":"+a.SiteId+":"+a.SlotId+":"+a.TargetId+":"+a.Target.X+":"+a.Target.Z+":"+a.BuildingKind+":"+a.UnitKind+":"+a.ResearchKind;
         internal static IEnumerable<PlayableBuildingSnapshot> Producers(PlayableAiObservation o,AiRosterDescriptorData descriptor)=>
             o.Buildings.Where(b=>b.Owner==o.Owner&&b.Kind==descriptor.producer).OrderBy(b=>b.Id);
+        // One match-start draw per bot. The saved seed and owner ID reproduce
+        // the draw without a mutable RNG or a separate save field.
+        internal static int CerberusPreference(int matchSeed, string ownerId) =>
+            (int)(AiRandom.Key(matchSeed, ownerId, "cerberus-preference-v1", "production-limit", 0) % 5);
+
+        // Count the proposed order against the live support available to the bot.
+        private const int SupportPopulationPerCerberus = 15;
+
+        internal static string CerberusOrderRejection(int seed, string ownerId, int committed, int supportingPopulation)
+        {
+            if (committed >= CerberusPreference(seed, ownerId)) return "AI Cerberus limit";
+            return supportingPopulation / SupportPopulationPerCerberus <= committed
+                ? "AI Cerberus requires more supporting troops"
+                : null;
+        }
+
+        internal static string CerberusOrderRejection(PlayableAiObservation observation, PlayableProfile profile,
+            int pendingOrders = 0) =>
+            CerberusOrderRejection(observation.Seed, observation.OwnerId, CerberusStrength(observation) + pendingOrders,
+                observation.Entities.Where(unit => unit.Owner == observation.Owner && unit.Health > 0 &&
+                    unit.Kind != PlayableEntityKind.Cerberus)
+                    .Sum(unit => PlayableUnitRules.Population(profile, unit.Kind)));
+
+        private static int CerberusStrength(PlayableAiObservation observation) =>
+            observation.Entities.Count(unit => unit.Owner == observation.Owner &&
+                unit.Kind == PlayableEntityKind.Cerberus && unit.Health > 0) +
+            observation.Buildings.Where(building => building.Owner == observation.Owner && building.PrivateState != null)
+                .Sum(building => building.PrivateState.Orders.Count(order => !order.IsUpgrade && order.Kind == PlayableEntityKind.Cerberus));
+
+        internal const int CoverPerIgla = 3;
+
+        internal static int IglaCover(PlayableEntityKind kind) => kind switch
+        {
+            PlayableEntityKind.Cerberus => CoverPerIgla,
+            PlayableEntityKind.Tank or PlayableEntityKind.Explorer => 1,
+            _ => 0
+        };
+
+        internal static bool IglaCoverAllowsOrder(int cover, int committed) => cover / CoverPerIgla > committed;
+
+        internal static string IglaOrderRejection(PlayableAiObservation observation, int pendingOrders = 0)
+        {
+            if (!observation.Entities.Any(unit => observation.IsHostile(unit.Owner) && unit.Health > 0 &&
+                (unit.Kind is PlayableEntityKind.Tank or PlayableEntityKind.Cerberus) &&
+                observation.Vision?.IsVisible(unit.Position) == true))
+                return "AI Igla requires observed enemy armor";
+            var own = observation.Entities.Where(unit => unit.Owner == observation.Owner && unit.Health > 0);
+            int cover = own.Where(AiReinforcementPolicy.Available).Sum(unit => IglaCover(unit.Kind));
+            int committed = pendingOrders + own.Count(unit => unit.Kind == PlayableEntityKind.Igla) +
+                observation.Buildings.Where(building => building.Owner == observation.Owner && building.PrivateState != null)
+                    .Sum(building => building.PrivateState.Orders.Count(order => !order.IsUpgrade && order.Kind == PlayableEntityKind.Igla));
+            return IglaCoverAllowsOrder(cover, committed) ? null : "AI Igla requires more live ground cover";
+        }
+
         public static string Reject(PlayableAiObservation o,PlayableProfile profile,PlayableAiAction a,bool idleProducer=false,AiRosterCatalog catalog=null)
         {
             if(a.PlayerId!=o.OwnerId||a.Generation!=o.Generation||a.ProfileId!=profile.ProfileId||a.ProfileRevision!=profile.Revision||o.ProfileId!=profile.ProfileId||o.ProfileRevision!=profile.Revision)return "owner/generation/profile mismatch";
@@ -168,15 +225,39 @@ namespace Spacewars.Runtime
                 var descriptor=catalog.Production(a.Kind);
                 if(descriptor==null||!string.IsNullOrWhiteSpace(descriptor.exclusionReason))return "unsupported production descriptor";
                 var kind=descriptor.kind;
+                if (kind == PlayableEntityKind.Cerberus)
+                {
+                    if (!PlayableResearchRules.UpgradedCenterReady(o.Buildings, o.Owner)) return "upgraded scientific center prerequisite";
+                    if (CerberusOrderRejection(o, profile) is string rejection) return rejection;
+                }
                 if(descriptor.unlockDependencies.Any(r=>!o.OwnerResearch.Any(q=>q.Kind==r&&q.Complete)))return "production unlock prerequisite";
-                if(kind==PlayableEntityKind.Shkval&&!o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true))return "ready science prerequisite";
+                if(kind==PlayableEntityKind.Igla && IglaOrderRejection(o) is string iglaRejection)return iglaRejection;
+                if((kind is PlayableEntityKind.Shkval or PlayableEntityKind.Skat or PlayableEntityKind.Igla)&&!o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true))return "ready science prerequisite";
                 if(!PlayableUnitRules.Supported(kind)||a.EntityIds.Count!=1)return "unsupported production";
                 var producer=o.Buildings.FirstOrDefault(b=>b.Id==a.EntityIds[0]&&b.Owner==o.Owner);
                 if(producer==null||producer.Kind!=descriptor.producer||producer.Health<=0||producer.Phase!=ConstructionPhase.Ready||producer.PrivateState==null||producer.PrivateState.Lifecycle?.Selling==true)return "ready live producer prerequisite";
                 if(producer.PrivateState.QueueCount>=PlayableDomain.MaximumProductionOrders)return "producer queue full";
-                if(idleProducer&&producer.PrivateState.QueueCount>0)return producer.PrivateState.Orders.Any(q=>q.Active&&q.Remaining<=0)?"producer exit blocked":"producer queue busy";
+                if (idleProducer && producer.PrivateState.QueueCount > 0)
+                {
+                    if (AiProductionDemand.Blocked(producer)) return "producer exit blocked";
+                    // A special order can wait behind one ordinary paid order.
+                    // A repeat line otherwise offers no idle review window.
+                    if (kind != PlayableEntityKind.Cerberus || producer.PrivateState.QueueCount > 1)
+                        return "producer queue busy";
+                }
                 if(o.Population==null||o.Population.Capacity-o.Population.Living-o.Population.Reserved<catalog.PopulationCost(kind,profile))return "population capacity";
                 return o.Credits<catalog.CreditCost(kind,profile)?"insufficient credits":null;
+            }
+            if(a.Kind==PlayableCommandKind.UpgradeProducer)
+            {
+                if(a.EntityIds.Count!=1)return "one upgrade recipient required";
+                var b=o.Buildings.FirstOrDefault(x=>x.Id==a.EntityIds[0]&&x.Owner==o.Owner);
+                if(b==null||!TerritoryRules.ScienceProducer(b.Kind)||b.Kind!=a.BuildingKind||b.Health<=0||
+                    b.Phase!=ConstructionPhase.Ready||b.PrivateState==null||b.PrivateState.Lifecycle?.Selling==true||b.SystemsDisabled)
+                    return "ready owned producer required";
+                if(b.ProducerUpgraded||b.PrivateState.QueueCount>0||b.LaunchPhase!=0)return "producer upgrade unavailable";
+                if(!PlayableResearchRules.UpgradedCenterReady(o.Buildings,o.Owner))return "upgraded scientific center prerequisite";
+                return o.Credits<profile.ProducerUpgradeCost(b.Kind)?"insufficient credits":null;
             }
             if(a.Kind==PlayableCommandKind.UpgradeRefinery)
             {

@@ -20,6 +20,36 @@ namespace Spacewars.Tests.EditMode
         void Heal(PlayableDomain d,double seconds)=>Call(d,"AdvanceRepairTowers",seconds);
         double Hp(PlayableDomain d,int id)=>View(d).Entities.Single(u=>u.Id==id).ExactHealth.Value;
         [TearDown]public void Cleanup(){foreach(var d in owned){d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();Assert.Zero(d.Navigation.PhysicalHostBudget.PhysicalBytes);}owned.Clear();}
+        [Test]
+        public void IndependentLabTermsSurviveCurrentWorldRestore()
+        {
+            var data=PlayableProfile.Default.CopyData();
+            PlayableProfileMetadata.ProjectIndependentLabStats(data);
+            data.turretRange=5;
+            data.repairTowerRange=7;
+            data.gaussCreditCost=475;
+            data.hawkVision=19;
+            data.shkvalBaseBlastRadius=1.05;
+            data.orbitalMineEnemyClearanceMeters=5.4;
+            var profile=PlayableProfile.Create(data);
+            var domain=new PlayableDomain(profile,813,false);
+            owned.Add(domain);
+            Call(domain,"AddCredits",PlayableOwner.Player,10000d);
+            int id=Build(domain);
+            var at=Tower(domain,id).Position;
+            int target=Unit(domain,new NavPoint(at.X+6,at.Z),20,PlayableEntityKind.Tank);
+            double initial=Hp(domain,target);
+            Heal(domain,.25);
+            Assert.AreEqual(initial+1,Hp(domain,target),1e-9);
+            var bytes=domain.CaptureWorldBytes(7,"independent-lab");
+            var restored=PlayableDomain.RestoreWorldBytes(bytes,profile,7,"independent-lab");
+            owned.Add(restored);
+            CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"independent-lab"));
+            Heal(domain,.25);
+            Heal(restored,.25);
+            Assert.AreEqual(Hp(domain,target),Hp(restored,target));
+        }
+
         [TestCase(PlayableEntityKind.Tank)][TestCase(PlayableEntityKind.Hawk)]
         public void FixedRateContinuesUnderFireAndNeverOverheals(PlayableEntityKind kind)
         {
@@ -67,22 +97,50 @@ namespace Spacewars.Tests.EditMode
             d.Navigation.Crowd.Units.Single(u=>u.Id==first).Position=new NavPoint(at.X+40,at.Z);
             Heal(d,.01);Assert.AreEqual(worse,Tower(d,tower).Healing.TargetId);
         }
-        [Test]public void ExistingHigherIdLockCannotBeStolenAndHealingCannotStack()
+        [Test]public void ExistingHigherIdLockSurvivesAndBothTowerHealsStack()
         {
             var d=New();int low=Build(d),high=Build(d,1002);var a=Tower(d,low).Position;var b=Tower(d,high).Position;
             int target=Unit(d,new NavPoint((a.X+b.X)/2,(a.Z+b.Z)/2),50);
             var rows=(System.Collections.IDictionary)typeof(PlayableDomain).GetField("buildings",F).GetValue(d);
             rows[high].GetType().GetField("Healing").SetValue(rows[high],new RepairTowerState{Target=target,Initialized=true});
-            double before=Hp(d,target);Heal(d,1);Assert.AreEqual(before+4,Hp(d,target),1e-9);Assert.AreEqual(target,Tower(d,high).Healing.TargetId);Assert.Zero(Tower(d,low).Healing.TargetId);
+            double before=Hp(d,target);Heal(d,1);Assert.AreEqual(before+8,Hp(d,target),1e-9);Assert.AreEqual(target,Tower(d,high).Healing.TargetId);Assert.AreEqual(target,Tower(d,low).Healing.TargetId);
             Assert.AreEqual(PlayableCommandStatus.Applied,Call(d,"SellBuilding",high,PlayableOwner.Player,null));Heal(d,.25);Assert.AreEqual(target,Tower(d,low).Healing.TargetId);Assert.Zero(Tower(d,high).Healing.TargetId);
         }
-        [Test]public void OwnUnitsOnlyAndDefensePlotEconomicContract()
+        [Test]public void OwnBuildingUnderFireAndDefensePlotEconomicContract()
         {
             var d=New();Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Call(d,"BuildAt",1,1,PlayableBuildingKind.RepairTower,1,PlayableOwner.Player,null));int tower=Build(d);var at=Tower(d,tower).Position;
-            Unit(d,new NavPoint(at.X+3,at.Z),50,owner:PlayableOwner.Enemy);Call(d,"Damage",1,50);Heal(d,1);Assert.Zero(Tower(d,tower).Healing.TargetId);
+            Unit(d,new NavPoint(at.X+3,at.Z),50,owner:PlayableOwner.Enemy);Call(d,"Damage",1,50);int before=Tower(d,1).Health;Heal(d,1);Assert.AreEqual(1,Tower(d,tower).Healing.TargetId);Assert.AreEqual(before+4,Tower(d,1).Health);
             var p=PlayableProfile.Default;Assert.AreEqual(TerritoryRules.Cost(p,PlayableBuildingKind.SentryTurret),TerritoryRules.Cost(p,PlayableBuildingKind.RepairTower));Assert.AreEqual(TerritoryRules.Duration(p,PlayableBuildingKind.SentryTurret),TerritoryRules.Duration(p,PlayableBuildingKind.RepairTower));
             Call(d,"Damage",1,10000);Assert.False(View(d).Buildings.Any(b=>b.Id==tower));
         }
+        [Test]
+        public void PaidRepairBillsOnlyTheRemainderAfterFreeBuildingRepair()
+        {
+            var d = New();
+            int tower = Build(d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call(d,"BuildAt",1,1,
+                PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+            Call(d,"AdvanceFoundations");
+            Call(d,"AdvanceBuildings",100d);
+            var factory = View(d).Buildings.Single(b => b.Kind == PlayableBuildingKind.Factory);
+            Call(d,"Damage",factory.Id,25);
+            // Isolate credit settlement from the existing damage lockout contract.
+            var rows = (System.Collections.IDictionary)typeof(PlayableDomain).GetField("buildings",F).GetValue(d);
+            var building = rows[factory.Id];
+            building.GetType().GetField("LastDamageTime").SetValue(building,null);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call(d,"StartRepair",factory.Id,PlayableOwner.Player,null));
+            double credits = (double)Call(d,"Balance",PlayableOwner.Player);
+            double maximum = factory.MaxHealth;
+            double missing = maximum - Tower(d,factory.Id).Health;
+            Heal(d,(missing-1)/PlayableProfile.Default.RepairTowerHealthPerSecond);
+            Assert.AreEqual(factory.Id,Tower(d,tower).Healing.TargetId);
+            Call(d,"AdvanceBuildingLifecycle",1d);
+            Assert.AreEqual(maximum,Tower(d,factory.Id).Health);
+            double rate = TerritoryRules.Cost(PlayableProfile.Default,factory.Kind)*PlayableProfile.Default.BuildingRepairCostRatio/maximum;
+            Assert.AreEqual(rate,credits-(double)Call(d,"Balance",PlayableOwner.Player),1e-8);
+            Assert.False(Tower(d,factory.Id).PrivateState.Lifecycle.Repairing);
+        }
+
         [Test]public void CurrentSaveRetainsFractionalHealingTargetAndExactContinuation()
         {
             var d=New();int tower=Build(d);var at=Tower(d,tower).Position;Unit(d,new NavPoint(at.X+3,at.Z),50);d.Step(1d/30);

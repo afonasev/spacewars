@@ -24,9 +24,9 @@ namespace Spacewars.Simulation.Ai
                 yield return F("micro.chaseEnabled","Прекращение опасной погони","Сменяет удаляющуюся цель при доступной местной альтернативе. Безопасность уже выбранного локального фокуса сохраняется.","toggle",0,1,1,new[]{0,1,1}[i],true);
                 yield return F("micro.observedFireSeconds","Память видимого огня","Сколько хранится факт реально видимого выстрела известного противника по своему юниту; не раскрывает выбранные противником приказы.","s",.1,10,.1,2);
                 yield return F("micro.focusAttackers","Сильный фокус","Минимум фактически атакующих видимых противников для отвода повреждённого юнита.","units",2,12,1,3,true);
-                yield return F("micro.withdrawHealth","Здоровье для отвода","При сильном фокусе и фактическом уроне ниже этой доли здоровья проверяется безопасный отвод.","ratio",.05,1,.05,.7);
+                yield return F("micro.withdrawHealth","Здоровье для отвода","При фактическом огне и здоровье строго ниже этой доли проверяется короткий отвод за совместимое прикрытие; Шквал занимает прикрытие независимо от здоровья.","ratio",.05,1,.05,.6);
                 yield return F("micro.lossPerSecond","Быстрая потеря здоровья","Доля максимального здоровья в секунду, позволяющая реагировать на сильный фактический урон.","ratio/s",.01,2,.01,.12);
-                yield return F("micro.shortStep","Короткий отвод","Первое расстояние поиска безопасной позиции от атакующих.","m",.5,20,.5,4);
+                yield return F("micro.shortStep","Предел короткого возврата","Верхняя граница короткого возврата и движения назад; фактический шаг также ограничен размером юнита.","m",.5,20,.5,4);
                 yield return F("micro.maxWithdrawal","Глубина отвода","Максимальная глубина поиска, если короткое смещение не выводит из опасности.","m",1,40,.5,12);
                 yield return F("micro.safetyMargin","Запас вне дальности","Дополнительная дистанция к наблюдаемой дальности атакующих при выборе безопасной точки.","m",0,8,.25,1);
                 yield return F("micro.safeSeconds","Покой перед возвратом","Непрерывный интервал без фактического фокуса перед возвращением; защищает от дёрганья.","s",.1,10,.1,1.5);
@@ -42,6 +42,28 @@ namespace Spacewars.Simulation.Ai
                 yield return F("micro.returnCoreUnits","Живое ядро для возврата","Минимум живых боеспособных бойцов рядом с текущей безопасной точкой группы.","units",2,12,1,2,true);
                 yield return F("micro.returnCoreHealth","Здоровье ядра","Минимальная доля здоровья бойца, учитываемого в актуальном ядре для возврата.","ratio",.1,1,.05,.4);
             }
+
+            const string expert="difficulty.expert.";
+            const string groupName="ИИ / Контроль / Эксперт";
+            yield return new AiProfileField(expert+"control.ordersPerMinute",groupName,"Полезных приказов в минуту","Общий темп приказов Эксперта по всей карте.","orders/min",1,300,1,240,true);
+            yield return new AiProfileField(expert+"control.burst",groupName,"Короткая серия","Максимум накопленных полезных приказов Эксперта.","orders",1,8,1,8,true);
+            yield return new AiProfileField(expert+"incomeBonusPercent",groupName,"Прежний бонус к доходу","Надбавка Эксперта в прежних версиях профиля.","%",0,100,1,50,true);
+            yield return new AiProfileField("difficulty.cheater.incomeBonusPercent","ИИ / Контроль / Читер","Бонус к доходу","Надбавка к периодическому доходу Читера от всех источников.","%",0,100,1,50,true);
+            yield return new AiProfileField(expert+"opening.earlyGroundShare","ИИ / Дебюты и мидгейм","Ранняя фабрика Эксперта и Читера","Доля дебютов с одним источником дохода перед наземной фабрикой. Остальные дебюты выбираются по обычным весам.","ratio",0,1,.05,0,false);
+            yield return new AiProfileField(expert+"opening.incomeBeforeReinforcement","ИИ / Дебюты и мидгейм","Доход после первого выхода","После сбора первой группы Эксперт и Читер строят второй источник дохода перед необязательным подкреплением, если штаб вне опасности.","toggle",0,1,1,0,true);
+            yield return Override("decisionSeconds","Интервал решений","s",.25,6,.05);
+            yield return Override("reactionSeconds","Нижняя граница реакции","s",.1,5,.05);
+            yield return Override("control.reactionMaxSeconds","Верхняя граница реакции","s",.1,6,.05);
+            yield return Override("estimateNoise","Ошибка оценки","ratio",0,.5,.01);
+            yield return Override("actionsPerDecision","Команд за решение","commands",1,8,1,true);
+            yield return Override("micro.cooldownSeconds","Пауза повторного микро","s",.1,30,.1);
+            yield return Override("micro.safeSeconds","Покой перед возвратом","s",.1,10,.1);
+            yield return Override("decision.repeatOrderSeconds","Интервал повторного приказа","s",.5,10,.5);
+            yield return Override("decision.retrySeconds","Пауза после отказа","s",1,20,1);
+            yield return Override("decision.intentAgingSeconds","Срок повышения приоритета","s",1,60,1);
+
+            AiProfileField Override(string key,string label,string unit,double minimum,double maximum,double step,bool integral=false)
+                =>new AiProfileField(expert+key,groupName,label,"Общий параметр Эксперта и Читера. Значение −1 включает прежнее поведение.",unit,-1,maximum,step,-1,integral,minimum);
         }
     }
 }

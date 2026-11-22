@@ -75,7 +75,7 @@ namespace Spacewars.Runtime
             OwnerReceipts=seats.ToDictionary(s=>s.OwnerId,s=>(IReadOnlyList<PlayableCommandReceipt>)Array.AsReadOnly(next.Receipts.Where(r=>r.Ordinal>consumedOrdinal&&r.Receipt.OwnerId==s.OwnerId).Select(r=>r.Receipt).ToArray()));
             consumedOrdinal=next.ReceiptOrdinal;Frame=next;
             // Transport capacity is consumed once by the coordinator, never a viewport.
-            runtime.DrainReceipts();
+            runtime.AcknowledgeOfflineReceipts(next.ReceiptOrdinal);
         }
         public PlayableCommandSubmitResult Submit(string seatId,PlayableCommandKind kind,int[] entities,NavPoint point=default(NavPoint),int targetId=0,int siteId=0,int slotId=0,int parentId=0,PlayableBuildingKind buildingKind=PlayableBuildingKind.Factory,PlayableEntityKind unitKind=PlayableEntityKind.Tank,PlayableResearchKind researchKind=PlayableResearchKind.TankChassis,PlayableOrderMode mode=PlayableOrderMode.Replace,long productionOrderId=0)
         {

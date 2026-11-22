@@ -67,9 +67,18 @@ namespace Spacewars.Tests.PlayMode
                     occupied?new[]{new PlayableBuildingSnapshot(site.Id,PlayableOwner.Player,site.Kind,site.Position,250,1,0,0,default,site.Id,0,phase:ConstructionPhase.Ready)}:Array.Empty<PlayableBuildingSnapshot>(),
                     Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
                     new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,occupied?1:.6,false,occupied?site.Id:0,occupied)});
-                world.RenderSites(Frame(1,false));
+                var hidden=new PlayableSnapshot(p.ProfileId,p.Revision,1,7,0,0,RuntimeStatus.Running,false,
+                    PlayableMatchOutcome.Playing,0,null,Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),
+                    Array.Empty<PlayableProjectileSnapshot>(),null,null,publicSites:new[]{site});
+                world.RenderSites(hidden);
+
                 var pad=root.GetComponentsInChildren<Transform>().Single(t=>t.name=="Site pad "+site.Id+":0");
                 var technical=pad.Find("Technical apron").GetComponent<MeshFilter>();var capture=pad.Find("Capture").GetComponent<MeshFilter>();
+                Assert.Zero(technical.sharedMesh.vertexCount,"No duplicate public overlay over the yard in fog.");
+                Assert.Zero(capture.sharedMesh.vertexCount);
+                var yard=root.GetComponentsInChildren<MeshRenderer>().Single(r=>r.name=="Steel mine work yard "+site.Id);
+                Assert.AreEqual((float)p.FogExploredOpacity,yard.sharedMaterial.GetFloat("_FoundryMineFogLimit"));
+                world.RenderSites(Frame(1,false));
                 Assert.Zero(technical.sharedMesh.vertexCount,"No model-sized decorative square over the broad yard");
                 Assert.Greater(capture.sharedMesh.vertexCount,0,"Capture progress must remain visible");
                 Assert.AreSame(world.Fog.Texture,capture.GetComponent<Renderer>().sharedMaterial.GetTexture("_FogMask"));

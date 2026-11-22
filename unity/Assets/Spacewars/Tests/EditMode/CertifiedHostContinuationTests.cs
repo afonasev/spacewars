@@ -26,6 +26,54 @@ namespace Spacewars.Tests.EditMode
         private long command;
         private PlayableProfile activeProfile=PlayableProfile.Default;
 
+        internal static long RecastWorkerManagedAndSessionBytes(NavigationSession session)
+        {
+            // Count the worker roots separately from the native allocations
+            // owned by their GC handles across this process.
+            var roots=new System.Collections.Generic.List<NavOwnedStorage>();
+            var startup=(RecastGroupPreparation)typeof(NavigationSession).GetField("recastStartup",F).GetValue(session);
+            if(startup!=null){
+                roots.Add((NavOwnedStorage)typeof(RecastGroupPreparation).GetField("owner",F).GetValue(startup));
+                var cache=(RecastMapCache)typeof(RecastGroupPreparation).GetField("cache",F).GetValue(startup);
+                roots.Add((NavOwnedStorage)typeof(RecastMapCache).GetField("foundationPayload",F).GetValue(cache));
+                roots.Add(((NavGeometry)typeof(RecastMapCache).GetField("publicGeometry",F).GetValue(cache))?.StorageRoot);
+                var entry=(RecastMapCache.Entry)typeof(RecastMapCache).GetField("first",F).GetValue(cache);
+                roots.Add(entry);
+                for(;entry!=null;entry=entry.Next)
+                    roots.Add((NavOwnedStorage)typeof(RecastMapHandle).GetField("payload",F).GetValue(entry.Map.Handle));
+                var context=(NavOwnedStorage)typeof(RecastGroupPreparation).GetField("first",F).GetValue(startup);
+                roots.Add(context);
+                for(;context!=null;context=(NavOwnedStorage)context.GetType().GetField("Next",F).GetValue(context)){
+                    var type=context.GetType();
+                    var pin=(NavigationAdmissionPin)type.GetField("Pin",F).GetValue(context);
+                    roots.Add(pin.StorageOwner);
+                    var map=(RecastMapCache.Pin)type.GetField("Map",F).GetValue(context);
+                    roots.Add((NavOwnedStorage)typeof(RecastMapCache.Pin).GetField("owner",F).GetValue(map));
+                    if(map.Map!=null)
+                        roots.Add((NavOwnedStorage)typeof(RecastMapHandle).GetField("payload",F).GetValue(map.Map.Handle));
+                    var query=(RecastNavigationQuery)type.GetField("Query",F).GetValue(context);
+                    if(query!=null){
+                        var handle=(RecastQueryHandle)typeof(RecastNavigationQuery).GetField("handle",F).GetValue(query);
+                        roots.Add((NavOwnedStorage)typeof(RecastQueryHandle).GetField("metadata",F).GetValue(handle));
+                    }
+                }
+            }
+            return NavigationStorageOwnershipTests.UniqueWithSession(session,roots.ToArray());
+        }
+
+        internal static long RecastWorkerNativeBytes()
+        {
+            long nativeBytes=checked((long)RecastNative.sw_recast_allocation_bytes());
+            long nativeCount=checked((long)RecastNative.sw_recast_allocation_count());
+            var allocation=typeof(RecastNative).GetNestedType("NativeAllocation",BindingFlags.NonPublic);
+            long nativeCreditOverhead=NavStorageLayout.Charge(NavStorageLayout.ObjectBytesBound(allocation)+16);
+            return checked(nativeBytes+nativeCount*nativeCreditOverhead);
+        }
+
+        private void AssertRetentionIncludingRecastWorker()
+            =>Assert.AreEqual(checked(RecastWorkerManagedAndSessionBytes(session)+RecastWorkerNativeBytes()),
+                session.PhysicalHostBudget.PhysicalBytes);
+
         [SetUp] public void SetUp()
         {
             activeProfile=PlayableProfile.Default;
@@ -199,7 +247,7 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(1,denied);Assert.AreEqual(point,actor.Position);Assert.AreEqual(publications,session.OwnedMovementPublications);Assert.AreEqual(batches,session.OwnedResultBatchPublications);Assert.AreEqual(physical,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(prefix,Bytes());
             session.Step(1d/30);Assert.AreEqual(publications+1,session.OwnedMovementPublications);Assert.Zero(session.LastOwnedMovementPublicationAllocatedBytes);Assert.Greater(actor.Position.X,point.X);
             if(ready){Assert.AreEqual(batches+1,session.OwnedResultBatchPublications);Assert.Zero(session.LastOwnedResultBatchPublicationAllocatedBytes);Assert.Zero(session.Answers.Count);Assert.NotNull(session.InstalledExecutionFor(second));Assert.Greater(session.Crowd.Units.Single(u=>u.Id==second).Position.X,-18);}
-            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);byte[] published=Bytes();session.Step(1d/30);byte[] suffix=Bytes();Restore(published);CollectionAssert.AreEqual(published,Bytes());session.Step(1d/30);CollectionAssert.AreEqual(suffix,Bytes());
+            AssertRetentionIncludingRecastWorker();byte[] published=Bytes();session.Step(1d/30);byte[] suffix=Bytes();Restore(published);CollectionAssert.AreEqual(published,Bytes());session.Step(1d/30);CollectionAssert.AreEqual(suffix,Bytes());
         }
         [TestCase(false)][TestCase(true)] public void ReadyAndActualLocalRepairRefuseAndPublishOneWholeStepBeforeCallbacks(bool mixed)
         {
@@ -207,13 +255,15 @@ namespace Spacewars.Tests.EditMode
             int moving=Spawn(-18,-14);Spawn(-14,-14);Arrival(moving,new NavPoint(-10,-14));
             for(int i=0;i<20000&&(session.PendingCount>0||session.AllocationCount>0);i++){Pump(4);session.ApplyResults();}
             Assert.Zero(session.PendingCount);Assert.True(session.Crowd.TryGet(moving,out var actor));const double dt=1d/30;
-            for(int tick=0;tick<300&&actor.blockedSeconds+dt<activeProfile.Navigation.RepairRetrySeconds;tick++)Call("Step",dt);
-            Assert.GreaterOrEqual(actor.blockedSeconds+dt,activeProfile.Navigation.RepairRetrySeconds);Assert.Zero(session.Crowd.RepairCount);var global=actor.StorageOwner.Global;
+            PlaceLocalDetourBlockers(actor);
+            var budget=session.PhysicalHostBudget;
+            PrimeLocalDetour(dt);
+            Assert.Zero(session.Crowd.RepairCount);var global=actor.StorageOwner.Global;
             int ready=Spawn(-18,-6);Arrival(ready,new NavPoint(-10,-6));
             if(mixed){Assert.AreEqual(PlayableCommandStatus.Accepted,Call("Apply",new PlayableCommand(1,++command,"player-1",PlayableCommandKind.SetRally,new[]{factory},new NavPoint(-8,10)),null));Call("AdvanceRally");Assert.AreEqual(PlayableCommandStatus.Accepted,Call("Apply",new PlayableCommand(1,++command,"player-1",PlayableCommandKind.SetRally,new[]{factory},new NavPoint(-6,10)),null));Call("AdvanceRally");}
             int expectedAnswers=mixed?3:1;for(int i=0;i<20000&&session.Answers.Count<expectedAnswers;i++){Pump(4);if(session.Answers.Count<expectedAnswers)session.PrepareDeliveryBarrier();}
             Assert.AreEqual(expectedAnswers,session.Answers.Count);Assert.Zero(session.AllocationCount);Assert.True(session.Crowd.TryGet(ready,out var next));var nextPosition=next.Position;var answers=session.Answers.CopyItems();var answer=answers.Single(a=>a.Request.Entity==ready);Assert.AreEqual(ready,answer.Request.Entity);Assert.AreEqual(NavSolveStatus.Ready,answer.Status);
-            var budget=session.PhysicalHostBudget;byte[] prefix=Bytes();long physical=budget.PhysicalBytes;int applied=session.AppliedResults,batch=session.OwnedResultBatchPublications,movements=session.OwnedMovementPublications,denied=0,underGate=0;bool destination=false;var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
+            byte[] prefix=Bytes();long physical=budget.PhysicalBytes;int applied=session.AppliedResults,batch=session.OwnedResultBatchPublications,movements=session.OwnedMovementPublications,denied=0,underGate=0;bool destination=false;var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
             try{budget.AllocationAdmission=_=>{if(Monitor.IsEntered(gate))underGate++;var frames=new System.Diagnostics.StackTrace().GetFrames();if(frames.Any(f=>f.GetMethod().DeclaringType==typeof(NavigationInstalledExecutionOwner)))destination=true;if(frames.Any(f=>f.GetMethod().Name=="ReplaceLocal"&&f.GetMethod().DeclaringType==typeof(NavPreparedCrowdStep))){Assert.True(destination,"Ready destination must exist before movement local-output refusal");denied++;return false;}return true;};session.Step(dt);}finally{budget.AllocationAdmission=null;}
             Assert.AreEqual(1,denied);Assert.Zero(underGate);Assert.AreEqual(batch,session.OwnedResultBatchPublications);Assert.AreEqual(movements,session.OwnedMovementPublications);Assert.AreEqual(applied,session.AppliedResults);CollectionAssert.AreEqual(answers,session.Answers.CopyItems());Assert.AreEqual(nextPosition,next.Position);Assert.AreSame(global,actor.StorageOwner.Global);Assert.AreEqual(physical,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(prefix,Bytes());
             if(!mixed){
@@ -225,10 +275,134 @@ namespace Spacewars.Tests.EditMode
             }
             int callbacks=0;void Activated(NavigationRequest request){if(request.Entity!=ready)return;callbacks++;Assert.False(Monitor.IsEntered(gate));Assert.Zero(session.Answers.Count);Assert.Greater(session.Crowd.RepairCount,0);Assert.Greater(actor.StorageOwner.Local.Count,0);Assert.Greater(next.Position.X,nextPosition.X);Assert.NotNull(session.InstalledExecutionFor(ready));}
             session.RouteActivated+=Activated;try{session.Step(dt);}finally{session.RouteActivated-=Activated;}
-            Assert.AreEqual(1,callbacks);Assert.AreEqual(batch+1,session.OwnedResultBatchPublications);Assert.AreEqual(movements+1,session.OwnedMovementPublications);Assert.Zero(session.LastOwnedResultBatchPublicationAllocatedBytes);Assert.Zero(session.LastOwnedMovementPublicationAllocatedBytes);Assert.AreSame(global,actor.StorageOwner.Global);Assert.AreEqual(mixed?1:0,typeof(NavigationSession).GetProperty("ProbeAnswerCount",F).GetValue(session));Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);
+            Assert.AreEqual(1,callbacks);Assert.AreEqual(batch+1,session.OwnedResultBatchPublications);Assert.AreEqual(movements+1,session.OwnedMovementPublications);Assert.Zero(session.LastOwnedResultBatchPublicationAllocatedBytes);Assert.Zero(session.LastOwnedMovementPublicationAllocatedBytes);Assert.AreSame(global,actor.StorageOwner.Global);Assert.AreEqual(mixed?1:0,typeof(NavigationSession).GetProperty("ProbeAnswerCount",F).GetValue(session));AssertRetentionIncludingRecastWorker();
             byte[] published=Bytes();var suffix=new byte[20][];for(int i=0;i<suffix.Length;i++){Call("Step",dt);suffix[i]=Bytes();}Pump(4);byte[] afterPump=Bytes();string facts=HostFacts();
-            Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());kernel.Attach(session.RoutePort);typeof(CertifiedRouteKernel).GetMethod("RefreshPhysicalFrontier",F).Invoke(kernel,new object[]{session.RoutePort});session.Step(dt);CollectionAssert.AreEqual(published,Bytes());for(int i=0;i<suffix.Length;i++){Call("Step",dt);CollectionAssert.AreEqual(suffix[i],Bytes(),"composed Ready/repair cold suffix "+i);}Pump(4);CollectionAssert.AreEqual(afterPump,Bytes());Assert.AreEqual(facts,HostFacts());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+            Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());kernel.Attach(session.RoutePort);typeof(CertifiedRouteKernel).GetMethod("RefreshPhysicalFrontier",F).Invoke(kernel,new object[]{session.RoutePort});session.Step(dt);CollectionAssert.AreEqual(published,Bytes());for(int i=0;i<suffix.Length;i++){Call("Step",dt);CollectionAssert.AreEqual(suffix[i],Bytes(),"composed Ready/repair cold suffix "+i);}Pump(4);CollectionAssert.AreEqual(afterPump,Bytes());Assert.AreEqual(facts,HostFacts());AssertRetentionIncludingRecastWorker();
         }
+
+        private void PlaceLocalDetourBlockers(NavUnit actor)
+        {
+            double radius=activeProfile.TankCollisionRadius;
+            double distance=2*radius+activeProfile.Navigation.LocalGridCell;
+            var at=actor.Position;
+            var blockers=new[]{
+                new NavPoint(at.X+distance,at.Z),
+                new NavPoint(at.X+distance/2,at.Z+Math.Sqrt(3)*distance/2),
+                new NavPoint(at.X+distance/2,at.Z-Math.Sqrt(3)*distance/2)
+            };
+            foreach(var point in blockers){
+                Assert.True(session.Crowd.CanPlace(point,radius));
+                Spawn(point.X,point.Z);
+            }
+            AssertClearFromPath(actor,new NavPoint(at.X-1.2,at.Z),new NavPoint(at.X-1.2,at.Z+2.8),
+                new NavPoint(at.X+1.6,at.Z+3.0),actor.Goal);
+        }
+
+        private void PrimeLocalDetour(double dt)
+        {
+            var budget=session.PhysicalHostBudget;
+            bool localOutputReached=false;
+            // Reject the first real local output so the next step must
+            // prepare the same detour from the still-committed source.
+            try{
+                budget.AllocationAdmission=_=>{
+                    if(!new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().Name=="ReplaceLocal"&&f.GetMethod().DeclaringType==typeof(NavPreparedCrowdStep)))return true;
+                    localOutputReached=true;
+                    return false;
+                };
+                for(int tick=0;tick<300&&!localOutputReached;tick++)Call("Step",dt);
+            }finally{budget.AllocationAdmission=null;}
+            Assert.True(localOutputReached,"Setup must reach an actual prepared local detour.");
+        }
+
+        [TestCase(false)][TestCase(true)] public void PaidBackgroundPressureLeavesLocalRepairAndIndependentMotion(bool withReady)
+        {
+            int blocked=Spawn(-18,-14);
+            Spawn(-14,-14);
+            Arrival(blocked,new NavPoint(-10,-14));
+            for(int i=0;i<20000&&(session.PendingCount>0||session.AllocationCount>0);i++){
+                Pump(4);
+                session.ApplyResults();
+            }
+            Assert.Zero(session.PendingCount);
+            Assert.Zero(session.AllocationCount);
+            Assert.Zero(session.Answers.Count);
+            Assert.True(session.Crowd.TryGet(blocked,out var actor)&&actor.Moving);
+            Assert.NotNull(session.InstalledExecutionFor(blocked));
+
+            PlaceLocalDetourBlockers(actor);
+            const double dt=1d/30;
+            Assert.Zero(actor.StorageOwner.Local?.Count??0);
+            int walker=Spawn(-18,-6);
+            Arrival(walker,new NavPoint(-10,-6));
+            for(int i=0;i<20000&&(session.PendingCount>0||session.AllocationCount>0);i++){
+                Pump(4);
+                session.ApplyResults();
+            }
+            Assert.Zero(session.Answers.Count);
+            Assert.Zero(session.PendingCount);
+            Assert.True(session.Crowd.TryGet(walker,out var moving)&&moving.Moving);
+            Assert.NotNull(session.InstalledExecutionFor(walker));
+            session.BindMotionAuthority(new AiCombatMicroMotionAuthority((PlayableDomain)domain,()=>Array.Empty<PlayableAiOwnerLoop>()));
+            int joining=0;
+            if(withReady){
+                PrimeLocalDetour(dt);
+                joining=Spawn(-18,2);
+                Arrival(joining,new NavPoint(-10,2));
+                for(int i=0;i<20000&&session.Answers.Count==0;i++){
+                    Pump(4);
+                    if(session.Answers.Count==0)session.PrepareDeliveryBarrier();
+                }
+                var answers=session.Answers.CopyItems();
+                Assert.AreEqual(1,answers.Length);
+                Assert.AreEqual(NavSolveStatus.Ready,answers[0].Status);
+                Assert.AreEqual(joining,answers[0].Request.Entity);
+                Assert.NotNull(answers[0].Corridor);
+            }
+            var prior=actor.StorageOwner.Global;
+            int repairs=session.Crowd.RepairCount;
+            var budget=session.PhysicalHostBudget;
+            Assert.True(session.TryOpenPhysicalHostScope(NavigationPreparationKind.Solve,session.Generation,
+                session.Admission.PublicationIdentity,out var pressure));
+            using(pressure){
+                long bytes=LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes-budget.LiveHeadroom;
+                Assert.Positive(bytes);
+                Assert.True(pressure.TryReserve(bytes));
+                Assert.False(pressure.TryReserve(1));
+                string denialStack=null;
+                budget.AllocationAdmission=requested=>{
+                    if(requested>LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes)
+                        denialStack=$"requested={requested}, available={LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes}\n"+new System.Diagnostics.StackTrace();
+                    return true;
+                };
+                try{
+                    bool repaired=false;
+                    for(int tick=0;tick<(withReady?1:120)&&!repaired;tick++){
+                        var before=moving.Position;
+                        int publications=session.OwnedMovementPublications;
+                        session.Step(dt);
+                        Assert.IsNull(denialStack,$"Paid reserve refused at step {tick}, floor={budget.LiveHeadroom}\n{denialStack}");
+                        if(session.Crowd.RepairCount==repairs)continue;
+                        if((actor.StorageOwner.Local?.Count??0)==0)continue;
+                        TestContext.WriteLine($"floor={budget.LiveHeadroom}, pressure={bytes}, repair step={tick}, "+
+                            $"movement={session.OwnedMovementPublications-publications}");
+                        Assert.AreEqual(publications+1,session.OwnedMovementPublications);
+                        Assert.AreNotEqual(before,moving.Position);
+                        if(withReady){
+                            Assert.Zero(session.Answers.Count);
+                            Assert.NotNull(session.InstalledExecutionFor(joining));
+                        }
+                        repaired=true;
+                    }
+                    Assert.True(repaired,"The blocked actor must install its actual local detour under pressure.");
+                    Assert.AreSame(prior,actor.StorageOwner.Global);
+                }finally{budget.AllocationAdmission=null;}
+                Assert.LessOrEqual(budget.PeakRetainedBytes,LayeredNavigationScheduler.MaxRetainedBytes);
+            }
+            Assert.Zero(budget.HeldBytes);
+            Assert.Zero(budget.ActiveScopes);
+        }
+
         [Test] public void ActualMovingGroupRepairsInOwnedStepAndRefusesLocalOutputAtomically()
         {
             int moving=Spawn(-18,-14);int neighbor=Spawn(-14,-14);Arrival(moving,new NavPoint(-10,-14));
@@ -351,6 +525,182 @@ namespace Spacewars.Tests.EditMode
             CollectionAssert.AreEqual(suffix,Bytes());Assert.AreEqual(facts,HostFacts());Pump(1);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(nextFacts,HostFacts());
             Restore(completed);CollectionAssert.AreEqual(completed,Bytes());Assert.True(session.TryProbeAnswer(out first));Assert.AreEqual(-8,first.Request.Entity);Assert.True(session.TryProbeAnswer(out second));Assert.AreEqual(-9,second.Request.Entity);CollectionAssert.AreEqual(suffix,Bytes());
             Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+        }
+
+        [Test] public void SingleCapacityExceededReadyPublishesWithIndependentNativeMotion()
+        {
+            int walker=Spawn(-18,-10);
+            Assert.True(session.Move(walker,new NavPoint(-10,-10)));
+            for(int i=0;i<20000&&session.Answers.Count==0;i++)Pump(64);
+            Assert.AreEqual(NavSolveStatus.Ready,session.Answers.CopyItems().Single().Status);
+            session.ApplyResults();
+            Assert.True(session.Crowd.TryGet(walker,out var moving)&&moving.Moving);
+            session.BindMotionAuthority(new AiCombatMicroMotionAuthority((PlayableDomain)domain,()=>Array.Empty<PlayableAiOwnerLoop>()));
+
+            int blocked=Spawn(-18,-14);
+            Assert.True(session.Move(blocked,new NavPoint(-10,-14)));
+            for(int i=0;i<20000&&session.Answers.Count==0;i++)Pump(64);
+            var answer=session.Answers.CopyItems().Single();
+            Assert.AreEqual(NavSolveStatus.Ready,answer.Status);
+            Assert.NotNull(answer.Corridor);
+            Assert.AreSame(answer.Request,session.PendingRequestFor(blocked));
+
+            // Reserve actual externally owned host memory using the route-port
+            // accounting boundary. Existing routes and the Ready remain owned.
+            long host=session.HostRetainedBytes;
+            long bytes=LayeredNavigationScheduler.MaxRetainedBytes-host-session.CorridorRetainedBytes-1;
+            Assert.Positive(bytes);
+            var memory=System.Runtime.InteropServices.Marshal.AllocHGlobal(new IntPtr(bytes));
+            try{
+                session.RoutePort.SetHostRetainedBytes(host+bytes);
+                var before=moving.Position;
+                int movement=session.OwnedMovementPublications,results=session.OwnedResultBatchPublications;
+                int applied=session.AppliedResults,failed=session.OwnedOrdinaryFailurePublications;
+                session.ResultBatchPreparationBoundary=stage=>{
+                    if(stage==2)throw new InvalidOperationException("Refuse before the atomic write.");
+                };
+                try{session.Step(1d/30);}
+                finally{session.ResultBatchPreparationBoundary=null;}
+                Assert.AreSame(answer,session.Answers.CopyItems().Single());
+                Assert.AreEqual(before,moving.Position);
+                Assert.AreEqual(results,session.OwnedResultBatchPublications);
+                Assert.AreEqual(movement,session.OwnedMovementPublications);
+
+                session.Step(1d/30);
+                Assert.Zero(session.Answers.Count,"An over-capacity Ready must be resolved in its FIFO turn.");
+                Assert.Null(session.PendingRequestFor(blocked));
+                Assert.AreEqual(applied,session.AppliedResults);
+                Assert.AreEqual(failed+1,session.OwnedOrdinaryFailurePublications);
+                Assert.AreEqual(results+1,session.OwnedResultBatchPublications);
+                Assert.AreEqual(movement+1,session.OwnedMovementPublications);
+                Assert.AreNotEqual(before,moving.Position);
+                var failures=(NavigationCommandSlots<int,NavSolveStatus>)typeof(NavigationSession).GetField("technicalFailures",F).GetValue(session);
+                Assert.AreEqual(NavSolveStatus.CapacityExceeded,failures[blocked]);
+            }finally{
+                session.RoutePort.SetHostRetainedBytes(host);
+                System.Runtime.InteropServices.Marshal.FreeHGlobal(memory);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SingleBlockedConnectorPublishesWithIndependentNativeMotion(bool obsolete)
+        {
+            int walker=Spawn(-18,-10);
+            Assert.True(session.Move(walker,new NavPoint(-10,-10)));
+            for(int i=0;i<20000&&session.Answers.Count==0;i++)Pump(64);
+            Assert.AreEqual(1,session.Answers.Count);
+            session.ApplyResults();
+            Assert.Zero(session.Answers.Count);
+            Assert.True(session.Crowd.TryGet(walker,out var moving)&&moving.Moving);
+            session.BindMotionAuthority(new AiCombatMicroMotionAuthority((PlayableDomain)domain,()=>Array.Empty<PlayableAiOwnerLoop>()));
+
+            int blocked=Spawn(-18,-14);
+            Assert.True(session.Move(blocked,new NavPoint(-10,-14)));
+            var request=session.PendingRequestFor(blocked);
+            Assert.NotNull(request);
+            var owner=request.StorageOwner;
+            owner.Retain();
+            try{
+                Assert.True(session.Requests.TryDequeue(out var handed));
+                Assert.AreSame(request,handed);
+                if(obsolete)session.Stop(blocked,false);
+                Assert.True(session.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,
+                    session.Generation,session.Admission.PublicationIdentity,out var scope));
+                using(scope){
+                    var payload=NavigationHostAnswer.CreateTerminal(owner,NavSolveStatus.BlockedConnector,scope.OwnedReservation());
+                    try{scope.Attach(payload);scope.Commit(payload,_=>Assert.True(session.Answers.TryEnqueue(payload.Answer)));}
+                    finally{payload.ReleaseStorage();}
+                }
+            }finally{owner.Release();}
+
+            var head=session.Answers.CopyItems().Single();
+            var before=moving.Position;
+            long installed=moving.InstalledRequest;
+            int movement=session.OwnedMovementPublications,results=session.OwnedResultBatchPublications;
+            int failures=session.OwnedOrdinaryFailurePublications,discards=session.OwnedDiscardPublications;
+            session.ResultBatchPreparationBoundary=stage=>{
+                if(stage==2)throw new InvalidOperationException("Refuse before the atomic write.");
+            };
+            try{session.Step(1d/30);}
+            finally{session.ResultBatchPreparationBoundary=null;}
+            Assert.AreSame(head,session.Answers.CopyItems().Single());
+            Assert.AreSame(obsolete?null:request,session.PendingRequestFor(blocked));
+            Assert.AreEqual(before,moving.Position);
+            Assert.AreEqual(movement,session.OwnedMovementPublications);
+            Assert.AreEqual(results,session.OwnedResultBatchPublications);
+
+            session.Step(1d/30);
+
+            Assert.Zero(session.Answers.Count,"The lone terminal answer must not wait for a second response.");
+            Assert.Null(session.PendingRequestFor(blocked));
+            Assert.AreEqual(results+1,session.OwnedResultBatchPublications);
+            Assert.AreEqual(failures+(obsolete?0:1),session.OwnedOrdinaryFailurePublications);
+            Assert.AreEqual(discards+(obsolete?1:0),session.OwnedDiscardPublications);
+            Assert.AreEqual(movement+1,session.OwnedMovementPublications);
+            Assert.AreEqual(installed,moving.InstalledRequest);
+            Assert.AreNotEqual(before,moving.Position);
+            Assert.True(session.Crowd.TryGet(blocked,out var rejected)&&!rejected.Moving);
+            if(!obsolete){
+                Assert.AreEqual(request.Request,rejected.FailedRequest);
+                Assert.AreEqual(NavigationOutcome.Rejected,rejected.LastFailure);
+            }
+        }
+
+        [Test]
+        public void SingleObsoleteStaleAnswerDiscardsAndMovesInTheSameNativeStep()
+        {
+            int walker=Spawn(-18,-10);
+            Assert.True(session.Move(walker,new NavPoint(-10,-10)));
+            for(int i=0;i<20000&&session.Answers.Count==0;i++)Pump(64);
+            Assert.AreEqual(1,session.Answers.Count);
+            session.ApplyResults();
+            Assert.Zero(session.Answers.Count);
+            Assert.True(session.Crowd.TryGet(walker,out var moving)&&moving.Moving);
+            session.BindMotionAuthority(new AiCombatMicroMotionAuthority((PlayableDomain)domain,()=>Array.Empty<PlayableAiOwnerLoop>()));
+
+            void EnqueueObsoleteAnswer(int actor,NavPoint goal)
+            {
+                Assert.True(session.Move(actor,goal));
+                var request=session.PendingRequestFor(actor);
+                Assert.NotNull(request);
+                var owner=request.StorageOwner;
+                owner.Retain();
+                try{
+                    Assert.True(session.Requests.TryDequeue(out var handed));
+                    Assert.AreSame(request,handed);
+                    session.Stop(actor,false);
+                    Assert.IsNull(session.PendingRequestFor(actor));
+                    Assert.True(session.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,session.Generation,session.Admission.PublicationIdentity,out var scope));
+                    using(scope){
+                        var payload=NavigationHostAnswer.CreateTerminal(owner,NavSolveStatus.Stale,scope.OwnedReservation());
+                        try{scope.Attach(payload);scope.Commit(payload,_=>Assert.True(session.Answers.TryEnqueue(payload.Answer)));}
+                        finally{payload.ReleaseStorage();}
+                    }
+                }finally{owner.Release();}
+            }
+
+            int obsolete=Spawn(-18,-14);
+            var initial=moving.Position;
+            session.Step(1d/30);
+            Assert.AreNotEqual(initial,moving.Position,"The unrelated walker can move with its current route before the test ingress.");
+            var before=moving.Position;
+            int publications=session.OwnedMovementPublications;
+            int batches=session.OwnedResultBatchPublications,discards=session.OwnedDiscardPublications;
+            EnqueueObsoleteAnswer(obsolete,new NavPoint(-10,-14));
+            var head=session.Answers.CopyItems().Single();
+            Assert.AreEqual(NavSolveStatus.Stale,head.Status);
+            Assert.AreEqual(obsolete,head.Request.Entity);
+
+            session.Step(1d/30);
+
+            Assert.AreEqual(21,session.LastNavigationStepPath);
+            Assert.Zero(session.Answers.Count,"The first Stale must retire without a second response.");
+            Assert.AreEqual(batches+1,session.OwnedResultBatchPublications);
+            Assert.AreEqual(discards+1,session.OwnedDiscardPublications);
+            Assert.AreEqual(publications+1,session.OwnedMovementPublications);
+            Assert.AreNotEqual(before,moving.Position);
+            Assert.True(session.Crowd.TryGet(obsolete,out var stopped)&&!stopped.Moving);
         }
 
         [TestCase(false,false)][TestCase(true,false)][TestCase(false,true)][TestCase(true,true)]
@@ -841,6 +1191,7 @@ namespace Spacewars.Tests.EditMode
 
         [TestCase(0)][TestCase(1)][TestCase(2)][TestCase(3)] public void ActualRallyProducerCompletesAcrossOwnedIngressAndFullWorldColdRestore(int capturePoint)
         {
+            ulong nativeAtStart=RecastNative.sw_recast_allocation_bytes();
             Call("AddCredits",PlayableOwner.Player,10000d);Call("BuildAt",1,2,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null);Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
             var buildings=(IDictionary)Domain.GetField("buildings",F).GetValue(domain);int factory=0;
             foreach(DictionaryEntry pair in buildings)if((PlayableBuildingKind)pair.Value.GetType().GetField("Kind").GetValue(pair.Value)==PlayableBuildingKind.Factory)factory=(int)pair.Key;
@@ -854,7 +1205,18 @@ namespace Spacewars.Tests.EditMode
             Complete();Assert.AreEqual(3,session.OwnedIngressPublications);var suffix=Bytes();var facts=HostFacts();Pump(1);var next=Bytes();var nextFacts=HostFacts();
             Restore(prefix);Assert.Zero(budget.PhysicalBytes);CollectionAssert.AreEqual(prefix,Bytes());Complete();CollectionAssert.AreEqual(suffix,Bytes());Assert.AreEqual(facts,HostFacts());Pump(1);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(nextFacts,HostFacts());
             var restoredBuildings=(IDictionary)Domain.GetField("buildings",F).GetValue(domain);var building=restoredBuildings[factory];Assert.True((bool)building.GetType().GetField("HasRally").GetValue(building));Assert.AreEqual(goal,building.GetType().GetField("Rally").GetValue(building));
+            // The independent managed owner walk cannot see Recast's native cache blocks.
+            // Check their retirement separately, then compare the remaining ledger exactly.
+            var derivative=(RecastGroupPreparation)typeof(NavigationSession).GetField("recastStartup",F).GetValue(session);
+            Assert.NotNull(derivative);
+            Assert.False(derivative.HasTransientWork);
+            long withCache=session.PhysicalHostBudget.PhysicalBytes;
+            Assert.Greater(RecastNative.sw_recast_allocation_bytes(),nativeAtStart);
+            derivative.Dispose();
+            Assert.AreEqual(nativeAtStart,RecastNative.sw_recast_allocation_bytes());
+            Assert.Less(session.PhysicalHostBudget.PhysicalBytes,withCache);
             Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+            CollectionAssert.AreEqual(next,Bytes(),"Retiring derivative storage must leave the restored authority intact.");
         }
 
         [TestCase("carrier")][TestCase("map")][TestCase("admission")]
@@ -1486,6 +1848,68 @@ namespace Spacewars.Tests.EditMode
             }
         }
 
+        [Test,Timeout(30000)]
+        public void OrdinaryDomainRecoversContendedMovementWithAnEmptyAnswerQueue()
+        {
+            int id=Spawn(-18,-14);
+            Arrival(id,new NavPoint(-10,-14));
+            for(int i=0;i<20000&&(session.PendingCount>0||session.AllocationCount>0);i++){
+                Pump(4);
+                session.ApplyResults();
+            }
+            Assert.True(session.HasCertifiedHost);
+            Assert.Zero(session.Answers.Count);
+            Assert.NotNull(session.InstalledExecutionFor(id));
+            Assert.True(session.Crowd.TryGet(id,out var actor));
+            Assert.True(actor.Moving);
+            var original=actor.Position;
+            var request=actor.InstalledRequest;
+            int movement=session.OwnedMovementPublications;
+            ((PlayableDomain)domain).NonblockingNavigationPreparation=true;
+
+            var port=session.RoutePort;
+            var budget=session.PhysicalHostBudget;
+            using var entered=new ManualResetEventSlim();
+            using var release=new ManualResetEventSlim();
+            Exception failure=null;
+            var resolver=new Thread(()=>{
+                try{
+                    if(!port.TryBeginHostOperation())throw new InvalidOperationException("The host could not begin.");
+                    try{
+                        if(!budget.TryOpenScope(NavigationPreparationKind.Solve,session.Generation,0,out var scope))
+                            throw new InvalidOperationException("The host scope could not open.");
+                        using(scope){
+                            using(var allocation=new NavStorageAllocation(scope.TryReserve)){
+                                allocation.Reserve(128);
+                                allocation.Register(new ResolvingBirth(entered,release));
+                            }
+                            scope.Discard();
+                        }
+                    }finally{port.EndHostOperation();}
+                }catch(Exception error){failure=error;entered.Set();}
+            }){IsBackground=true};
+            resolver.Start();
+            try{
+                Assert.True(entered.Wait(5000));
+                Assert.IsNull(failure);
+                Call("StepNavigationWithStableAnswers",1d/30);
+                Assert.AreEqual(original,actor.Position);
+                Assert.AreEqual(movement,session.OwnedMovementPublications);
+                Assert.Zero(session.Answers.Count);
+                Assert.True(port.CaptureRequested,"Motion contention must request a host yield even with no Ready answers.");
+            }finally{release.Set();Assert.True(resolver.Join(5000));}
+            Assert.IsNull(failure);
+            Assert.False(port.TryBeginHostOperation(),"The worker must yield until the recovery turn.");
+            Call("StepNavigationWithStableAnswers",1d/30);
+            Assert.AreEqual(movement+1,session.OwnedMovementPublications);
+            Assert.AreNotEqual(original,actor.Position);
+            Assert.AreEqual(request,actor.InstalledRequest);
+            Assert.Zero(session.Answers.Count);
+            Assert.False(port.CaptureRequested);
+            Assert.True(port.TryBeginHostOperation(),"The worker must resume immediately after the acknowledged turn.");
+            port.EndHostOperation();
+        }
+
         [Test,Timeout(180000)] public void OrdinaryDomainResultTurnDrainsExactReadyPrefixThenResumesRealWorkerAndColdSuffix()
         {
             int[] ids={Spawn(-18,-14),Spawn(-18,-10),Spawn(-18,-6)};
@@ -1651,6 +2075,62 @@ namespace Spacewars.Tests.EditMode
                 var prefix=Bytes();Pump(1);var suffix=Bytes();var facts=HostFacts();Pump(1);var next=Bytes();var nextFacts=HostFacts();Restore(prefix);Assert.Zero(budget.PhysicalBytes);CollectionAssert.AreEqual(prefix,Bytes());Pump(1);CollectionAssert.AreEqual(suffix,Bytes());Assert.AreEqual(facts,HostFacts());Pump(1);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(nextFacts,HostFacts());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
             }finally{pressure?.Release();}
         }
+        [Test] public void GroundIngressPriorityKeepsAnOldestRequestTurn()
+        {
+            int moving = Spawn(-18, -14);
+            int stationary = Spawn(-18, -10);
+            Assert.True(session.Move(moving, new NavPoint(-10, -14)));
+            for (int step = 0; step < 20000 && session.Answers.Count == 0; step++) Pump(64);
+            session.ApplyResults();
+            Assert.True(session.Crowd.TryGet(moving, out var actor) && actor.Moving);
+
+            Assert.True(session.Move(moving, new NavPoint(-8, -14)));
+            Assert.True(session.Move(stationary, new NavPoint(-10, -10)));
+            var original = session.Requests.CopyItems();
+            CollectionAssert.AreEqual(new[] { moving, stationary }, original.Select(request => request.Entity));
+
+            // A later request must remain outside the frozen grant's prefix.
+            session.PrioritizeGroundIngressLocked(false, original[0].Request);
+            CollectionAssert.AreEqual(original, session.Requests.CopyItems());
+            session.PrioritizeGroundIngressLocked(false, original[1].Request);
+            CollectionAssert.AreEqual(new[] { original[1], original[0] }, session.Requests.CopyItems());
+            session.PrioritizeGroundIngressLocked(true, original[1].Request);
+            CollectionAssert.AreEqual(original, session.Requests.CopyItems());
+        }
+
+        [Test] public void RestoredReadyAnswerReusesQualifiedExecutionPoints()
+        {
+            kernel.Clear();
+            session.ReleaseCommittedHostRoot();
+            Call("DestroyOwnedNavigation");
+            activeProfile = PlayableProfile.ThreeCrossingsDefault;
+            domain = Activator.CreateInstance(Domain, F, null, new object[] { activeProfile, 1L, false }, null);
+            session = (NavigationSession)Domain.GetProperty("Navigation", F).GetValue(domain);
+            kernel = new CertifiedRouteKernel();
+
+            int entity = Spawn(-18, 0);
+            Assert.True(session.Move(entity, new NavPoint(-14, 0)));
+            for (int step = 0; step < 20000 && session.Answers.Count == 0; step++) Pump(64);
+            var hot = session.Answers.CopyItems().Single();
+            Assert.AreEqual(NavSolveStatus.Ready, hot.Status);
+            Assert.True(session.Crowd.TryGet(entity, out var actor));
+            Assert.True(hot.StorageOwner.CanInstallFrom(session.Crowd, actor, activeProfile.AuthoredMap));
+            var saved = Bytes();
+            session.ApplyResults();
+            var expected = Bytes();
+
+            Restore(saved);
+            CollectionAssert.AreEqual(saved, Bytes());
+            var restored = session.Answers.CopyItems().Single();
+            Assert.True(restored.StorageOwner.HasGeometryQualification);
+            Assert.True(session.Crowd.TryGet(entity, out actor));
+            Assert.True(restored.StorageOwner.CanInstallFrom(session.Crowd, actor, activeProfile.AuthoredMap));
+            int preparations = session.QualifiedEntryPreparations;
+            session.ApplyResults();
+            Assert.Greater(session.QualifiedEntryPreparations, preparations);
+            CollectionAssert.AreEqual(expected, Bytes());
+        }
+
         [TestCase(false)][TestCase(true)] public void PreparedReadyQualificationKeepsFullVerdictAndRefusalOffGate(bool partition)
         {
             if(partition){kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");activeProfile=PlayableProfile.ThreeCrossingsDefault;domain=Activator.CreateInstance(Domain,F,null,new object[]{activeProfile,1L,false},null);session=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(domain);kernel=new CertifiedRouteKernel();}

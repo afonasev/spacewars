@@ -17,7 +17,11 @@ namespace Spacewars.Tests.EditMode
         [TestCase("aligned",true)][TestCase("off-axis",true)][TestCase("outside",false)]
         public void SettledNearFollowPublishesCurrentTinyLegWithoutChangingCachedDetour(string placement,bool compact)
         {
-            var p=PlayableProfile.Default;var domain=(PlayableDomain)NativeCombatFixture.WithTwoEnemyDefenders(p,71,false);
+            // Settled Follow compaction belongs to the flat, non-Recast route backend.
+            var terms=PlayableProfile.Default.CopyData();
+            terms.groundRouteBackend=0;
+            var p=PlayableProfile.Create(terms);
+            var domain=(PlayableDomain)NativeCombatFixture.WithTwoEnemyDefenders(p,71,false);
             try
             {
                 var home=p.Headquarters(PlayableOwner.Player);var leaderPoint=new NavPoint(home.X+14,home.Z+6);

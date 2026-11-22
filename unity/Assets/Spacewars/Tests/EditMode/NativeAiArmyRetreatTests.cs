@@ -162,6 +162,12 @@ namespace Spacewars.Tests.EditMode
             var proof=new PlayableRouteProof(4,old.Owner,71,100,1,wave.Position,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,1,default,default,new[]{default(NavPoint)});
             var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,100,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,old.Entities.Concat(new[]{wave}).ToArray(),old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:old.RouteProofs.Concat(new[]{proof}).ToArray()));
             AiTacticalExecutor.Observe(o,r,id,p);mission.SetPhase(r,phase,100);((AiArmyMissionState)Field(mission,"state")).Reason="withdrawal";
+            var follow=new PlayableAiAction(42,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,
+                PlayableCommandKind.Follow,new[]{4},targetId:1,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            Assert.AreEqual(join,mission.CanDeliverReinforcement(o,p,AiProfile.Initial,r,follow));
+            var attackMove=new PlayableAiAction(43,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,
+                PlayableCommandKind.AttackMove,new[]{4},seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            Assert.False(mission.CanDeliverReinforcement(o,p,AiProfile.Initial,r,attackMove));
             var records=new[]{A5Receipt(),new PlayableAiTraceRecord(o.Identity,42,90,7,90,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"current applied Follow",o.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,o.OwnerId,7,1),AiArmyPlanner.Policy,PlayableCommandKind.Follow)};
             mission.Observe(o,r,AiProfile.Initial,records,replanQuietGuards:false);Assert.True(mission.Active);Assert.AreEqual(!join,r.Capture().Armies.Single().Reinforcements.Contains(4));
             Assert.AreEqual(3,r.Capture().Armies.Single().Members.Except(r.Capture().Armies.Single().Reinforcements).Count()-(join?1:0),"The original core body count is preserved; no viability threshold changes.");
@@ -176,6 +182,40 @@ namespace Spacewars.Tests.EditMode
             var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,1000,1000,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:old.RouteProofs.ToArray()));
             var receipt=new PlayableAiTraceRecord(o.Identity,314,900,7,900,mode=="unapplied"?PlayableAiDeliveryStatus.Accepted:PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"current pending core replacement",o.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,o.OwnerId,7,1),mode=="foreign-policy"?"foreign":AiArmyPlanner.Policy,PlayableCommandKind.Move);
             mission.Observe(o,r,AiProfile.Initial,new[]{A5Receipt(),receipt},replanQuietGuards:false);Assert.AreEqual(keep,mission.Active,"An owned viable core replacement is independent of a repair client's deadline; exact authority checks still apply.");
+        }
+        [TestCase(false)][TestCase(true)]
+        public void Retreat_CurrentCertifiedMicroOrderPreservesMissionUntilPhysicalArrival(bool humanReplacement)
+        {
+            var registry=Registry();
+            var mission=A4Mission(registry);
+            long armyId=mission.Capture().ArmyId;
+            var original=A5Observation("remote",101,move:true);
+            mission.SetPhase(registry,AiArmyPhase.Retreating,100);
+            ((AiArmyMissionState)Field(mission,"state")).Reason="withdrawal";
+
+            var goal=new NavPoint(-12,3);
+            var micro=new AiCombatMicroPolicy();
+            var action=new PlayableAiAction(1,original.OwnerId,original.ProfileId,original.ProfileRevision,71,
+                original.SnapshotSequence,PlayableCommandKind.Move,new[]{1},goal,seed:original.Seed,
+                sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            micro.Commit(new AiCombatMicroPlan{Action=action,Army=armyId,Phase=AiCombatMicroPhase.Repair},71,100);
+            micro.Applied(action,20,100,new AiReceiptIdentity(71,original.OwnerId,1,1));
+            mission.CombatMicroOrder=micro.CurrentOverride;
+
+            var units=original.Entities.Select(u=>u.Id!=1?u:new PlayableEntitySnapshot(u.Id,u.Owner,u.Kind,u.Position,u.Health,true,0,0,0,
+                new PlayableTacticalOrderSnapshot(u.Id,u.Owner,71,20,100,PlayableTacticalOrderKind.Move,goal,0),
+                navigationOutcome:NavigationOutcome.Moving,orderStamp:new PlayableOrderStamp(u.Id,u.Owner,71,20,20,100,
+                    humanReplacement?PlayableOrderOrigin.Human:PlayableOrderOrigin.Ai,PlayableCommandKind.Move,
+                    PlayableAiOpeningComposition.SourceIdentity,1,1))).ToArray();
+            var observed=PlayableAiObservation.From(new PlayableSnapshot(original.ProfileId,original.ProfileRevision,71,original.Seed,
+                101,101,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,original.Buildings.ToArray(),
+                Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
+                vision:original.Vision,routeProofs:original.RouteProofs.ToArray()));
+
+            mission.Observe(observed,registry,AiProfile.Initial,new[]{A5Receipt()},replanQuietGuards:false);
+            Assert.AreEqual(!humanReplacement,mission.Active);
+            if(humanReplacement)Assert.AreEqual("withdrawal order replaced",mission.Capture().Reason);
+            else Assert.AreEqual(AiArmyPhase.Retreating,mission.Capture().Phase,"The micro receipt does not satisfy group arrival");
         }
         [Test] public void Retreat_ArrivedIntermediateLegStillNeedsActualHomeArrival()
         {
@@ -307,19 +347,14 @@ namespace Spacewars.Tests.EditMode
         [Test] public void Retreat_OrdinaryArtillerySupportMoveDoesNotHijackMissionPhase()
         {
             var r=Registry();var mission=A4Mission(r);var old=A4Observation(100,wave:true,gun:true,near:true);long id=mission.Capture().ArmyId;AiTacticalExecutor.Observe(old,r,id,PlayableProfile.Default);
+            Assert.True(r.Capture().Armies.Single().Reinforcements.Contains(4));
+            // Establish an already assembled support member. This assertion
+            // exercises ordinary repositioning, not the wave's promotion.
+            r.JoinReinforcements(id,AiArmyPlanner.Policy,new[]{4});
             var fact=new PlayableArtillerySupportSnapshot(4,71,100,true,false,false,true,new NavPoint(-5,4));
             var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,100,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,old.Entities.ToArray(),old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:old.RouteProofs.ToArray(),artillerySupport:new[]{fact}));
             var action=mission.Propose(o,A4Opening(),PlayableProfile.Default,AiProfile.Initial,r);Assert.NotNull(action);Assert.AreEqual(PlayableCommandKind.Move,action.Kind);CollectionAssert.AreEqual(new[]{4},action.EntityIds);var phase=mission.Capture().Phase;var anchor=r.Capture().Armies.Single().Anchor;
             mission.Commit(o,action,r);Assert.AreEqual(phase,mission.Capture().Phase);Assert.AreEqual(anchor,r.Capture().Armies.Single().Anchor);Assert.AreEqual(id,mission.Capture().ArmyId);
-        }
-        private static OfflineMatchConfiguration A5VisibleRecoveryConfig()
-        {
-            var c=A4NativeConfig();var observer=new NavPoint(20,-8);
-            // Positive recovery has a legitimately observed objective. Only this local
-            // fixture copy moves its existing refinery/declared slot; A4 is unchanged.
-            var sites=c.Sites.Select(s=>s.Id==1?new TerritorySite(s.Id,s.Kind,s.Position,s.Slots.Select(x=>x.Id==2?new TerritorySlot(x.Id,observer,x.Heading):x).ToArray()):s).ToArray();
-            var buildings=c.ScenarioBuildings.Select(b=>b.LogicalPlayer==1&&b.Kind==PlayableBuildingKind.Refinery?new OfflineScenarioBuilding(b.LogicalPlayer,b.Kind,b.SiteId,b.SlotId,observer,b.Heading):b).ToArray();
-            return new OfflineMatchConfiguration(c.Profile,c.SourceIdentity+"-a5-visible-recovery",c.MapIdentity+"-a5-visible-recovery",c.RouteProvenance,c.Seed,c.Roster.ToArray(),c.Starts.ToArray(),sites,c.Obstacles.ToArray(),new double[,]{{0,100},{100,0}},spectators:c.Spectators.ToArray(),scenario:c.ScenarioUnits.ToArray(),scenarioBuildings:buildings);
         }
         [TestCase(true)][TestCase(false)] public void Retreat_ActualVisibleThreatCompletesNativeArrivalRecoveryAndReplay(bool injectReinforcements)
             =>A5RecoveryCycle(injectReinforcements,injectReinforcements);
@@ -327,49 +362,149 @@ namespace Spacewars.Tests.EditMode
             =>A5RecoveryCycle(true,false);
         private static void A5RecoveryCycle(bool injectReinforcements,bool visibleObjective)
         {
-            var c=visibleObjective?A5VisibleRecoveryConfig():A4NativeConfig();var a=new PlayableAuthorityTick(c,71);var owner=Owners(a).Single();var registry=(AiArmyRegistry)Field(owner,"armies");var planner=(AiArmyPlanner)Field(owner,"armyPlanner");var domain=Field(a,"domain");
+            var c=A5DeliveryConfig(noAffordableReinforcements:!injectReinforcements,combatOnly:injectReinforcements);
+            var ai=AiProfile.Initial;
+            if(injectReinforcements)
+            {
+                // Exercise the original group withdrawal and native wave join.
+                // A separate local repair detour has its own fixture and can
+                // replace a member's required group arrival before this witness.
+                var terms=ai.CopyData();
+                terms.revision++;
+                NativeBalanceFields.Write(AiProfileMetadata.Field("difficulty.fighter.micro.repairEnabled"),terms,0);
+                ai=new AiProfile(terms);
+            }
+            var a=new PlayableAuthorityTick(c,71);var owner=a.Scheduler.Owners.Single();var registry=(AiArmyRegistry)Field(owner,"armies");var planner=(AiArmyPlanner)Field(owner,"armyPlanner");var domain=a.Domain;
+            void RestoreSight(PlayableDomain world)
+            {
+                var observer=(int)world.GetType().GetMethod("SpawnUnit",F).Invoke(world,new object[]{new NavPoint(20,-8),PlayableOwner.Player,PlayableEntityKind.Explorer});
+                Assert.Greater(observer,0);
+                world.Navigation.Stop(observer,true);
+            }
             using(var routes=new UnityHostRouteService())
             {
-                for(int i=0;i<300&&(!planner.Active||planner.Capture().Phase!=AiArmyPhase.Advancing);i++)NativeStep(a,routes);
-                Assert.True(planner.Active);long army=planner.Capture().ArmyId;var front=a.ParticipantView("player-1").Entities.Where(u=>registry.ArmyFor(u.Id)==army).OrderBy(u=>u.Id).First().Position;
-                for(int i=0;i<6;i++)domain.GetType().GetMethod("SpawnUnit",F).Invoke(domain,new object[]{new NavPoint(front.X+c.Profile.TankRange/2,front.Z+(i-3)*2),PlayableOwner.Enemy,PlayableEntityKind.Tank});
-                bool retreat=false,recover=false,resume=false,moved=false,pendingRestore=false,effectiveRestore=false,injected=false;long lastSeenAtRetreat=-1,recoveredTick=-1;var injectedIds=new System.Collections.Generic.List<int>();PlayableAuthorityTick twin=null;var initial=a.ParticipantView("player-1").Entities.Where(u=>registry.ArmyFor(u.Id)==army).ToDictionary(u=>u.Id,u=>u.Position);
-                for(int i=0;i<(injectReinforcements?900:1600)&&!resume&&(!retreat||planner.Active);i++)
+                for(int i=0;i<300&&(!planner.Active||!planner.HasAppliedOrder||planner.Capture().TargetKind!=PlayableRouteTargetKind.VisibleEnemy);i++)NativeStep(a,routes);
+                Assert.True(planner.Active);Assert.True(planner.HasAppliedOrder);Assert.AreEqual(PlayableRouteTargetKind.VisibleEnemy,planner.Capture().TargetKind);
+                long army=planner.Capture().ArmyId;
+                if(injectReinforcements)
                 {
-                    NativeStep(a,routes);if(twin!=null){NativeStep(twin,routes);ExactByteAssert.AreEqual(a.CaptureBytes(),twin.CaptureBytes(),"Exact native replay after withdrawal checkpoint");}
-                    var phase=planner.Capture().Phase;retreat|=phase==AiArmyPhase.Retreating;recover|=phase==AiArmyPhase.Recovering;resume=recover&&(phase==AiArmyPhase.Staging||phase==AiArmyPhase.Advancing||phase==AiArmyPhase.Engaging);
-                    if(retreat&&lastSeenAtRetreat<0)lastSeenAtRetreat=planner.Capture().LastSeenTick;
-                    if(planner.Capture().Reason=="recovered"&&recoveredTick<0)recoveredTick=a.Tick;
-                    if(retreat&&planner.Active)Assert.AreEqual(army,planner.Capture().ArmyId,"Original army owns the entire retreat/recovery cycle");
-                    if(recover&&injectReinforcements&&!injected)
-                    {
-                        // Fixture-injected healthy reinforcements through the existing
-                        // produced-unit spawn API; this does not prove production itself.
-                        for(int n=0;n<3;n++)
-                        {
-                            var point=new NavPoint(-23,-14-n*3);
-                            var units=(System.Collections.IDictionary)Field(domain,"units");var oldIds=units.Keys.Cast<int>().ToArray();
-                            domain.GetType().GetMethod("SpawnProduced",F).Invoke(domain,new object[]{point,(NavPoint?)new NavPoint(8,-8),PlayableOwner.Player,PlayableEntityKind.Tank});
-                            injectedIds.Add(units.Keys.Cast<int>().Except(oldIds).Single());
-                            if(twin!=null){var td=Field(twin,"domain");td.GetType().GetMethod("SpawnProduced",F).Invoke(td,new object[]{point,(NavPoint?)new NavPoint(8,-8),PlayableOwner.Player,PlayableEntityKind.Tank});}
-                        }
-                        injected=true;TestContext.WriteLine("Fixture-injected 3 healthy reinforcements; actual native assembly and viability remain required");
-                    }
-                    var view=a.ParticipantView("player-1");moved|=view.Entities.Any(u=>initial.ContainsKey(u.Id)&&!initial[u.Id].Equals(u.Position));
-                    if(phase==AiArmyPhase.Retreating&&!pendingRestore&&(long)Field(planner,"pendingId")!=0)
-                    {twin=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c);ExactByteAssert.AreEqual(a.CaptureBytes(),twin.CaptureBytes());pendingRestore=true;}
-                    if(phase==AiArmyPhase.Retreating&&!effectiveRestore&&view.Entities.Any(u=>registry.ArmyFor(u.Id)==army&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&u.OrderStamp?.Origin==PlayableOrderOrigin.Ai))
-                    {var copy=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c);ExactByteAssert.AreEqual(a.CaptureBytes(),copy.CaptureBytes());effectiveRestore=true;long tick=a.Tick;long progress=planner.Capture().ProgressTick;for(int n=0;n<3;n++){Assert.True(a.TryAdvance(paused:true));if(twin!=null)Assert.True(twin.TryAdvance(paused:true));}Assert.AreEqual(tick,a.Tick);Assert.AreEqual(progress,planner.Capture().ProgressTick);if(twin!=null)ExactByteAssert.AreEqual(a.CaptureBytes(),twin.CaptureBytes());}
-                    if(i%60==0)TestContext.WriteLine("A5 actual lifecycle "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,Mission=planner.Capture(),Army=registry.Capture().Armies.FirstOrDefault(x=>x.Id==army),Units=view.Entities.Where(u=>initial.ContainsKey(u.Id)),Records=a.CaptureDiagnosticCheckpoints().Single().Records.TakeLast(8)}));
+                    // Rebind after the actual opening. Genesis samples the full
+                    // profile hash, so starting with the repair toggle disabled
+                    // would select a different opening and authored core.
+                    var openingBefore=owner.Checkpoint.Opening.ProfileIdentity;
+                    a.Scheduler.Rebind(ai);
+                    Assert.AreEqual(openingBefore,owner.Checkpoint.Opening.ProfileIdentity);
+                    var core=registry.CaptureArmy(army).Single();
+                    Assert.AreEqual(4,core.Members.Length-core.Reinforcements.Length,
+                        "The positive case starts with the four authored core members");
                 }
-                TestContext.WriteLine("A5 final lifecycle "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,Mission=planner.Capture(),Registry=registry.Capture(),InjectedIds=injectedIds.ToArray(),Snapshot=a.ParticipantView("player-1").Entities,Records=a.CaptureDiagnosticCheckpoints().Single().Records.TakeLast(12)}));
-                Assert.True(retreat);Assert.True(moved);Assert.True(pendingRestore);Assert.True(effectiveRestore);Assert.True(recover,"Physical safe native arrival is required");if(injectReinforcements)
+                var front=a.ParticipantView("player-1").Entities.Where(u=>registry.ArmyFor(u.Id)==army).OrderByDescending(u=>u.Position.X).ThenBy(u=>u.Id).First().Position;
+                var hostileWave=Enumerable.Range(0,6).Select(i=>(int)domain.GetType().GetMethod("SpawnUnit",F).Invoke(domain,
+                    new object[]{new NavPoint(front.X+c.Profile.TankRange/2,front.Z+(i-3)*2),PlayableOwner.Enemy,PlayableEntityKind.Tank})).ToArray();
+                Assert.IsEmpty(AiDefensePlanner.Threats(PlayableAiObservation.From(a.ParticipantView("player-1")),c.Profile),"The test must exercise a field withdrawal, outside owned infrastructure defense.");
+                bool retreat=false,recover=false,resume=false,moved=false,pendingRestore=false,effectiveRestore=false,pursuersDisengaged=false;long lastSeenAtRetreat=-1,recoveredTick=-1;var injectedIds=new System.Collections.Generic.List<int>();PlayableAuthorityTick twin=null;var initial=a.ParticipantView("player-1").Entities.Where(u=>registry.ArmyFor(u.Id)==army).ToDictionary(u=>u.Id,u=>u.Position);
+                string originalRelease=null;long releaseTick=-1;bool sightRestored=false;
+                // Release the authored wave from the home side of the actual
+                // retreat lane with space for each native formation approach.
+                var wavePositions=new[]{new NavPoint(-20,-7),new NavPoint(-22,-10),new NavPoint(-20,-11)};
+                void SpawnWaveMember()
                 {
+                    var preferred=wavePositions[injectedIds.Count];
+                    var radius=PlayableUnitRules.Radius(c.Profile,PlayableEntityKind.Tank);
+                    var points=new[]{preferred,new NavPoint(preferred.X+2,preferred.Z),new NavPoint(preferred.X,preferred.Z-2),
+                        new NavPoint(preferred.X+2,preferred.Z-2),new NavPoint(preferred.X+4,preferred.Z)};
+                    var free=points.Where(point=>domain.Geometry.IsFree(point,radius)&&domain.Navigation.Crowd.Units.All(unit=>
+                        AiPositionDevelopmentPlanner.Distance(unit.Position,point)>=unit.Radius+radius)).ToArray();
+                    Assert.IsNotEmpty(free,"The home lane must leave a physically free reinforcement slot");
+                    var point=free[0];
+                    TestContext.WriteLine("A5 wave release tick="+a.Tick+" point="+point);
+                    var units=(System.Collections.IDictionary)Field(domain,"units");var oldIds=units.Keys.Cast<int>().ToArray();
+                    domain.GetType().GetMethod("SpawnProduced",F).Invoke(domain,new object[]{point,null,PlayableOwner.Player,PlayableEntityKind.Tank});
+                    injectedIds.Add(units.Keys.Cast<int>().Except(oldIds).Single());
+                    var restored=Field(twin,"domain");
+                    restored.GetType().GetMethod("SpawnProduced",F).Invoke(restored,new object[]{point,null,PlayableOwner.Player,PlayableEntityKind.Tank});
+                    ExactByteAssert.AreEqual(a.CaptureBytes(),twin.CaptureBytes(),"Fixture arrival at both exact continuations");
+                }
+                AiArmyPlanner.RepairReleaseForQa=(id,tick,reason,_)=>{
+                    if(id!=army)return;
+                    originalRelease=reason;releaseTick=tick;
+                };
+                try
+                {
+                    for(int i=0;i<(injectReinforcements?900:1600)&&!resume&&originalRelease==null;i++)
+                    {
+                        NativeStep(a,routes);if(twin!=null){NativeStep(twin,routes);ExactByteAssert.AreEqual(a.CaptureBytes(),twin.CaptureBytes(),"Exact native replay after withdrawal checkpoint");}
+                        var phase=planner.Capture().Phase;retreat|=phase==AiArmyPhase.Retreating;recover|=phase==AiArmyPhase.Recovering;resume=recover&&(phase==AiArmyPhase.Staging||phase==AiArmyPhase.Advancing||phase==AiArmyPhase.Engaging);
+                        if(retreat&&lastSeenAtRetreat<0)lastSeenAtRetreat=planner.Capture().LastSeenTick;
+                        if(planner.Capture().Reason=="recovered"&&recoveredTick<0)recoveredTick=a.Tick;
+                        if(originalRelease!=null)break;
+                        if(retreat&&planner.Active)Assert.AreEqual(army,planner.Capture().ArmyId,"Original army owns the entire retreat/recovery cycle");
+                        if(pendingRestore&&phase==AiArmyPhase.Retreating&&injectReinforcements&&!pursuersDisengaged)
+                        {
+                            // The human pursuers disengage through actual authority after
+                            // the original army has committed to withdrawal. Leaving them
+                            // firing indefinitely destroyed the original receiving core.
+                            for(int n=0;n<hostileWave.Length;n++)
+                            {
+                                var order=new PlayableCommand(71,n+1,"enemy-1",PlayableCommandKind.Move,new[]{hostileWave[n]},new NavPoint(11+n*2,14));
+                                Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(order).Status);
+                                Assert.AreEqual(PlayableCommandStatus.Applied,twin.Apply(order).Status);
+                            }
+                            ExactByteAssert.AreEqual(a.CaptureBytes(),twin.CaptureBytes());
+                            pursuersDisengaged=true;
+                        }
+                        // Release the wave behind the retiring army once its
+                        // original members all hold a native withdrawal order.
+                        // Follow still requires physical recovery of that core.
+                        if(pursuersDisengaged&&injectedIds.Count==0&&phase==AiArmyPhase.Retreating&&
+                            a.ParticipantView("player-1").Entities.Where(u=>initial.ContainsKey(u.Id))
+                                .All(u=>u.OrderStamp?.Origin==PlayableOrderOrigin.Ai&&u.OrderStamp.Kind==PlayableCommandKind.Move))
+                        {
+                            SpawnWaveMember();
+                            SpawnWaveMember();
+                        }
+                        if(injectedIds.Count==2&&injectedIds.Any(id=>registry.ArmyFor(id)==army))
+                            SpawnWaveMember();
+                        // Keep both fixtures physically identical through the
+                        // wave join. The positive branch reacquires the objective
+                        // from real unit vision before the army can resume.
+                        if(visibleObjective&&!sightRestored&&injectedIds.Count==wavePositions.Length)
+                        {
+                            var original=registry.CaptureArmy(army).Single();
+                            if(injectedIds.All(id=>original.Members.Contains(id)&&!original.Reinforcements.Contains(id)))
+                            {
+                                RestoreSight(domain);
+                                RestoreSight(twin.Domain);
+                                ExactByteAssert.AreEqual(a.CaptureBytes(),twin.CaptureBytes(),"Reacquired sight in both exact continuations");
+                                sightRestored=true;
+                            }
+                        }
+                        if(injectedIds.Count>0&&phase==AiArmyPhase.Retreating)
+                        {
+                            var original=registry.Capture().Armies.Single(g=>g.Id==army);
+                            Assert.False(injectedIds.Any(id=>original.Members.Contains(id)&&!original.Reinforcements.Contains(id)),
+                                "No wave member may join an original core that is still retreating");
+                        }
+                        var view=a.ParticipantView("player-1");moved|=view.Entities.Any(u=>initial.ContainsKey(u.Id)&&!initial[u.Id].Equals(u.Position));
+                        if(phase==AiArmyPhase.Retreating&&!pendingRestore&&(long)Field(planner,"pendingId")!=0)
+                        {twin=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c,ai);ExactByteAssert.AreEqual(a.CaptureBytes(),twin.CaptureBytes());pendingRestore=true;}
+                        if(phase==AiArmyPhase.Retreating&&!effectiveRestore&&view.Entities.Any(u=>registry.ArmyFor(u.Id)==army&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&u.OrderStamp?.Origin==PlayableOrderOrigin.Ai))
+                        {var copy=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c,ai);ExactByteAssert.AreEqual(a.CaptureBytes(),copy.CaptureBytes());effectiveRestore=true;long tick=a.Tick;long progress=planner.Capture().ProgressTick;for(int n=0;n<3;n++){Assert.True(a.TryAdvance(paused:true));if(twin!=null)Assert.True(twin.TryAdvance(paused:true));}Assert.AreEqual(tick,a.Tick);Assert.AreEqual(progress,planner.Capture().ProgressTick);if(twin!=null)ExactByteAssert.AreEqual(a.CaptureBytes(),twin.CaptureBytes());}
+                        if(i%60==0)TestContext.WriteLine("A5 actual lifecycle "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,Mission=planner.Capture(),Army=registry.Capture().Armies.FirstOrDefault(x=>x.Id==army),Units=view.Entities.Where(u=>initial.ContainsKey(u.Id)),Records=a.CaptureDiagnosticCheckpoints().Single().Records.TakeLast(8)}));
+                    }
+                }
+                finally { AiArmyPlanner.RepairReleaseForQa=null; }
+                TestContext.WriteLine("A5 final lifecycle "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,Mission=planner.Capture(),Registry=registry.Capture(),OriginalRelease=originalRelease,ReleaseTick=releaseTick,InjectedIds=injectedIds.ToArray(),Snapshot=a.ParticipantView("player-1").Entities,Records=a.CaptureDiagnosticCheckpoints().Single().Records.TakeLast(12)}));
+                Assert.True(retreat,"Original mission must enter retreat");Assert.True(moved,"Original units must move");Assert.True(pendingRestore,"Pending retreat checkpoint must restore exactly");Assert.True(effectiveRestore,"Installed retreat checkpoint must restore exactly");Assert.True(recover,"Physical safe native arrival is required");if(injectReinforcements)
+                {
+                    Assert.IsNull(originalRelease,"The original mission remains in charge of recovery.");
+                    Assert.AreEqual(wavePositions.Length,injectedIds.Count);
                     var g=registry.Capture().Armies.Single(x=>x.Id==army);Assert.True(injectedIds.All(id=>g.Members.Contains(id)&&!g.Reinforcements.Contains(id)),"All three healthy fixture reinforcements must actually join through strict native assembly");
                     var view=PlayableAiObservation.From(a.ParticipantView("player-1"));var line=view.Entities.Where(u=>g.Members.Contains(u.Id)&&!g.Reinforcements.Contains(u.Id)&&AiRosterCatalog.Initial.For(u.Kind).lineWeight>0).ToArray();
                     Assert.GreaterOrEqual(AiDefensePlanner.Force(line,c.Profile,AiProfile.Initial),AiDefensePlanner.Force(new[]{new PlayableEntitySnapshot(999,view.Owner,PlayableEntityKind.Tank,default,c.Profile.TankHealth,false,0,0,0)},c.Profile,AiProfile.Initial)*AiProfile.Initial.Value("armies.minimumUnits"));
                     if(visibleObjective)
                     {
+                        Assert.True(sightRestored);
                         Assert.True(resume,"Recovered original army must resume pressure/retask after native reinforcement assembly");Assert.True(view.Vision.IsVisible(planner.Capture().Target));Assert.True(view.Buildings.Any(b=>b.Id==planner.Capture().TargetId&&view.IsHostile(b.Owner)&&b.Health>0),"The original objective is genuinely owner-visible at native resume");
                     }
                     else
@@ -380,8 +515,9 @@ namespace Spacewars.Tests.EditMode
                 }
                 else
                 {
-                    Assert.False(planner.Active,"No fixture reinforcements: underpowered native recovery must release within the existing stall bound");
-                    Assert.AreEqual("withdrawal no meaningful progress deadline",planner.Capture().Reason);
+                    Assert.AreEqual(AiArmyPhase.Disbanded,registry.CaptureArmy(army).Single().Phase,"Underpowered original mission releases within the existing stall bound");
+                    Assert.AreEqual("withdrawal no meaningful progress deadline",originalRelease);
+                    Assert.GreaterOrEqual(releaseTick,0);
                 }
                 a.Stop();Assert.False(planner.Active);Assert.True(registry.Capture().Armies.All(x=>x.Phase==AiArmyPhase.Disbanded));twin?.Stop();
             }
@@ -402,14 +538,35 @@ namespace Spacewars.Tests.EditMode
             Assert.True((bool)method.Invoke(null,new object[]{original,default(NavPoint),escape,p.TankCollisionRadius,p}),"This departure is safe against the initial frontline");
             Assert.False((bool)method.Invoke(null,new object[]{o,default(NavPoint),escape,p.TankCollisionRadius,p}),"A separate initially unexposed weapon envelope cannot be crossed");
         }
-        private static OfflineMatchConfiguration A5DeliveryConfig()
+        private static OfflineMatchConfiguration A5DeliveryConfig(bool noAffordableReinforcements=false,bool combatOnly=false)
         {
-            var c=A4NativeConfig();var home=new NavPoint(-28,0);var factory=new NavPoint(-28,-9);var refinery=new NavPoint(-28,10);
+            var c=A4NativeConfig();
+            const double homeX=-28;
+            var home=new NavPoint(homeX,0);var factory=new NavPoint(homeX,-9);var refinery=new NavPoint(homeX,10);
+            // Keep the original anchors while allowing their common defensive ring.
+            var data=c.Profile.CopyData();data.arenaHalfExtent=36;
+            if(combatOnly)
+            {
+                // All factories and fighters needed here are already authored.
+                // Funding would reserve one of those fighters for the opening
+                // before the mission forms and start an unrelated economic race.
+                data.startingCredits=0;data.headquartersIncomePerPeriod=0;
+                data.refineryIncomePerPeriod=0;data.outpostIncomePerPeriod=0;
+            }
+            if(noAffordableReinforcements)
+            {
+                // The no-wave control isolates an underpowered original
+                // core without paid replacements from later queues.
+                data.tankCreditCost=5000;data.explorerCreditCost=5000;
+                data.shkvalCreditCost=5000;data.hawkCreditCost=5000;
+            }
+            var p=PlayableProfile.Create(data);
+            var homeSlots=new[]{new TerritorySlot(1,factory,0),new TerritorySlot(2,refinery,0),c.Sites.Single(s=>s.Id==1).Slots.Single(s=>s.Id==3)};
             // Authored post-opening battle: economic anchors stay behind both the frontline and crossing envelope.
-            var starts=c.Starts.Select((start,i)=>i==0?new OfflineStart(start.Id,start.SiteId,home,new NavPoint(-28,6),start.Heading,start.PinnedLogicalPlayer):start).ToArray();
-            var sites=c.Sites.Select(site=>site.Id!=1?site:new TerritorySite(site.Id,site.Kind,home,new[]{new TerritorySlot(1,factory,0),new TerritorySlot(2,refinery,0)})).ToArray();
-            var buildings=c.ScenarioBuildings.Select(b=>b.LogicalPlayer!=1?b:new OfflineScenarioBuilding(1,b.Kind,b.SiteId,b.SlotId,b.Kind==PlayableBuildingKind.Factory?factory:refinery,b.Heading)).ToArray();
-            return new OfflineMatchConfiguration(c.Profile,c.SourceIdentity,c.MapIdentity,c.RouteProvenance,c.Seed,c.Roster.ToArray(),starts,sites,c.Obstacles.ToArray(),new double[,]{{0,100},{100,0}},scenario:c.ScenarioUnits.ToArray(),scenarioBuildings:buildings);
+            var starts=c.Starts.Select((start,i)=>i==0?new OfflineStart(start.Id,start.SiteId,home,new NavPoint(homeX,6),start.Heading,start.PinnedLogicalPlayer):start).ToArray();
+            var sites=c.Sites.Select(site=>site.Id!=1?site:new TerritorySite(site.Id,site.Kind,home,homeSlots)).ToArray();
+            var buildings=c.ScenarioBuildings.Select(b=>b.LogicalPlayer!=1?b:new OfflineScenarioBuilding(1,b.Kind,b.SiteId,b.SlotId,homeSlots.Single(s=>s.Id==b.SlotId).Position,b.Heading)).ToArray();
+            return new OfflineMatchConfiguration(p,c.SourceIdentity,c.MapIdentity,c.RouteProvenance,c.Seed,c.Roster.ToArray(),starts,sites,c.Obstacles.ToArray(),new double[,]{{0,100},{100,0}},scenario:c.ScenarioUnits.ToArray(),scenarioBuildings:buildings);
         }
         [TestCase(false)][TestCase(true)] public void Retreat_ActualPendingWithdrawalRechecksMovingVisibleEnemyBeforeSequence(bool intrusion)
         {

@@ -47,7 +47,7 @@ namespace Spacewars.Presentation
                 Part("Grid floor",centers[i]+Vector3.down*.15f,new Vector3(50,.2f,50),floor,layer);
                 for(int k=-24;k<=24;k+=2){Part("Grid",centers[i]+new Vector3(k,-.04f,0),new Vector3(.018f,.01f,50),line,layer);Part("Grid",centers[i]+new Vector3(0,-.04f,k),new Vector3(50,.01f,.018f),line,layer);}
                 var camera=new GameObject("Showcase camera "+i).AddComponent<Camera>();camera.transform.SetParent(transform);camera.rect=new Rect(i/3f,0,1/3f,1);camera.cullingMask=1<<layer;camera.orthographic=true;camera.orthographicSize=3.7f;camera.clearFlags=CameraClearFlags.SolidColor;camera.backgroundColor=new Color(.12f,.16f,.20f);camera.nearClipPlane=.1f;camera.farClipPlane=100;Cameras[i]=camera;
-                weapons[i]=new HawkWeapon(i==2?gameplay.HawkUpgradedPreparationSeconds:gameplay.HawkPreparationSeconds,i==2?gameplay.HawkUpgradedSalvoDelay:gameplay.HawkSalvoDelay,i==2?gameplay.HawkUpgradedReloadSeconds:gameplay.HawkReloadSeconds);
+                weapons[i]=new HawkWeapon(i==2?gameplay.HawkUpgradedPreparationSeconds:gameplay.HawkPreparationSeconds,i==2?gameplay.HawkUpgradedSalvoDelay:gameplay.HawkSalvoDelay,PlayableUnitRules.HawkSalvoPause(gameplay));
                 Part("Target",centers[i]+new Vector3(0,2.8f,6),Vector3.one*.7f,target,layer,PrimitiveType.Sphere);
             }
             Present();

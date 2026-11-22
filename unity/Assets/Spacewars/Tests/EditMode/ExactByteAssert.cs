@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 
 namespace Spacewars.Tests.EditMode
@@ -15,6 +16,8 @@ namespace Spacewars.Tests.EditMode
             }
             if (expected.Length != actual.Length)
                 Assert.Fail(message + " byte length expected=" + expected.Length + " actual=" + actual.Length);
+            if (expected.AsSpan().SequenceEqual(actual))
+                return;
             for (int i = 0; i < expected.Length; i++)
                 if (expected[i] != actual[i])
                     Assert.Fail(message + " byte mismatch index=" + i + " expected=" + expected[i] + " actual=" + actual[i]);

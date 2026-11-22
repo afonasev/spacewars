@@ -170,7 +170,24 @@ namespace Spacewars.Runtime
                                 : goalLocation.SurfaceId==NavLocation.FlatSurface);
                         }else goalValid=Crowd.Locate(row.Goal,actor.Radius,out goalLocation);
                         if(!goalValid||!basis.IsFree(row.Goal,actor.Radius)||c.GeometryChange&&geometryQueued+registered>=RouteRequestCapacity){
-                            if(!c.GeometryChange)return null;row.GeometryRejected=true;c.OrdinaryCount--;if(old!=null){c.NextFailures.Remove(row.Entity);int nameIndex=c.PreparedBacking.CrowdNames.Find(row.Entity);if(nameIndex<0)return false;row.ArrivalFailureNames=NavigationPreparedCrowdNameWrite.CreateOwned(c.PreparedBacking.CrowdNames,nameIndex,old,r);}continue;
+                            if(!c.GeometryChange)return null;
+                            row.GeometryRejected=true;c.OrdinaryCount--;
+                            if(old!=null){
+                                c.NextFailures.Remove(row.Entity);
+                                int nameIndex=c.PreparedBacking.CrowdNames.Find(row.Entity);
+                                if(nameIndex<0)return false;
+                                row.ArrivalFailureNames=NavigationPreparedCrowdNameWrite.CreateOwned(c.PreparedBacking.CrowdNames,nameIndex,old,r);
+                            }else if(actor.Active&&actor.Installed.Request.Request.Goal.Equals(row.Goal)){
+                                foreach(var foundation in c.Foundations){
+                                    if(foundation.Footprint(c.GeometryDomain).DistanceSquared(row.Goal)>actor.Radius*actor.Radius)continue;
+                                    // A permanent footprint closed the installed endpoint. Drop
+                                    // the retained intent before a subsequent rebind can retry it.
+                                    row.InstalledGoalClosedByFoundation=true;
+                                    c.NextGoals.Remove(row.Entity);
+                                    break;
+                                }
+                            }
+                            continue;
                         }
                         row.Next=NavigationHostRequest.CreateOwned(Generation,checked(++c.NextSequence),row.Entity,checked(c.SourceOrders[row.Entity]+1),nextProfile.ForUnit(actor.Radius,actor.TargetSpeed,actor.TargetTurn),RebindMovementGeometry(c,actor,basis),actor.Position,row.Goal,basis,RebindHeldIdentity(c,actor),new NavigationMemberIdentity(actor.Incarnation,actor.Mobility,metadata.GroupId,member.OrderRevision,RemovalMembership(c,metadata.GroupId,metadata.MembershipRevision)),actor.Location,goalLocation,null,r);
                         if(c.GeometryChange)geometryQueued++;member.Goal=row.Goal;member.GoalLocation=goalLocation;member.HasGoal=true;member.MobilityRevision=actor.Mobility;member.Reservation=row.Entity;member.Phase=actor.Held?GroupMemberPhase.Held:member.FormationReleased?GroupMemberPhase.Combat:GroupMemberPhase.PendingRoute;
@@ -204,7 +221,18 @@ namespace Spacewars.Runtime
                     if(c.FifoCount>0){c.RetiredQueue=liveProbeAnswers;liveProbeAnswers=c.SourceQueue.TakeResetNoThrow();}c.RetiredBarrier=TakeAllBarrierAnswersNoThrow();if(c.Bootstrap==null)mailbox.TakeBatchNoThrow(c.RetiredRequests);answers.TakeBatchNoThrow(c.RetiredAnswers);answerCorridorBytes=c.PostAnswerBytes;
                     foreach(var row in c.Retries)if(!row.Assigned&&!row.GeometryRejected&&!row.GeometryCarried&&!row.Removed)mailbox.AppendOneNoThrow(row.Next.Request,row.Next);requestSequence=c.NextSequence;if(PublishAdmissionOwnerNoThrow(c.Admission))c.Admission=null;authorityOperationIdentity=c.Operation+(c.BalanceDomain==null?1:2);OwnedRebindPublications++;c.TransferNoThrow();LastOwnedRebindPublicationAllocatedBytes=GC.GetAllocatedBytesForCurrentThread()-before;
                 }};
-                using(PerformanceProfile.Measure(ProfileStage.WreckPublish)){using(EnterTransport())scope.Publish(c,publish);scope.ResolveCommitted();}NavArrivalDiagnostic.Buffer?.Transition(c.GeometryChange?"geometry-rebind":"profile-rebind",((NavGeometry)c.SourceCore.Geometry.Facade).Revision,geometry.Revision,c.Operation,c.NextSequence,c.AllocatingRows,c.Sequence,((long)((NavigationProfile)c.SourceCore.Profile.Facade).Revision<<32)|(uint)profile.Revision);FinishPreparedBalance(c);foreach(var row in c.Retries){if(row.Removed){MovementCancelled?.Invoke(row.Entity);continue;}if(row.GeometryCarried)continue;if(row.GeometryRejected){if(row.Source!=null)RouteFailed?.Invoke(row.Source.Request,NavigationOutcome.Rejected);MovementCancelled?.Invoke(row.Entity);}else if(row.Assigned)EndpointAssigned?.Invoke(row.Next.Request);else RouteRequested?.Invoke(row.Next.Request);}SignalHost();return true;
+                using(PerformanceProfile.Measure(ProfileStage.WreckPublish)){using(EnterTransport())scope.Publish(c,publish);scope.ResolveCommitted();}NavArrivalDiagnostic.Buffer?.Transition(c.GeometryChange?"geometry-rebind":"profile-rebind",((NavGeometry)c.SourceCore.Geometry.Facade).Revision,geometry.Revision,c.Operation,c.NextSequence,c.AllocatingRows,c.Sequence,((long)((NavigationProfile)c.SourceCore.Profile.Facade).Revision<<32)|(uint)profile.Revision);FinishPreparedBalance(c);
+                foreach(var row in c.Retries){
+                    if(row.Removed){MovementCancelled?.Invoke(row.Entity);continue;}
+                    if(row.GeometryCarried)continue;
+                    if(row.GeometryRejected){
+                        if(row.Source!=null)RouteFailed?.Invoke(row.Source.Request,NavigationOutcome.Rejected);
+                        if(row.InstalledGoalClosedByFoundation)c.GeometryDomain.RetireTacticalMoveForClosedFoundation(c.Actors[row.ActorIndex].Installed.Request.Request);
+                        MovementCancelled?.Invoke(row.Entity);
+                    }else if(row.Assigned)EndpointAssigned?.Invoke(row.Next.Request);
+                    else RouteRequested?.Invoke(row.Next.Request);
+                }
+                SignalHost();return true;
             }catch(InvalidOperationException error){if(c?.Published==true)throw;if(geometryTarget!=null)LastGeometryPreparationFailure=error;return false;}finally{c?.ReleaseRemovalDrafts();c?.Dispose();}}
         }
     }

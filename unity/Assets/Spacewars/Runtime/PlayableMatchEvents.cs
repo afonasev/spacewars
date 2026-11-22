@@ -15,6 +15,6 @@ namespace Spacewars.Runtime
         }
         private PlayableMatchEvent[] MatchEvents(PlayableOwner? owner=null)
             =>matchEvents.Where(e=>Tick-e.Tick<=profile.NotificationHistorySeconds*30&&
-                (owner.HasValue?e.Owner==owner.Value:e.Battle)).ToArray();
+                (e.Shared||(owner.HasValue?(e.Teamwide?!Hostile(e.Owner,owner.Value):e.Owner==owner.Value):e.Battle))).ToArray();
     }
 }

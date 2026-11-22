@@ -128,7 +128,60 @@ namespace Spacewars.Runtime
             }
         }
         private GroupMemberPhase CurrentMemberPhase(int entity,NavUnit actor,GroupMemberState member)
-            =>member.FormationReleased?GroupMemberPhase.Combat:actor.Held?GroupMemberPhase.Held:IsPending(entity)?GroupMemberPhase.PendingRoute:actor.Moving?GroupMemberPhase.March:actor.Outcome==NavigationOutcome.Arrived?GroupMemberPhase.Arrived:actor.Outcome==NavigationOutcome.Unreachable?GroupMemberPhase.Unreachable:actor.Outcome==NavigationOutcome.Blocked||actor.Outcome==NavigationOutcome.Rejected?GroupMemberPhase.Blocked:GroupMemberPhase.Stopped;
+            =>CurrentMemberPhase(entity,actor,member.FormationReleased);
+        private GroupMemberPhase CurrentMemberPhase(int entity,NavUnit actor,bool released)
+            =>released?GroupMemberPhase.Combat:actor.Held?GroupMemberPhase.Held:IsPending(entity)?GroupMemberPhase.PendingRoute:actor.Moving?GroupMemberPhase.March:actor.Outcome==NavigationOutcome.Arrived?GroupMemberPhase.Arrived:actor.Outcome==NavigationOutcome.Unreachable?GroupMemberPhase.Unreachable:actor.Outcome==NavigationOutcome.Blocked||actor.Outcome==NavigationOutcome.Rejected?GroupMemberPhase.Blocked:GroupMemberPhase.Stopped;
+        // Detached inputs for one post-movement observation. The owning group publishes
+        // one tick for the observed rows. A missing observation retains its old stamp.
+        private struct ContactRow
+        {
+            internal NavigationAuthorityMember.Values State;
+            internal NavLocation? Goal;
+            internal string PreviousPhase;
+            internal bool? Contact;
+
+            internal ContactRow(GroupMemberState member)
+            {
+                State=new NavigationAuthorityMember.Values(member);
+                Goal=member.GoalLocation;
+                PreviousPhase=member.ContactPhase;
+                Contact=null;
+            }
+
+            internal NavigationAuthorityMember Publish(long tick,INavStorageReservation reservation)
+            {
+                var data=State;
+                if(Contact.HasValue){
+                    data=new NavigationAuthorityMember.Values(data,data.MobilityRevision,data.Phase,
+                        data.Reservation,Contact.Value,tick);
+                }
+                return NavigationAuthorityMember.CopyOwned(data,Goal,
+                    Contact.HasValue?"PostMovementVisibility":PreviousPhase,reservation);
+            }
+        }
+
+        private static readonly long ContactRowScratchBytes=Math.Max(
+            9L+NavStorageLayout.ObjectBytesBound(typeof(GroupMemberState)),
+            NavStorageLayout.ValueBytes(typeof(ContactRow)));
+
+        // Valid only during one contact pass and under the transport lock. Slot
+        // replacement, insertion and removal all advance the backing revision.
+        private struct ContactOwnership
+        {
+            private NavigationCommandSlots<long,GroupOrderState> groups;
+            private int revision;
+
+            internal bool Check(NavigationSession session,NavigationCommandSlots<long,GroupOrderState> current)
+            {
+                if(session.pending.Count!=0||session.probes.Count!=0)return session.CanOwnAdmissionProjection();
+                if(ReferenceEquals(current,groups)&&current.Revision==revision)return true;
+                if(!session.CanOwnAdmissionProjection())return false;
+                groups=current;
+                revision=current.Revision;
+                return true;
+            }
+        }
+
         private void RefreshOwnedGroupMembers()
         {
             if(!(memberGroups is NavigationCommandSlots<int,long> slots))return;
@@ -144,15 +197,26 @@ namespace Spacewars.Runtime
             if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,admissionPublicationIdentity,out var scratchScope))return false;
             try{using(scratchScope)using(NavStorageScratch.Reserve(scratchScope.OwnedReservation(),checked(512L+8L*count))){
                 var seen=new long[count];int used=0;bool complete=true;
-                foreach(int entity in entities){
-                    long group;using(EnterTransport()){if(!memberGroups.TryGetValue(entity,out group))continue;}
-                    bool visited=false;for(int i=0;i<used;i++)if(seen[i]==group){visited=true;break;}if(visited)continue;
-                    seen[used++]=group;using(PerformanceProfile.Measure(ProfileStage.ContactPublish))if(!TryOwnedGroupContacts(group,detect,tick,afterPublish))complete=false;
+                using(EnterTransport()){
+                    foreach(int entity in entities){
+                        if(!memberGroups.TryGetValue(entity,out long group))continue;
+                        bool visited=false;for(int i=0;i<used;i++)if(seen[i]==group){visited=true;break;}
+                        if(!visited)seen[used++]=group;
+                    }
                 }
+                var ownership=new ContactOwnership();
+                for(int i=0;i<used;i++)
+                    using(PerformanceProfile.Measure(ProfileStage.ContactPublish))
+                        if(!PublishGroupContacts(seen[i],detect,tick,afterPublish,ref ownership))complete=false;
                 return complete;
             }}catch(NavigationRetentionBudget.CapacityRefused){return false;}
         }
         internal bool TryOwnedGroupContacts(long groupId,Func<int,bool?> detect,long tick,Action<int,bool> afterPublish=null)
+        {
+            var ownership=new ContactOwnership();
+            return PublishGroupContacts(groupId,detect,tick,afterPublish,ref ownership);
+        }
+        private bool PublishGroupContacts(long groupId,Func<int,bool?> detect,long tick,Action<int,bool> afterPublish,ref ContactOwnership ownership)
         {
             NavigationLiveGroupObservation observation;NavigationHostRoot host;NavigationAuthorityOwners authority;NavigationAdmissionStorage observedAdmission;
             long operation,publication;GroupOrderState record;
@@ -161,7 +225,7 @@ namespace Spacewars.Runtime
                 if(!(groups is NavigationCommandSlots<long,GroupOrderState> slots)||!(slots.OwnerFor(groupId)is NavigationLiveGroup owner))return false;
                 // Compatibility ingress is still raw until host registration.
                 // Defer this owned write; never admit an unowned pending edge.
-                if(!CanOwnAdmissionProjection())return false;
+                if(!ownership.Check(this,slots))return false;
                 observation=owner.ObserveForCopy(ObserveLiveWriteToken());host=committedHostRoot;authority=authorityOwners;host?.Retain();authority?.Retain();
                 operation=authorityOperationIdentity;publication=admissionPublicationIdentity;observedAdmission=admissionOwner;observedAdmission?.Retain();
             }
@@ -169,28 +233,45 @@ namespace Spacewars.Runtime
                 if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope))return false;
                 using(scope){NavigationAuthorityGroup version=null;NavigationPreparedGroupWrite write=null;bool published=false,admissionPublished=false;
                     try{
-                        using(NavStorageScratch.Reserve(scope.OwnedReservation(),checked(512L+NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+32L+(8L+NavStorageLayout.ObjectBytesBound(typeof(GroupMemberState)))*observation.Version.Members.Count))){
-                            GroupOrderState values;
+                        var reservation=scope.OwnedReservation();
+                        int count=observation.Version.Members.Count;
+                        long scratch=checked(576L+NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+ContactRowScratchBytes*count);
+                        using(NavStorageScratch.Reserve(reservation,scratch)){
+                            var rows=new ContactRow[count];
+                            GroupOrderState header;
                             using(EnterTransport()){
                                 if(operation!=authorityOperationIdentity||publication!=admissionPublicationIdentity||!observation.Owner.MatchesObservation(observation))return false;
-                                values=record.Copy();
+                                header=record.CopyHeader();
+                                header.Members=null;
+                                for(int i=0;i<count;i++)rows[i]=new ContactRow(record.Members[i]);
                             }
-                            for(int i=0;i<values.Members.Length;i++){
-                                var value=values.Members[i];bool? contact=detect(value.Entity);
-                                if(!contact.HasValue)continue;
-                                if(value.FormationReleased!=contact.Value){values.MarchAnchor=0;values.MarchInitialized=false;}
-                                value.FormationReleased=contact.Value;value.ContactTick=tick;value.ContactPhase="PostMovementVisibility";
-                                using(EnterTransport()){
-                                    if(operation!=authorityOperationIdentity||!observation.Owner.MatchesObservation(observation)||!Crowd.TryGet(value.Entity,out var actor)||actor.Incarnation!=value.Incarnation)return false;
-                                    value.MobilityRevision=actor.MobilityRevision;
-                                    if(allocating.ContainsKey(value.Entity))value.Phase=GroupMemberPhase.Allocating;
-                                    else{value.Reservation=reservations.ContainsKey(value.Entity)?value.Entity:0;value.Phase=CurrentMemberPhase(value.Entity,actor,value);}
+                            for(int i=0;i<count;i++){
+                                ref var row=ref rows[i];
+                                row.Contact=detect(row.State.Entity);
+                                if(row.Contact.HasValue&&row.Contact.Value!=row.State.FormationReleased){
+                                    header.MarchAnchor=0;
+                                    header.MarchInitialized=false;
                                 }
                             }
-                            version=NavigationAuthorityGroup.CopyWithContactBatchOwned(observation.Version,new NavigationAuthorityGroup.Values(values),i=>NavigationAuthorityMember.CopyOwned(values.Members[i],scope.OwnedReservation()),scope.OwnedReservation());
+                            using(EnterTransport()){
+                                if(operation!=authorityOperationIdentity||!observation.Owner.MatchesObservation(observation))return false;
+                                for(int i=0;i<count;i++){
+                                    ref var row=ref rows[i];
+                                    if(!row.Contact.HasValue)continue;
+                                    var old=row.State;
+                                    if(!Crowd.TryGet(old.Entity,out var actor)||actor.Incarnation!=old.Incarnation)return false;
+                                    bool isAllocating=allocating.ContainsKey(old.Entity);
+                                    long heldReservation=isAllocating?old.Reservation:reservations.ContainsKey(old.Entity)?old.Entity:0;
+                                    var phase=isAllocating?GroupMemberPhase.Allocating:CurrentMemberPhase(old.Entity,actor,row.Contact.Value);
+                                    if(old.Phase!=phase||old.MobilityRevision!=actor.MobilityRevision||old.Reservation!=heldReservation)
+                                        row.State=new NavigationAuthorityMember.Values(old,actor.MobilityRevision,phase,heldReservation,old.FormationReleased,old.ContactTick);
+                                }
+                            }
+                            version=NavigationAuthorityGroup.CopyWithContactBatchOwned(observation.Version,new NavigationAuthorityGroup.Values(header),
+                                i=>rows[i].Publish(tick,reservation),reservation);
                         }
                         write=NavigationPreparedGroupWrite.CreateOwned(observation,version,-2,scope);
-                        bool reuse;using(EnterTransport())reuse=operation==authorityOperationIdentity&&ReferenceEquals(observedAdmission,admissionOwner)&&admissionBatchDepth==0&&commandGroup==null&&observedAdmission!=null&&observedAdmission.Value.PublishedThroughRequestSequence==requestSequence&&observedAdmission.Groups.Count==groups.Count&&observedAdmission.Requests.Count==pending.Count+probes.Count&&observedAdmission.MatchesGroupReplacement(version);
+                        bool reuse;using(EnterTransport())reuse=operation==authorityOperationIdentity&&ReferenceEquals(observedAdmission,admissionOwner)&&admissionBatchDepth==0&&commandGroup==null&&observedAdmission!=null&&observedAdmission.Value.PublishedThroughRequestSequence==requestSequence&&observedAdmission.Groups.Count==groups.Count&&observedAdmission.Requests.Count==pending.Count+probes.Count&&observedAdmission.MatchesContactReplacement(version);
                         if(reuse){observedAdmission.Retain();write.Admission=observedAdmission;}
                         else write.Admission=PrepareAdmissionProjection(groups,pending,requestSequence,checked(publication+1),operation,scope,observedAdmission,version);
                         write.RequireEdge(write.Admission);scope.Attach(write);

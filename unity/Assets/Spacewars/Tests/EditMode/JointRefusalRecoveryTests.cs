@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using NUnit.Framework;
+using Spacewars.Presentation;
 using Spacewars.Simulation;
 using Spacewars.Runtime;
 namespace Spacewars.Tests.EditMode
@@ -32,17 +33,88 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void WideStagingRecoveryUsesAcceptedWaypointWhenTemporaryFrontierIsOccupied()
         {
-            var map=ThreeCrossingsMap.Default;var profile=PlayableProfile.RecastGroupCorridorDefault.Navigation;
-            var s=new NavigationSession(805,new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision),profile,null,map);
-            try{
-                var from=new NavPoint(12.697164442559522,17.816507576646746);var accepted=new NavPoint(12.80000114440918,35.400001525878906);var frontier=new NavPoint(11.6,from.Z);
-                var own=s.Crowd.Add(48,from,.58,7,7.5,new NavLocation(from,"bank/east"));own.Heading=Math.PI;Assert.True(s.Crowd.SetRoute(48,accepted,new[]{accepted},new NavLocation(accepted,"bank/east")));
-                foreach(var p in new[]{new NavPoint(11.6,17.439749167483455),new NavPoint(11.6,18.6)}){var peer=s.Crowd.Add(s.Crowd.Units.Count+100,p,.58,7,7.5,new NavLocation(p,"bank/east"));peer.Outcome=NavigationOutcome.Arrived;}
-                Assert.True(s.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,805,1,out var scope));using(scope){var frame=NavPreparedCrowdStep.Create(s.Crowd,3,scope.OwnedReservation());try{
-                    frame.Observe();int row=frame.Find(48);for(int tick=0;tick<15&&frame.After[row].localRoute.Length==0;tick++){frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.Guide|NavFormationFrameHint.StagingFeed,Target=frontier};frame.Compute(1d/30);}
-                    Assert.Greater(frame.Working.RepairCount,0);Assert.Greater(frame.After[row].localRoute.Length,0,"Recovery must not repeatedly fail toward an occupied temporary holding point.");Assert.Greater(frame.After[row].noProgressTicks,0,"The real failure enters bounded recovery rather than policy-wait masking.");Assert.AreEqual(accepted,frame.After[row].Goal);Assert.Less(frame.After[row].noProgressTicks,150);Assert.True(frame.After[row].Moving);
-                }finally{frame.Release();}scope.Discard();}
-            }finally{s.ReleaseCommittedHostRoot();}
+            var profile=PlayableProfile.RecastGroupCorridorDefault;
+            var map=profile.AuthoredMap;
+            var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);
+            var session=new NavigationSession(805,geometry,profile.Navigation,null,map){UsesRecastGroundRoutes=true};
+            try
+            {
+                var from=new NavPoint(12.697164442559522,17.816507576646746);
+                var goal=new NavPoint(-16,38);
+                var frontier=new NavPoint(11.6,from.Z);
+                var own=session.Crowd.Add(48,from,.58,7,7.5,new NavLocation(from,"bank/east"));
+                own.Heading=Math.PI;
+                Assert.True(session.Move(own.Id,goal));
+                using(var host=new UnityHostRouteService())
+                {
+                    var binding=new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort);
+                    for(int i=0;i<200&&session.PendingCount>0;i++){host.Service(binding,8);session.ApplyResults();}
+                }
+                Assert.AreEqual(1,session.AppliedResults);
+                var installed=(NavigationInstalledExecutionOwner)own.StorageOwner.InstalledExecution;
+                Assert.NotNull(installed);
+                var route=installed.Corridor.TypedRoute;
+                Assert.NotNull(route?.RecastPlan,"The staging motor requires a typed Recast route");
+                int entry=Enumerable.Range(0,route.Legs.Count).First(i=>route.Legs[i].Kind==NavTypedLegKind.Portal);
+                int exit=Enumerable.Range(entry+1,route.Legs.Count-entry-1).First(i=>route.Legs[i].Kind==NavTypedLegKind.Portal);
+                foreach(var point in new[]{new NavPoint(11.6,17.439749167483455),new NavPoint(11.6,18.6)})
+                {
+                    var peer=session.Crowd.Add(session.Crowd.Units.Count+100,point,.58,7,7.5,new NavLocation(point,"bank/east"));
+                    peer.Outcome=NavigationOutcome.Arrived;
+                }
+                Assert.True(session.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,805,1,out var scope));
+                using(scope)
+                {
+                    var reservation=scope.OwnedReservation();
+                    var frame=NavPreparedCrowdStep.Create(session.Crowd,session.Crowd.Units.Count,reservation);
+                    try
+                    {
+                        frame.Observe();
+                        int row=frame.Find(own.Id);
+                        var actor=frame.After[row];
+                        frame.BindRecast(row,route,NavRecastIntervals.Initial(route));
+                        Assert.True(RecastFormationGuide.TryLayout(route,route.Legs[entry].PortalId,route.Legs[exit].PortalId,
+                            profile.Navigation.ArrivalSlotSpacing,reservation,out var passage));
+                        // This scenario exercises full-width staging. Its installed
+                        // route runs along the south edge of the north bridge.
+                        var layout=new RecastFormationGuide.Layout(passage.Entry,passage.Exit,passage.Direction,
+                            passage.Length,passage.Low,passage.High,passage.Pitch,passage.Radius,preferDirectional:false);
+                        double limit=layout.Station(frontier);
+                        const double dt=1d/30;
+                        for(int tick=0;tick<15&&actor.localRoute.Length==0;tick++)
+                        {
+                            var hint=RecastFormationGuide.StagingApproach(frame,row,route,entry,layout,limit,0,0,0,1,actor.Speed,dt);
+                            if(tick==0)
+                            {
+                                Assert.AreNotEqual(0,hint.Flags&NavFormationFrameHint.Guide,"The current staging policy must offer a temporary guide");
+                                Assert.AreNotEqual(0,hint.Flags&NavFormationFrameHint.PreEntry);
+                                Assert.That(hint.Target.X,Is.EqualTo(frontier.X).Within(1e-9));
+                                Assert.That(hint.Target.Z,Is.EqualTo(frontier.Z).Within(1e-9));
+                            }
+                            frame.Formation[row]=hint;
+                            frame.Compute(dt);
+                            if(tick==0)Assert.AreEqual(hint.Target,frame.Motion[row].Target);
+                        }
+                        Assert.Greater(frame.Working.RepairCount,0);
+                        Assert.Greater(actor.localRoute.Length,0,"Recovery must not repeatedly fail toward an occupied temporary holding point.");
+                        Assert.Greater(actor.noProgressTicks,0,"The real failure enters bounded recovery rather than policy-wait masking.");
+                        Assert.AreEqual(goal,actor.Goal);
+                        Assert.AreSame(own.route,actor.route,"Local recovery preserves the accepted route");
+                        Assert.Less(actor.noProgressTicks,150);
+                        Assert.True(actor.Moving);
+                    }
+                    finally{frame.Release();}
+                    scope.Discard();
+                }
+            }
+            finally
+            {
+                session.ReleaseCommittedHostRoot();
+                session.DestroyNavigationAuthority();
+                Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);
+                Assert.Zero(session.PhysicalHostBudget.HeldBytes);
+                Assert.Zero(session.PhysicalHostBudget.ActiveScopes);
+            }
         }
         [Test] public void AdmittedRecoveryUsesAcceptedRouteAroundRecordedHoldingCurtain()
         {

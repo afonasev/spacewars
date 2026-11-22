@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
@@ -21,6 +22,57 @@ namespace Spacewars.Tests.EditMode
         static PlayableEntitySnapshot[] Enemy(int health=100)=>Enumerable.Range(101,10).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Enemy,PlayableEntityKind.Tank,new NavPoint(7+(id%2),((id-101)/2)*1.5-3),id==101?health:100,false,0,0,Math.PI,maxHealth:100)).ToArray();
         static AiArmyRegistry Army(PlayableAiObservation o,out long id)
         {var r=new AiArmyRegistry("player-1",Gen,Ai,AiDifficulty.Veteran);Assert.True(r.TryCreate(o,AiArmyRole.Attack,AiArmyPlanner.Policy,o.Entities.Where(u=>u.Owner==o.Owner).Select(u=>u.Id),out id));return r;}
+        [TestCase(true)]
+        [TestCase(false)]
+        public void NativeCombatReleasesOnlyCertifiedFocusOutsideRange(bool focus)
+        {
+            var starts=new[]{
+                new OfflineStart("west",1,new NavPoint(-25,-5),new NavPoint(-20,-5),pin:1),
+                new OfflineStart("east",2,new NavPoint(-9,21),new NavPoint(2,27),pin:2)};
+            var sites=starts.Select(s=>new TerritorySite(s.SiteId,PlayableBuildingKind.Headquarters,s.Position,Array.Empty<TerritorySlot>())).ToArray();
+            var shooterAt=new NavPoint(-17.5,15);
+            var targetAt=new NavPoint(shooterAt.X+P.TankRange+0.5,shooterAt.Z);
+            var config=new OfflineMatchConfiguration(P,"micro-focus-range","micro-focus-range","ordinary",7,
+                new[]{new OfflineParticipant("player-1",1,1,OfflineControl.Ai),new OfflineParticipant("enemy-1",2,2,OfflineControl.Human)},
+                starts,sites,Array.Empty<NavObstacle>(),new double[,]{{0,100},{100,0}},
+                scenario:new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Tank,shooterAt),new OfflineScenarioUnit(2,PlayableEntityKind.Tank,targetAt)});
+            var domain=new PlayableDomain(P,Gen,config);
+            var loop=new PlayableAiOwnerLoop(P,PlayableAiOpeningComposition.Initialize(7,"player-1",aiProfile:Ai),Gen,null,Ai,AiDifficulty.Veteran);
+            domain.ConfigureCombatExecutionOwners(()=>new[]{loop});
+            try
+            {
+                var view=domain.Snapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+                var shooter=view.Entities.Single(u=>u.Owner==PlayableOwner.Player&&u.Kind==PlayableEntityKind.Tank);
+                var enemy=view.Entities.Single(u=>u.Owner==PlayableOwner.Enemy&&u.Kind==PlayableEntityKind.Tank);
+                string source=PlayableAiOpeningComposition.SourceIdentity;
+                var action=new PlayableAiAction(1,"player-1",P.ProfileId,P.Revision,Gen,0,PlayableCommandKind.Attack,
+                    new[]{shooter.Id},enemy.Position,targetId:enemy.Id,seed:7,sourceIdentity:source);
+                var command=new PlayableCommand(Gen,1,"player-1",action.Kind,action.CopyEntityIds(),action.Target,
+                    targetId:enemy.Id,origin:PlayableOrderOrigin.Ai,source:source,jobId:1,actionId:1);
+                var applied=domain.Apply(command,out var message);
+                Assert.AreEqual(PlayableCommandStatus.Applied,applied,message);
+                if(focus)
+                {
+                    var micro=(AiCombatMicroPolicy)typeof(PlayableAiOwnerLoop).GetField("combatMicro",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(loop);
+                    micro.Commit(new AiCombatMicroPlan{Action=action,Phase=AiCombatMicroPhase.Focus,Army=1},Gen,domain.Tick);
+                    micro.Applied(action,1,domain.Tick,new AiReceiptIdentity(Gen,"player-1",1,1));
+                }
+                domain.Step(1d/30);
+                var current=domain.CombatExecutionActor(shooter.Id);
+                if(focus)
+                {
+                    Assert.IsNull(current.CurrentOrder);
+                    Assert.False(domain.Navigation.IsPending(shooter.Id));
+                    Assert.AreEqual(shooter.Position,current.Position);
+                }
+                else Assert.AreEqual(PlayableTacticalOrderKind.Attack,current.CurrentOrder?.Kind);
+            }
+            finally
+            {
+                domain.Navigation.ReleaseCommittedHostRoot();
+                domain.DestroyOwnedNavigation();
+            }
+        }
         [Test]
         public void TenOnTenUsesBoundedSubsetsAndExistingAssignmentsPreventOverkill()
         {
@@ -55,6 +107,23 @@ namespace Spacewars.Tests.EditMode
         {
             var o=View(Own(),Enemy(8));var armies=Army(o,out _);var micro=new AiCombatMicroPolicy();micro.Observe(o,P,Ai,AiDifficulty.Veteran,armies);
             var plan=micro.Plan(o,P,Ai,AiDifficulty.Veteran,armies);Assert.NotNull(plan);Assert.AreEqual(101,plan.Action.TargetId);Assert.AreEqual(1,plan.Action.EntityIds.Count);
+        }
+        [Test]
+        public void FocusCanFillRemainingDamageBudgetWithALighterShot()
+        {
+            var enemy=new PlayableEntitySnapshot(101,PlayableOwner.Enemy,PlayableEntityKind.Tank,new NavPoint(-5,0),10,false,0,0,0);
+            var own=new[]{
+                new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-7,0),100,false,enemy.Id,0,0),
+                new PlayableEntitySnapshot(2,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-8,0),100,false,0,0,0),
+                new PlayableEntitySnapshot(3,PlayableOwner.Player,PlayableEntityKind.Explorer,new NavPoint(-9,1),100,false,0,0,0)};
+            var observation=View(own,new[]{enemy});
+            var armies=Army(observation,out _);
+            var micro=new AiCombatMicroPolicy();
+            micro.Observe(observation,P,Ai,AiDifficulty.Veteran,armies);
+            var plan=micro.Plan(observation,P,Ai,AiDifficulty.Veteran,armies);
+            Assert.NotNull(plan);
+            Assert.AreEqual(enemy.Id,plan.Action.TargetId);
+            CollectionAssert.AreEqual(new[]{3},plan.Action.CopyEntityIds(),"Eight damage is already assigned. Add two, without assigning another eight.");
         }
         [Test]
         public void ACommonRetreatWithDifferentLocalAlternativesProducesOneGroupStopRatherThanTenStops()

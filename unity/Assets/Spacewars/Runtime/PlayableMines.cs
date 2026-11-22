@@ -23,7 +23,9 @@ namespace Spacewars.Runtime
             RefreshVision();double radius=OrbitalData.orbitalMineModelRadius;
             return Vision(owner).IsVisible(point)&&projectileGeometry.IsFree(point,radius)&&
                 (profile.AuthoredMap==null||profile.AuthoredMap.SupportsFootprint(point,radius))&&
-                !buildings.Values.Any(b=>b.Phase!=ConstructionPhase.Pending&&Distance(b.Position,point)<BuildingRadius(b.Kind)+radius);
+                !buildings.Values.Any(b=>b.Phase!=ConstructionPhase.Pending&&Distance(b.Position,point)<BuildingRadius(b.Kind)+radius)&&
+                !units.Values.Any(u => u.Health>0 && u.Air==null && Hostile(owner,u.Owner) &&
+                    TryActor(u.Id,out var actor) && OrbitalMinePlacement.Blocks(profile,point,actor.Position,actor.Location));
         }
         private void PlaceMine(PlayableOwner owner,NavPoint point)
         {
@@ -73,7 +75,7 @@ namespace Spacewars.Runtime
             }
             var prospective=new Dictionary<int,PlayableWreckSnapshot>();var removals=new List<Building>();
             foreach(var pair in total){
-                if(units.TryGetValue(pair.Key,out var unit)&&unit.Health<=pair.Value&&TryActor(unit.Id,out var actor))prospective.Add(unit.Id,CreateUnitWreck(unit,actor));
+                if(units.TryGetValue(pair.Key,out var unit)&&!Frozen(unit)&&unit.Health<=pair.Value&&TryActor(unit.Id,out var actor))prospective.Add(unit.Id,CreateUnitWreck(unit,actor));
                 if(buildings.TryGetValue(pair.Key,out var building)&&building.Health<=pair.Value*(building.Ready?1:profile.ConstructionDamageMultiplier))removals.Add(building);
             }
             var removedActors=prospective.Values.Where(w=>w.Kind!=PlayableEntityKind.Hawk).Select(w=>w.Id).ToArray();

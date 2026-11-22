@@ -17,6 +17,7 @@ Shader "Spacewars/TerritoryFog"
         _IndustrialFinish("Steel strength exponent concrete strength exponent",Vector)=(0,24,0,12)
         _FoundryPadBounds("Foundry pad center extent hex",Vector)=(0,0,1,0)
         _FoundryPadCenter("Foundry central foundation",Float)=0
+        _FoundryMineFogLimit("Maximum fog opacity on public Foundry mine yards",Float)=1
         _FoundryPadFinish("Foundry sand width scale foundation radius feather",Vector)=(2.25,3,3.5,.25)
         _FoundryPadPours("Foundry pour joint width contrast bay variation",Vector)=(.07,0,0,0)
         _FoundryPadAge("Foundry edge age width strength",Vector)=(2.5,0,0,0)
@@ -42,6 +43,8 @@ Shader "Spacewars/TerritoryFog"
         _RoadMask("Dirt road mask",2D)="black" {}
         _GroundTint("Ground tint",Color)=(.45,.46,.39,1)
         _RoadTint("Road tint",Color)=(.6,.52,.4,1)
+        _CrossingsRelayRoad("Relay road widening: bank X, radius, shoulder, lane width",Vector)=(0,0,1,0)
+        _CrossingsRelayRuts("Relay wheel spacing and rut width",Vector)=(0,0,0,0)
         _CrossingsRoadFinish("Crossings road center shade, shoulder tone, rut strength",Vector)=(0,.78,1,0)
         _CrossingsMinePad("Crossings mine yard value and contact shade",Vector)=(.3,.32,.3,0)
         _SurfaceNoise("Surface noise",Vector)=(11,.38,.24,.16)
@@ -82,6 +85,7 @@ Shader "Spacewars/TerritoryFog"
         _CrossingsHydroExtent("Crossings hydro span spill reach",Vector)=(0,0,0,0)
         _WaterDeep("Deep water",Color)=(.09,.34,.32,1)
         _WaterShallow("Shallow water",Color)=(.34,.63,.6,1)
+        [HideInInspector] _MatchAnimationTime("Match animation time",Float)=-1
         _WaterMotion("Ripple scale speed strength reflection",Vector)=(2.5,.35,.25,.35)
         _ShoreSettings("Shore width foam distance range",Vector)=(2.8,.35,8,0)
         _WeatheringMask("Dust contact wear",2D)="black" {}
@@ -116,9 +120,15 @@ Shader "Spacewars/TerritoryFog"
             #pragma fragment frag
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
+            #pragma multi_compile_fragment _ SPACEWARS_QA_TERRAIN_CACHE_READ SPACEWARS_QA_TERRAIN_CACHE_KEY SPACEWARS_QA_TERRAIN_CACHE_COVERAGE
+            #pragma multi_compile_local_fragment _ SPACEWARS_QA_STOCK_YARD
+            #pragma target 4.5 SPACEWARS_QA_TERRAIN_CACHE_READ SPACEWARS_QA_TERRAIN_CACHE_KEY SPACEWARS_QA_TERRAIN_CACHE_COVERAGE
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #if defined(SPACEWARS_QA_TERRAIN_CACHE_READ) && defined(SPACEWARS_QA_STOCK_YARD)
+            #undef SPACEWARS_QA_TERRAIN_CACHE_READ
+            #endif
             TEXTURE2D(_FogMask); SAMPLER(sampler_FogMask);
             TEXTURE2D(_FoundryRouteMask); SAMPLER(sampler_FoundryRouteMask);
             TEXTURE2D(_FoundryLavaHeat); SAMPLER(sampler_FoundryLavaHeat);
@@ -167,11 +177,12 @@ Shader "Spacewars/TerritoryFog"
                 half4 _FoundryClimbTint,_FoundryConnectionTint;
                 float4 _FoundryPadBounds, _FoundryPadFinish, _FoundryPadPours, _FoundryPadAge;
                 half4 _FoundrySandTint;
-                float _FoundryPadCenter, _FoundryCenterValue;
+                float _FoundryPadCenter, _FoundryCenterValue, _FoundryMineFogLimit;
                 half4 _GroundTint, _RoadTint;
-                float4 _CrossingsRoadFinish, _CrossingsMinePad;
+                float4 _CrossingsRoadFinish, _CrossingsMinePad, _CrossingsRelayRoad, _CrossingsRelayRuts;
                 float4 _SurfaceNoise, _Concrete, _Metal, _SurfaceExtras;
                 float4 _ArtTiles, _ArtDetail, _WaterMotion, _ShoreSettings, _NaturalBlend;
+                float _MatchAnimationTime;
                 float4 _CrossingsHydro, _CrossingsHydroExtent;
                 half4 _WaterDeep, _WaterShallow, _BasaltTint, _RustTint;
                 float4 _Geology, _Weathering;
@@ -299,24 +310,92 @@ Shader "Spacewars/TerritoryFog"
                 surface=lerp(surface,_BasaltTint.rgb*float3(.91,.85,.78)*ashFinish,masks.g*.6);
                 return surface;
             }
+            #if defined(SPACEWARS_QA_TERRAIN_CACHE_READ) || defined(SPACEWARS_QA_TERRAIN_CACHE_KEY) || defined(SPACEWARS_QA_TERRAIN_CACHE_COVERAGE)
+            bool TerrainCacheable()
+            {
+                return _CrossingsPalette.x>.5&&_YardObject<=.5&&_Dressing<.5&&
+                    ((_SurfaceRole>.5&&_SurfaceRole<1.5)||(_SurfaceRole>3.5&&_SurfaceRole<4.5));
+            }
+            #endif
+
+            #if defined(SPACEWARS_QA_TERRAIN_CACHE_READ) || defined(SPACEWARS_QA_TERRAIN_CACHE_COVERAGE)
+            int _TerrainCacheMode;
+            Texture2D<float4> _TerrainCacheSurface;
+            Texture2D<float4> _TerrainCacheNormal;
+            Texture2D<float4> _TerrainCachePosition;
+
+            bool TerrainCacheHit(Varyings input, int2 pixel)
+            {
+                if(_TerrainCacheMode!=4||!TerrainCacheable())return false;
+                float4 key=_TerrainCachePosition.Load(int3(pixel,0));
+                float valid=all(key==float4(input.positionWS,_SurfaceRole))?1:0;
+                return valid+QuadReadAcrossX(valid,pixel)+QuadReadAcrossY(valid,pixel)+
+                    QuadReadAcrossDiagonal(valid,pixel)==4;
+            }
+            #endif
+
+            #if defined(SPACEWARS_QA_TERRAIN_CACHE_COVERAGE)
             half4 frag(Varyings input):SV_Target
+            {
+                if(_TerrainCacheMode==7)return half4(_SurfaceRole,_Dressing,_YardObject,1);
+                if(!TerrainCacheable())return 0;
+                return TerrainCacheHit(input,int2(input.positionCS.xy))?half4(0,1,0,1):half4(1,0,0,1);
+            }
+            #elif defined(SPACEWARS_QA_TERRAIN_CACHE_KEY)
+            float4 frag(Varyings input, uint coverage:SV_Coverage):SV_Target
+            {
+                return coverage==15u&&TerrainCacheable()?float4(input.positionWS,_SurfaceRole):0;
+            }
+            #else
+            #if defined(SPACEWARS_QA_TERRAIN_CACHE_READ)
+            float4 frag(Varyings input):SV_Target
+            #else
+            half4 frag(Varyings input):SV_Target
+            #endif
             {
                 float2 uv=input.positionWS.xz/(2*_FogBounds.xy)+.5;
                 half fog=SAMPLE_TEXTURE2D(_FogMask,sampler_FogMask,uv).r;
+                // Foundry mine yards are the public pad surface; there is no separate overlay.
+                if(_SurfaceRole>7.5&&_SurfaceRole<8.5&&_FoundryPadBounds.w>1.5)
+                    fog=min(fog,_FoundryMineFogLimit);
                 float3 normal=normalize(input.normalWS);
                 float foundationReflection=0;
+                float matchTime=_MatchAnimationTime>=0?_MatchAnimationTime:_Time.y;
+                #if defined(SPACEWARS_QA_TERRAIN_CACHE_READ)
+                half3 surface;
+                float highlight=0;
+                half3 emission=0;
+                float3 eye=GetWorldSpaceNormalizeViewDir(input.positionWS);
+                bool yardObject=_YardObject>.5;
+                float yardSheen=0,yardFocus=1;
+                int2 pixel=int2(input.positionCS.xy);
+                UNITY_BRANCH
+                if(TerrainCacheHit(input,pixel))
+                {
+                    surface=_TerrainCacheSurface.Load(int3(pixel,0)).rgb;
+                    normal=_TerrainCacheNormal.Load(int3(pixel,0)).rgb;
+                }
+                else
+                {
+                #endif
                 // Map-wide world coordinates: no mesh IDs, tiled palette cells or UV seams.
                 float regionWarp=(noise(input.positionWS.xz/_CrossingsRegion.y+float2(17,43))-.5)*2*_CrossingsRegion.x;
                 float frontier=smoothstep(-_CrossingsPalette.w*.5,_CrossingsPalette.w*.5,
                     dot(input.positionWS.xz,_CrossingsPalette.yz)+regionWarp);
                 float4 infrastructure=SAMPLE_TEXTURE2D(_ConstructionMask,sampler_ConstructionMask,uv);
                 half3 roadTint=lerp(_RoadTint.rgb,_CrossingsDustB.rgb,frontier*_CrossingsPalette.x);
+                #if defined(SPACEWARS_QA_TERRAIN_CACHE_READ)
+                surface=_BaseColor.rgb;
+                #else
                 half3 surface=_BaseColor.rgb;
+                #endif
                 // Open AI test field: exactly one albedo, without procedural dressing.
                 if(_SurfaceRole<-.5)surface*=SAMPLE_TEXTURE2D(_EarthTex,sampler_EarthTex,input.positionWS.xz/8).rgb;
+                #if !defined(SPACEWARS_QA_TERRAIN_CACHE_READ)
                 float highlight=0;
                 half3 emission=0;
                 float3 eye=GetWorldSpaceNormalizeViewDir(input.positionWS);
+                #endif
                 float shore=SAMPLE_TEXTURE2D(_ShoreMask,sampler_ShoreMask,uv).r*_ShoreSettings.z;
                 // Fixed role IDs match ThreeCrossingsWorld; thresholds and projection axes are not art parameters.
                 if(_SurfaceRole>.5&&_SurfaceRole<5.5)
@@ -328,6 +407,7 @@ Shader "Spacewars/TerritoryFog"
                     bool natural=_SurfaceRole<1.5||(_SurfaceRole>3.5&&_SurfaceRole<4.5);
                     bool quietGround=_CrossingsPalette.x>.5&&_CrossingsGroundDetail.x>.5&&_SurfaceRole<1.5&&_Dressing<.5;
                     float groundReliefScale=1;
+                    float relayBlend=0, relayRuts=0;
                     if(natural)
                     {
                         float3 p=input.positionWS;
@@ -337,6 +417,32 @@ Shader "Spacewars/TerritoryFog"
                         float width=_NaturalBlend.x*(1+variation*_NaturalBlend.y);
                         float height=p.y-_NaturalBlend.w;
                         float road=SAMPLE_TEXTURE2D(_RoadMask,sampler_RoadMask,uv).r;
+                        if (_CrossingsRelayRoad.y > 0 && _SurfaceRole < 1.5 && _Dressing < .5)
+                        {
+                            float2 local = float2(abs(p.x) - _CrossingsRelayRoad.x, p.z);
+                            float radius = _CrossingsRelayRoad.y;
+                            float dist = length(local);
+                            float shoulder = _CrossingsRelayRoad.z;
+                            float edgeNoise = (noise(p.xz * .9) - .5) * shoulder;
+                            relayBlend = 1 - smoothstep(1.4 * radius, 2.3 * radius, dist);
+
+                            // The two bank approaches feed the turning circle from opposite ends.
+                            float laneX = .47 * radius * smoothstep(.48 * radius, 1.4 * radius, abs(local.y));
+                            float across = abs(local.x - laneX);
+                            float circleDepth = radius - dist;
+                            float laneDepth = .5 * _CrossingsRelayRoad.w + shoulder - across;
+                            float coverage = smoothstep(-1.35 * shoulder, 1.35 * shoulder, max(circleDepth, laneDepth) + edgeNoise);
+                            road = lerp(road, coverage, relayBlend);
+
+                            float wheelOffset = .5 * _CrossingsRelayRuts.x;
+                            float rutWidth = 1.45 * _CrossingsRelayRuts.y;
+                            float wobble = edgeNoise * .22;
+                            float circularRuts = abs(abs(dist - .70 * radius + wobble) - wheelOffset);
+                            float laneRuts = abs(across - wheelOffset + wobble);
+                            float approach = smoothstep(.40 * radius, .82 * radius, abs(local.y));
+                            relayRuts = max(1 - smoothstep(0, rutWidth, circularRuts),
+                                approach * (1 - smoothstep(0, rutWidth, laneRuts)));
+                        }
                         // Break up feathered dirt edges without introducing a hard threshold.
                         float roadEdgeNoise=(naturalNoise(p+float3(29,0,47),6.5)-.5)*2;
                         float crossingsRoadEdgeNoise=_CrossingsPalette.x>.5?roadEdgeNoise*_CrossingsRoadFinish.w:0;
@@ -379,6 +485,15 @@ Shader "Spacewars/TerritoryFog"
                             fineGrain*=_CrossingsGroundDetail.w;
                         }
                         soil*=(1+grain*fineGrain)*lerp(1,clamp(earth/.18,.35,2),groundDetail*(1-road*.65));
+                        if (relayBlend > 0)
+                        {
+                            // Compacted warm earth retains fine gravel between the worn wheel beds.
+                            float grit = dot(earth, half3(.2126,.7152,.0722));
+                            float textureTone = clamp(grit / .18, .55, 1.6);
+                            half3 packed = roadTint * half3(.82,.74,.67) * lerp(.83,1.03,saturate(textureTone - .4));
+                            float brokenWear = lerp(.48,1,noise(p.xz * 2.4));
+                            soil = lerp(soil, packed * (1 - .42 * brokenWear * relayRuts), road * relayBlend);
+                        }
                         half3 rock=NATURAL_SAMPLE(Rock,sampler_RockTex,texturePosition,_ArtTiles.y);
                         if(_CrossingsPalette.x>.5&&_CrossingsRockProjection.x>.5&&_SurfaceRole>3.5)
                             rock=crossingsRockSample(p,normal,_ArtTiles.y);
@@ -529,7 +644,7 @@ Shader "Spacewars/TerritoryFog"
                         if(_CrossingsHydro.x>.5)
                         {
                             Light main=GetMainLight();
-                            float waterClock=_CrossingsHydroExtent.z>.5?_CrossingsHydroExtent.w:_Time.y;
+                            float waterClock=_CrossingsHydroExtent.z>.5?_CrossingsHydroExtent.w:matchTime;
                             float2 w=input.positionWS.xz;
                             float t=waterClock*_CrossingsHydro.w*(_WaterMotion.y/.35);
                             float2 flow=w*(2.975/_WaterMotion.x)+float2(noise(w*.21)*.6,t*.8);
@@ -573,7 +688,7 @@ Shader "Spacewars/TerritoryFog"
                         else
                         {
                         float2 p=input.positionWS.xz/_WaterMotion.x;
-                        float time=_Time.y*_WaterMotion.y;
+                        float time=matchTime*_WaterMotion.y;
                         float warp=noise(p*.37+time*.03)*5;
                         float a=dot(p,float2(.8,.6))*6.283-time+warp;
                         float b=dot(p,float2(-.6,.8))*9.17+time*.73+noise(p*.61-time*.025)*4;
@@ -598,6 +713,7 @@ Shader "Spacewars/TerritoryFog"
                     if(_SurfaceRole<4.5)
                     {
                         float4 weather=SAMPLE_TEXTURE2D(_WeatheringMask,sampler_WeatheringMask,uv);
+                        weather.b *= 1-relayBlend;
                         float2 wind=float2(cos(_Weathering.z),sin(_Weathering.z));
                         float2 dustUV=float2(dot(input.positionWS.xz,wind),dot(input.positionWS.xz,float2(-wind.y,wind.x)));
                         float grit=noise(dustUV/float2(2.7,.45));
@@ -773,7 +889,7 @@ Shader "Spacewars/TerritoryFog"
                     else if(_SurfaceRole<11.5)
                     {
                         float heat=SAMPLE_TEXTURE2D(_FoundryLavaHeat,sampler_FoundryLavaHeat,uv).r;
-                        float2 flow=p.xz+float2(0,_Time.y*_FoundryLavaFinish.w);
+                        float2 flow=p.xz+float2(0,matchTime*_FoundryLavaFinish.w);
                         float2 q=flow/_FoundryLavaFinish.z;
                         float crust=smoothstep(.48,.67,noise(q+noise(q*.37)*2)*.7+noise(q*2.7)*.3);
                         float molten=heat*(1-saturate(crust+_FoundryCrustCoverage)*lerp(.92,.98,saturate(_FoundryCrustCoverage)));
@@ -818,8 +934,10 @@ Shader "Spacewars/TerritoryFog"
                     }
                     highlight=0;
                 }
+                #if !defined(SPACEWARS_QA_TERRAIN_CACHE_READ)
                 bool yardObject=_YardObject>.5;
                 float yardSheen=0,yardFocus=1;
+                #endif
                 if(yardObject)
                 {
                     // The tractor and curb use smooth manufactured surfaces, never terrain relief,
@@ -887,6 +1005,10 @@ Shader "Spacewars/TerritoryFog"
                     }
                     highlight=0;
                 }
+                #if defined(SPACEWARS_QA_TERRAIN_CACHE_READ)
+                }
+                #endif
+
                 Light light=GetMainLight(TransformWorldToShadowCoord(input.positionWS));
                 // Role IDs are the existing fixed material contract, not new geometry.
                 bool steel=_SurfaceRole>2.5&&_SurfaceRole<3.5;
@@ -904,8 +1026,18 @@ Shader "Spacewars/TerritoryFog"
                 // Neutral optical coefficients, not gameplay or designer-tunable values.
                 half grey=dot(lit,half3(.2126,.7152,.0722));
                 lit=lerp(lit,grey.xxx,fog);
+                #if defined(SPACEWARS_QA_TERRAIN_CACHE_READ)
+                half4 color=half4(lerp(lit,_FogColor.rgb,fog),1);
+                // Material capture and the full fallback execute the same program.
+                // Key and coverage still have independent signatures and variants.
+                if(_TerrainCacheMode==1)return float4(surface,1);
+                if(_TerrainCacheMode==2)return float4(normal,1);
+                return color;
+                #else
                 return half4(lerp(lit,_FogColor.rgb,fog),1);
+                #endif
             }
+            #endif
             ENDHLSL
         }
         // Depth reconstruction uses the same undeformed positions as the forward pass.
@@ -919,8 +1051,14 @@ Shader "Spacewars/TerritoryFog"
             HLSLPROGRAM
             #pragma vertex depthVert
             #pragma fragment depthFrag
+            #pragma multi_compile_instancing
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-            float4 depthVert(float4 positionOS:POSITION):SV_POSITION {return TransformObjectToHClip(positionOS.xyz);}
+            struct DepthAttributes {float4 positionOS:POSITION;UNITY_VERTEX_INPUT_INSTANCE_ID};
+            float4 depthVert(DepthAttributes input):SV_POSITION
+            {
+                UNITY_SETUP_INSTANCE_ID(input);
+                return TransformObjectToHClip(input.positionOS.xyz);
+            }
             half depthFrag(float4 positionCS:SV_POSITION):SV_Target {return positionCS.z;}
             ENDHLSL
         }

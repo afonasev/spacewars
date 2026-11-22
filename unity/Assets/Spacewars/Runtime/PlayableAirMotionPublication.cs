@@ -46,11 +46,22 @@ namespace Spacewars.Runtime
         internal sealed class AirTrace
         {
             internal NavPoint Nominal,Final;
-            internal double AssignedHeight,NominalClearance;
+            internal double AssignedHeight,NominalClearance,CruiseSpeed;
             internal bool HeightAssigned;
         }
         private readonly struct AirVisibility
         {internal readonly PlayableOwner Owner;internal readonly NavPoint Point;internal AirVisibility(PlayableOwner owner,NavPoint point){Owner=owner;Point=point;}}
+        private struct AirStaticInputRanges
+        {
+            internal PlayableProfile Profile;
+            internal IReadOnlyList<NavObstacle> Solids;
+            internal int ProfileStart,ProfileLength,SolidsStart,SolidsLength;
+        }
+#if UNITY_INCLUDE_TESTS
+        internal volatile bool VerifyAirInputReuseForTests;
+        internal int VerifiedAirInputReusesForTests;
+        internal int VerifiedAirInputTemplatesForTests;
+#endif
         private sealed class AirCalculation
         {
             internal readonly PlayableDomain Domain;
@@ -84,28 +95,62 @@ namespace Spacewars.Runtime
             var u=source.CopyForAir();var a=source.Air;var n=a.Actor;
             u.Air=new AirState{Actor=n.CopyMovementHeader(),Height=a.Height,PreviousHeight=a.PreviousHeight,Pitch=a.Pitch,Roll=a.Roll,YawVelocity=a.YawVelocity,ShortRemaining=a.ShortRemaining,Short=a.Short,Escape=a.Escape,Departing=a.Departing,FacingTarget=a.FacingTarget,Velocity=a.Velocity,YieldGoal=a.YieldGoal,Yielding=a.Yielding};
             foreach(var command in a.Deferred)u.Air.Deferred.Enqueue(command);
-            if(source.DefaultCombat!=null){var d=source.DefaultCombat;u.DefaultCombat=new DefaultCombatState{Phase=d.Phase,Anchor=d.Anchor,Deadline=d.Deadline,Engaged=d.Engaged,ReturnRequested=d.ReturnRequested};}
+            if(source.DefaultCombat!=null){var d=source.DefaultCombat;u.DefaultCombat=new DefaultCombatState{Phase=d.Phase,Anchor=d.Anchor,Deadline=d.Deadline,Engaged=d.Engaged,MovementRequested=d.MovementRequested,WithdrawalGoal=d.WithdrawalGoal};}
             return u;
         }
         private static void WriteAirBytes(BinaryWriter w,byte[] bytes){w.Write(bytes.Length);w.Write(bytes);}
         private static NavigationCaptureBytes ReadAirBytes(BinaryReader r,INavStorageReservation reservation)
         {int length=r.ReadInt32();if(length<0||length>WorldWire.MaxBytes)throw new ArgumentException("Invalid air source byte length.");return NavigationCaptureBytes.Allocate(length,reservation,()=>{var bytes=r.ReadBytes(length);if(bytes.Length!=length)throw new EndOfStreamException();return bytes;});}
         private static void WriteAirDefault(BinaryWriter w,Unit u)
-        {var d=u.DefaultCombat;w.Write(d!=null);if(d==null)return;w.Write((int)d.Phase);WorldWire.Write(w,d.Anchor);Number(w,d.Deadline);w.Write(d.Engaged);w.Write(d.ReturnRequested);}
+        {
+            var state=u.DefaultCombat;
+            w.Write(state!=null);
+            if(state!=null)WriteDefaultCombatState(w,state);
+        }
         private static void ReadAirDefault(BinaryReader r,Unit u)
-        {if(Boolean(r))u.DefaultCombat=new DefaultCombatState{Phase=EnumValue<DefaultCombatPhase>(r),Anchor=ReadPoint(r),Deadline=Number(r),Engaged=r.ReadInt32(),ReturnRequested=Boolean(r)};}
+        {
+            if(Boolean(r))u.DefaultCombat=ReadDefaultCombatState(r,true);
+        }
         // Capture every input read by the discrete law, including ground targets,
         // real solids/building tops and the existing visibility observations.
         private bool AirVisible(PlayableOwner owner,NavPoint point)=>visions.TryGetValue(TeamOf(owner),out var vision)&&vision.IsVisible(point);
-        private void WriteAirInputs(BinaryWriter w,double dt,AirVisibility[] observations,INavStorageReservation reservation)
+        private void WriteAirInputs(BinaryWriter w,double dt,AirVisibility[] observations,INavStorageReservation reservation,
+            ref AirStaticInputRanges ranges,byte[] captured=null)
         {
-            w.Write(1);w.Write(navigation.Generation);w.Write(Tick);Number(w,dt);w.Write(nextOrderRevision);using(var binding=WorldWire.AirMotionBindingOwned(profile,reservation))WriteAirBytes(w,binding.Bytes);
+            using var measured=PerformanceProfile.Measure(ProfileStage.AirMotionInputs);
+            w.Write(1);w.Write(navigation.Generation);w.Write(Tick);Number(w,dt);w.Write(nextOrderRevision);
+            int profileStart=checked((int)w.BaseStream.Position);
+            if(captured!=null)
+                w.Write(captured,ranges.ProfileStart,ranges.ProfileLength);
+            else
+                using(var binding=WorldWire.AirMotionBindingOwned(profile,reservation))WriteAirBytes(w,binding.Bytes);
+            int profileEnd=checked((int)w.BaseStream.Position);
             w.Write(units.Count);foreach(var u in units.Values.OrderBy(u=>u.Id)){
                 WriteRecord(w,u);WriteAirDefault(w,u);w.Write(TryActor(u.Id,out var n));if(n!=null){WorldWire.Write(w,n.Position);WorldWire.Write(w,n.Goal);Number(w,n.Heading);Number(w,n.Radius);Number(w,n.Speed);Number(w,n.TurnSpeed);w.Write(n.Moving);w.Write(n.Held);w.Write((int)n.Outcome);w.Write(n.Team);}}
             w.Write(buildings.Count);foreach(var b in buildings.Values.OrderBy(b=>b.Id)){w.Write(b.Id);w.Write((int)b.Owner);w.Write((int)b.Kind);w.Write((int)b.Phase);WorldWire.Write(w,b.Position);Number(w,b.Health);}
-            var solids=SolidObstacles().ToArray();w.Write(solids.Length);foreach(var solid in solids)WorldWire.Write(w,solid);
+            int solidsStart=checked((int)w.BaseStream.Position);
+            var solids=SolidObstacles();
+            if(captured!=null&&ReferenceEquals(solids,ranges.Solids))
+                w.Write(captured,ranges.SolidsStart,ranges.SolidsLength);
+            else{
+                w.Write(solids.Count);
+                for(int i=0;i<solids.Count;i++)WorldWire.Write(w,solids[i]);
+            }
+            ranges=new AirStaticInputRanges{
+                Profile=profile,Solids=solids,ProfileStart=profileStart,ProfileLength=profileEnd-profileStart,
+                SolidsStart=solidsStart,SolidsLength=checked((int)w.BaseStream.Position)-solidsStart
+            };
             w.Write(wrecks.Count);foreach(var wreck in wrecks.Values.OrderBy(v=>v.Id)){w.Write(wreck.Id);WorldWire.Write(w,wreck.Position);w.Write(wreck.Blocks(Tick));}
             w.Write(observations.Length);foreach(var v in observations){w.Write((int)v.Owner);WorldWire.Write(w,v.Point);w.Write(AirVisible(v.Owner,v.Point));}
+            if(immobilityUntil>elapsed)
+            {
+                var frozen=units.Values.Where(u=>u.Air!=null&&Frozen(u)).OrderBy(u=>u.Id).ToArray();
+                if(frozen.Length!=0)
+                {
+                    w.Write(0x53544131);w.Write(frozen.Length);
+                    foreach(var unit in frozen)w.Write(unit.Id);
+                }
+            }
         }
         private sealed class AirSource : NavOwnedStorage
         {
@@ -122,8 +167,9 @@ namespace Spacewars.Runtime
             internal override bool IsImmutableCaptureRoot=>true;
             private AirSource(long bytes,long generation,long operation,long tick,double dt):base(bytes)
             {Generation=generation;Operation=operation;Tick=tick;Dt=dt;Retain();}
-            internal static AirSource Calculate(PlayableDomain d,long operation,double dt,INavStorageReservation r)
+            internal static AirSource Calculate(PlayableDomain d,long operation,double dt,INavStorageReservation r,out AirStaticInputRanges staticInputs)
             {
+                staticInputs=default;
                 // Includes clone/queue/trace/dictionary backing and its construction
                 // peak. Serialization backing is admitted separately by Write.
                 long bytes=checked(NavStorageLayout.ObjectBytesBound(typeof(AirSource))+4096L+4096L*d.units.Count+256L*d.units.Values.Sum(u=>u.Air?.Deferred.Count??0));
@@ -131,8 +177,15 @@ namespace Spacewars.Runtime
                     allocation.Reserve(bytes);var s=allocation.Register(new AirSource(bytes,d.navigation.Generation,operation,d.Tick,dt));
                     try{
                         var frame=new AirCalculation(d);var before=frame.Units.Select(CaptureAirActor).ToArray();
-                        d.CalculateHawks(frame,dt);s.After=frame.Units;s.NextRevision=frame.NextRevision;s.Observations=frame.Observations.ToArray();
-                        if(d.airAuthority!=null){s.Inputs=NavigationCaptureBytes.Write(r,w=>d.WriteAirInputs(w,dt,s.Observations,r));s.RequireEdge(s.Inputs);}
+                        using(PerformanceProfile.Measure(ProfileStage.AirMotionLaw))d.CalculateHawks(frame,dt);
+                        s.After=frame.Units;s.NextRevision=frame.NextRevision;s.Observations=frame.Observations.ToArray();
+                        if(d.airAuthority!=null){
+                            var captured=d.airInputTemplateRanges;
+                            var template=d.airInputTemplate?.Bytes;
+                            s.Inputs=NavigationCaptureBytes.Write(r,w=>d.WriteAirInputs(w,dt,s.Observations,r,ref captured,template));
+                            s.RequireEdge(s.Inputs);
+                            staticInputs=captured;
+                        }
                         for(int i=0;i<frame.Traces.Length;i++){frame.Traces[i].AssignedHeight=frame.Units[i].Air.Height;frame.Traces[i].Final=frame.Units[i].Air.Actor.Position;}
                         s.Rows=before.Select((b,i)=>new AirMotionReceiver(b,CaptureAirActor(frame.Units[i]),frame.Traces[i])).ToArray();s.PinActorNames();
                         if(d.airAuthority!=null){s.Output=NavigationCaptureBytes.Write(r,w=>s.WriteOutput(w));s.RequireEdge(s.Output);}return s;
@@ -260,31 +313,104 @@ namespace Spacewars.Runtime
         private Exception airAdoptionFailure;
         private NavOwnedStorage failedAirSource;
         private NavigationMotionAdoption failedAirAdoption;
+        private NavigationCaptureBytes airInputTemplate;
+        private AirStaticInputRanges airInputTemplateRanges;
         internal long AirOperationWatermark{get{lock(airGate)return airSources?.Watermark??0;}}
         internal bool AwaitingAirSources{get{lock(airGate)return airSources!=null&&airSources.Sources.Any(s=>Volatile.Read(ref s.LivePins)==0);}}
         private void AssertAirQuiescent(){if(airPhase!=0||airAdoptionFailure!=null)throw new InvalidOperationException("Air publication is active or has unresolved adoption.",airAdoptionFailure);}
         private void AssertAirOperational(){AssertAirQuiescent();if(AwaitingAirSources||airSources?.Sources.Length>0&&airAuthority==null)throw new InvalidOperationException("Air sources await paid live authority rebind before clock/commands.");}
         internal void BindAirMotionAuthority(IAirMotionAuthority authority){lock(airGate){AssertAirQuiescent();if(airAuthority!=null)throw new InvalidOperationException("Air authority already bound.");airAuthority=authority??throw new ArgumentNullException(nameof(authority));airThread=Thread.CurrentThread.ManagedThreadId;}}
         private void AssertAirThread(){if(airAuthority!=null&&Thread.CurrentThread.ManagedThreadId!=airThread)throw new InvalidOperationException("Air publication requires its Domain thread.");}
+        private void ReleaseAirInputTemplate()
+        {
+            airInputTemplate?.Dispose();
+            airInputTemplate=null;airInputTemplateRanges=default;
+        }
+        private void TryRetainAirInputTemplate(byte[] input,AirStaticInputRanges ranges)
+        {
+            // Keep only the two immutable blocks. Their backing remains charged
+            // to this domain's physical ledger and is rebuilt after restore.
+            if(!navigation.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,navigation.Generation,0,out var scope))return;
+            using(scope){
+                NavigationCaptureBytes template=null;
+                try{
+                    var packed=new AirStaticInputRanges{
+                        Profile=ranges.Profile,Solids=ranges.Solids,ProfileLength=ranges.ProfileLength,
+                        SolidsStart=ranges.ProfileLength,SolidsLength=ranges.SolidsLength
+                    };
+                    int length=checked(packed.ProfileLength+packed.SolidsLength);
+                    template=NavigationCaptureBytes.Allocate(length,scope.CapacityReservationOwned(),()=>{
+                        var bytes=new byte[length];
+                        Buffer.BlockCopy(input,ranges.ProfileStart,bytes,0,packed.ProfileLength);
+                        Buffer.BlockCopy(input,ranges.SolidsStart,bytes,packed.SolidsStart,packed.SolidsLength);
+                        return bytes;
+                    });
+                    scope.Attach(template);
+                    scope.Commit(template,_=>{airInputTemplate=template;airInputTemplateRanges=packed;template=null;});
+                }catch(NavigationRetentionBudget.CapacityRefused){}
+                finally{template?.Dispose();}
+            }
+        }
         private void AdvanceHawks(double dt)
         {
-            AssertAirOperational();AssertAirThread();if(!units.Values.Any(u=>u.Air!=null))return;
+            AssertAirOperational();AssertAirThread();
+            if(!units.Values.Any(u=>u.Air!=null)){if(airInputTemplate!=null)ReleaseAirInputTemplate();return;}
+            bool knownAdopter=airAuthority is AiCombatMicroAirMotionAuthority&&navigation.PhysicalHostBudget.AllocationAdmission==null;
+            bool cacheInputs=knownAdopter&&(profile.AuthoredMap is CrimsonGroveMap||profile.AuthoredMap is ThreeCrossingsMap||
+                profile.AuthoredMap is DeafMirrorMap||profile.AuthoredMap is AntennaCityMap||profile.AuthoredMap is MossHighlandMap);
+            if(airInputTemplate!=null&&(!cacheInputs||!ReferenceEquals(profile,airInputTemplateRanges.Profile)))ReleaseAirInputTemplate();
+            using var measured=PerformanceProfile.Measure(ProfileStage.AirMotion);
             // Like ground movement, temporary host resolution/capacity refusal
             // leaves this complete Air step untouched while the world continues.
             if(!navigation.TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,navigation.Generation,0,out var scope))return;
             AirSource candidate=null;AirRegistry next=null,retired=null;NavigationMotionAdoption adoption=null;AirMotionPublication publication=null;
             using(scope){try{
-                var r=scope.CapacityReservationOwned();candidate=AirSource.Calculate(this,checked(AirOperationWatermark+1),dt,r);scope.Attach(candidate);
+                var r=scope.CapacityReservationOwned();
+                candidate=AirSource.Calculate(this,checked(AirOperationWatermark+1),dt,r,out var staticInputs);
+                scope.Attach(candidate);
                 if(airAuthority!=null){publication=new AirMotionPublication(this,candidate);airPhase=1;preparingAir=publication;
-                    try{adoption=airAuthority.Prepare(publication);if(adoption==null)return;if(publication.Selected==null||resumingAir!=null&&!ReferenceEquals(resumingAir,publication.Selected))throw new InvalidOperationException("Air adoption has no exact accepted source.");next=AirRegistry.Change(airSources,airSources.Watermark,(AirSource)publication.Selected,true,false,r);}finally{preparingAir=null;airPhase=0;}}
+                    try{using(PerformanceProfile.Measure(ProfileStage.AirMotionAdoption))adoption=airAuthority.Prepare(publication);if(adoption==null)return;if(publication.Selected==null||resumingAir!=null&&!ReferenceEquals(resumingAir,publication.Selected))throw new InvalidOperationException("Air adoption has no exact accepted source.");next=AirRegistry.Change(airSources,airSources.Watermark,(AirSource)publication.Selected,true,false,r);}finally{preparingAir=null;airPhase=0;}}
                 Action<object> install=_=>{lock(airGate){airPhase=2;for(int i=0;i<candidate.After.Length;i++)InstallAirUnit(units[candidate.After[i].Id],candidate.After[i]);nextOrderRevision=candidate.NextRevision;
                     if(next!=null){next.Retain();retired=airSources;airSources=next;}publication?.MarkCommittedNoThrow();
                     try{adoption?.ApplyCommittedNoThrow();airPhase=0;}catch(Exception error){airAdoptionFailure=error;candidate.Retain();failedAirSource=candidate;failedAirAdoption=adoption;adoption=null;}}};
                 // All fallible work, callback backing and final consumer validation
                 // precedes ANY aircraft mutation. Only prepared stores follow.
-                if(airAuthority!=null)using(var current=NavigationCaptureBytes.Write(r,w=>WriteAirInputs(w,dt,candidate.Observations,r)))if(!candidate.Inputs.Bytes.SequenceEqual(current.Bytes))throw new InvalidOperationException("Air source inputs changed.");
+                if(airAuthority!=null){
+                    // The ordinary Air adopter cannot edit authored configuration.
+                    // Re-emit every live field and compare the complete wire.
+                    bool reuse=knownAdopter&&navigation.PhysicalHostBudget.AllocationAdmission==null&&ReferenceEquals(profile,staticInputs.Profile);
+                    var captured=reuse?candidate.Inputs.Bytes:null;
+                    bool matches;
+                    if(reuse)
+                        matches=NavigationCaptureBytes.MatchesWrite(candidate.Inputs.Bytes,r,w=>WriteAirInputs(w,dt,candidate.Observations,r,ref staticInputs,captured));
+                    else{
+                        using var current=NavigationCaptureBytes.Write(r,w=>WriteAirInputs(w,dt,candidate.Observations,r,ref staticInputs));
+                        matches=candidate.Inputs.Bytes.AsSpan().SequenceEqual(current.Bytes);
+                    }
+                    if(!matches)throw new InvalidOperationException("Air source inputs changed.");
+#if UNITY_INCLUDE_TESTS
+                    if(reuse&&VerifyAirInputReuseForTests){
+                        AirStaticInputRanges fresh=default;
+                        using var oracle=NavigationCaptureBytes.Write(r,w=>WriteAirInputs(w,dt,candidate.Observations,r,ref fresh));
+                        if(!oracle.Bytes.AsSpan().SequenceEqual(candidate.Inputs.Bytes))throw new InvalidOperationException("Reused Air input wire differs from a complete write.");
+                        Interlocked.Increment(ref VerifiedAirInputReusesForTests);
+                        if(airInputTemplate!=null)Interlocked.Increment(ref VerifiedAirInputTemplatesForTests);
+                    }
+#endif
+                }
                 airPhase=1;adoption?.ValidateCurrent();scope.Publish(candidate,install);
                 scope.ResolveCommitted();if(airAdoptionFailure!=null)throw new InvalidOperationException("Committed air has unresolved consumer adoption.",airAdoptionFailure);
+                if (FlightDecisionAccepted != null)
+                    foreach (var row in candidate.Rows)
+                    {
+                        var before = row.BeforeActor;
+                        var after = row.AfterActor;
+                        if (before.CommandStamp?.Revision != after.CommandStamp?.Revision ||
+                            !before.Motion.Goal.Equals(after.Motion.Goal) || before.Motion.Moving != after.Motion.Moving)
+                            NotifyFlightDecision(units[row.Entity]);
+                    }
+                if(cacheInputs&&airInputTemplate==null&&ReferenceEquals(profile,staticInputs.Profile))
+                    TryRetainAirInputTemplate(candidate.Inputs.Bytes,staticInputs);
             }catch(AirMotionUnavailableException){if(airPhase==2||airAdoptionFailure!=null)throw;}catch(NavigationRetentionBudget.CapacityRefused){if(airPhase==2)throw;}finally{if(airAdoptionFailure==null)airPhase=0;adoption?.Dispose();retired?.Release();next?.ReleaseOwner();candidate?.ReleaseOwner();}}
         }
         private static void InstallAirUnit(Unit live,Unit after)
@@ -292,7 +418,7 @@ namespace Spacewars.Runtime
             var a=live.Air;var b=after.Air;a.Actor.CopyMovementValuesFrom(b.Actor);a.Height=b.Height;a.PreviousHeight=b.PreviousHeight;a.Pitch=b.Pitch;a.Roll=b.Roll;a.YawVelocity=b.YawVelocity;a.ShortRemaining=b.ShortRemaining;a.Short=b.Short;a.Escape=b.Escape;a.Departing=b.Departing;a.FacingTarget=b.FacingTarget;a.Velocity=b.Velocity;a.YieldGoal=b.YieldGoal;a.Yielding=b.Yielding;if(a.Deferred.Count!=b.Deferred.Count)a.Deferred.Dequeue();
             // The law can only reset default combat and dequeue one command.
             // Keep existing live identities; no prepared mutable backing escapes.
-            if(after.DefaultCombat==null)live.DefaultCombat=null;live.LastOrder=after.LastOrder;live.CurrentOrder=after.CurrentOrder;
+            live.DroneRepair=after.DroneRepair;if(after.DefaultCombat==null)live.DefaultCombat=null;live.LastOrder=after.LastOrder;live.CurrentOrder=after.CurrentOrder;
             live.BurstRemaining=after.BurstRemaining;live.BurstTarget=after.BurstTarget;live.Reload=after.Reload;live.StoppedSeconds=after.StoppedSeconds;live.Target=after.Target;live.ExplicitTarget=after.ExplicitTarget;live.HasAttackMove=after.HasAttackMove;live.AttackMove=after.AttackMove;
         }
         private AirMotionPin AcceptAirSource(AirMotionPublication publication)
@@ -334,6 +460,6 @@ namespace Spacewars.Runtime
             try{registry=AirRegistry.Change(null,watermark,null,false,false,transaction.Reservation);for(int i=0;i<count;i++){bool committed=Boolean(r);var source=AirSource.Read(r,transaction.Reservation);try{if(source.Generation!=navigation.Generation||source.Operation>watermark||source.Tick>Tick||registry.Find(source.Operation)>=0)throw new ArgumentException("Invalid saved air source binding.");var next=AirRegistry.Change(registry,watermark,source,committed,false,transaction.Reservation);registry.ReleaseOwner();registry=next;}finally{source.ReleaseOwner();}}airSources=registry;registry=null;}finally{registry?.ReleaseOwner();}
         }
         private void ReleaseAirMotionSources()
-        {lock(airGate){airSources?.Release();airSources=null;failedAirSource?.Release();failedAirSource=null;failedAirAdoption?.Dispose();failedAirAdoption=null;}}
+        {lock(airGate){ReleaseAirInputTemplate();airSources?.Release();airSources=null;failedAirSource?.Release();failedAirSource=null;failedAirAdoption?.Dispose();failedAirAdoption=null;}}
     }
 }

@@ -33,6 +33,7 @@ namespace Spacewars.Runtime
             internal NavigationPreparedCrowdNameWrite ArrivalFailureNames;internal NavArrivalStatus ArrivalTerminalStatus;
             internal NavArrivalProposal ArrivalProposal;internal int ArrivalOrder;internal byte ArrivalKind;
             internal NavPoint Goal;internal int ActorIndex,Entity,GroupIndex,MemberIndex;internal bool Valid,Assigned,WasAllocating,Selected,GeometryRejected,GeometryCarried,Removed;
+            internal bool InstalledGoalClosedByFoundation;
             internal long Group,Order,Membership;
         }
         private sealed partial class PreparedRebind : NavOwnedStorage,IDisposable
@@ -102,8 +103,9 @@ namespace Spacewars.Runtime
             return checked(8192L+4096L*actors+4096L*retries+64L+2L*(32L+(obstacleBytes+7)/8*8)+
                 32L*rowChars*actors+NavContract.DigestScratchBytes(128L+3L*joinedChars));
         }
-        private static NavGeometry RebindMovementGeometry(PreparedRebind c,RebindActor mover,NavGeometry basis)
+        private NavGeometry RebindMovementGeometry(PreparedRebind c,RebindActor mover,NavGeometry basis)
         {
+            basis = OwnerMovementGeometry?.Invoke(mover.Id, basis) ?? basis;
             int held=0;foreach(var other in c.Actors)if(other.Id!=mover.Id&&!c.Removes(other.Id)&&other.Held&&other.Team==mover.Team)held++;
             if(held==0)return basis;
             var solids=new NavObstacle[checked(basis.Obstacles.Count+held)];for(int i=0;i<basis.Obstacles.Count;i++)solids[i]=basis.Obstacles[i];

@@ -1,0 +1,1718 @@
+{
+  "Map": "moss-highland-native-v1",
+  "Seed": -1313779786,
+  "Profile": {
+    "orbitalMineCapacity": 3.0,
+    "orbitalMineVision": 5.0,
+    "orbitalMineDirectDamage": 80.0,
+    "orbitalMineSplashDamage": 50.0,
+    "orbitalMineBlastRadius": 1.4,
+    "orbitalMineModelRadius": 0.35,
+    "orbitalMineModelHeight": 0.14,
+    "orbitalMineEffectSeconds": 0.55,
+    "orbitalMineEffectHeight": 0.45,
+    "orbitalMineRimWidth": 0.055,
+    "orbitalMinePreviewWidth": 2.0,
+    "orbitalMineDustOpacity": 0.45,
+    "orbitalMineFragmentCount": 12.0,
+    "orbitalMineFragmentSize": 0.045,
+    "orbitalScanCoreDegrees": 2.0,
+    "orbitalScanTrailOpacity": 0.32,
+    "orbitalScanWaveOpacity": 0.13,
+    "orbitalScanWaveSeconds": 1.0,
+    "orbitalScanFadeSeconds": 0.2,
+    "orbitalScanRimOpacity": 0.08,
+    "orbitalHackHealthPercent": 50.0,
+    "orbitalHackSeconds": 30.0,
+    "orbitalScanRadius": 10.0,
+    "orbitalScanSeconds": 3.0,
+    "orbitalScanSweepSeconds": 1.2,
+    "orbitalScanSectorDegrees": 60.0,
+    "orbitalScanLineWidth": 1.5,
+    "orbitalScanOpacity": 0.65,
+    "orbitalCardWidth": 320.0,
+    "orbitalCardHeight": 336.0,
+    "orbitalCardArtworkSize": 220.0,
+    "orbitalUiRingWidth": 3.0,
+    "orbitalUiCornerRadius": 5.0,
+    "orbitalUiPulseSeconds": 1.2,
+    "orbitalUiCoolingArtworkOpacity": 0.25,
+    "orbitalPanelWidth": 76.0,
+    "orbitalIconSize": 36.0,
+    "orbitalLevelFontSize": 32.0,
+    "orbitalThresholdMax": 8000.0,
+    "orbitalUiMaxFontScale": 0.5,
+    "orbitalThreshold1": 250.0,
+    "orbitalThreshold2": 500.0,
+    "orbitalThreshold3": 1000.0,
+    "orbitalThreshold4": 2000.0,
+    "orbitalThreshold5": 4000.0,
+    "orbitalSystemFailureRadius": 5.0,
+    "orbitalSystemFailureSeconds": 20.0,
+    "orbitalSystemFailureMaxTargets": 2,
+    "orbitalBasicSeconds": 30.0,
+    "orbitalAdvancedSeconds": 60.0,
+    "orbitalUltimateSeconds": 90.0,
+    "orbitalCommonSeconds": 10.0,
+    "orbitalFinalSpeed": 2.0,
+    "groundRouteBackend": 1,
+    "turretHealth": 200.0,
+    "turretRange": 10.0,
+    "turretDamage": 3.0,
+    "turretBurstSize": 6,
+    "turretBurstShotIntervalMs": 90.0,
+    "turretBurstPauseMs": 1100.0,
+    "turretSpreadDeg": 5.0,
+    "turretProjectileSpeed": 32.0,
+    "gaussDamage": 50.0,
+    "gaussRange": 11.5,
+    "gaussCostMultiplier": 2.0,
+    "gaussHealthMultiplier": 1.5,
+    "gaussTankDamageFraction": 0.5,
+    "gaussReloadSeconds": 4.0,
+    "gaussPierceRetention": 0.7,
+    "gaussRangeBlend": 0.5,
+    "gaussBeamRadius": 0.04,
+    "gaussBeamSeconds": 0.85,
+    "gaussBeamIntensity": 3.0,
+    "gaussChargeSeconds": 1.1,
+    "gaussChargeIntensity": 5.0,
+    "gaussRecoilMeters": 0.09,
+    "gaussRecoilSeconds": 0.42,
+    "gaussRecoilPeakFraction": 0.15,
+    "gaussBeamGlowWidth": 5.0,
+    "gaussBeamRiseFraction": 0.12,
+    "repairTowerHealthPerSecond": 4.0,
+    "turretCreditCost": 200.0,
+    "turretBuildSeconds": 15.0,
+    "turretHealthMultiplier": 3.0,
+    "turretRangeMultiplier": 1.0,
+    "turretFootprintRadius": 0.55,
+    "turretPadOffset": 2.0,
+    "turretPassageWidth": 2.2,
+    "turretVision": 15.0,
+    "turretModelScale": 1.0,
+    "turretYawSpeed": 360.0,
+    "turretPitchSpeed": 180.0,
+    "turretDepression": 20.0,
+    "turretTurningSpread": 1.3,
+    "turretLaserWidth": 0.015,
+    "turretLaserIntensity": 1.8,
+    "constructionInitialHealthRatio": 0.25,
+    "buildingDestructionSeconds": 2.4,
+    "buildingDestructionShake": 0.045,
+    "buildingDestructionTilt": 1.2,
+    "buildingDestructionFireScale": 0.65,
+    "buildingDestructionSmokeOpacity": 0.32,
+    "provingGroundStartingCredits": 10000,
+    "provingGroundDividerWidth": 0.18,
+    "reinforcedConcreteCost": 200.0,
+    "reinforcedConcreteSeconds": 30.0,
+    "reinforcedConcreteBonusPercent": 25.0,
+    "reinforcedConcreteLevel2Cost": 200.0,
+    "reinforcedConcreteLevel2Seconds": 30.0,
+    "reinforcedConcreteLevel2BonusPercent": 50.0,
+    "provingGroundActionSeconds": 5.0,
+    "provingGroundOrbitalSeconds": 5.0,
+    "provingGroundAttackRearLaneOffset": 15.0,
+    "notificationBottomPixels": 8.0,
+    "notificationSeconds": 3.0,
+    "notificationHistorySeconds": 5.0,
+    "notificationFrontRadius": 16.0,
+    "notificationFrontIdleSeconds": 5.0,
+    "chatOutlineWidth": 0.2,
+    "chatShadowOffset": 1.0,
+    "chatShadowBlur": 2.0,
+    "aiChatAuthorSeconds": 12.0,
+    "aiChatTeamSeconds": 5.0,
+    "aiChatCriticalSeconds": 8.0,
+    "aiChatMaxAgeSeconds": 6.0,
+    "aiChatObserverLimit": 5.0,
+    "chatLeftPercent": 20.0,
+    "chatVisibleLimit": 5.0,
+    "chatReadableSeconds": 4.0,
+    "chatFadeSeconds": 2.0,
+    "chatEvictionSeconds": 0.25,
+    "hawkModelScale": 0.35,
+    "hawkAimTolerance": 0.04,
+    "hawkPreparationYawSpeed": 0.25,
+    "hawkMissileLength": 0.55,
+    "hawkMissileVisualScale": 0.8,
+    "hawkDebrisSeconds": 0.8,
+    "hawkDebrisSpeed": 3.0,
+    "hawkDebrisGravity": 9.81,
+    "hawkDebrisCount": 6.0,
+    "hawkHealth": 60.0,
+    "hawkCreditCost": 200.0,
+    "hawkPopulationCost": 3.0,
+    "hawkProductionSeconds": 20.0,
+    "hawkRadius": 1.0,
+    "hawkSpeed": 7.5,
+    "hawkReverseSpeed": 2.5,
+    "hawkStrafeSpeed": 8.0,
+    "hawkAcceleration": 7.0,
+    "hawkBraking": 12.0,
+    "hawkShortSeconds": 0.8,
+    "hawkShortDistance": 4.0,
+    "hawkYawSpeed": 4.0,
+    "hawkYawAcceleration": 10.0,
+    "hawkCruisePitch": 12.0,
+    "hawkAccelerationPitch": 10.0,
+    "hawkBank": 20.0,
+    "hawkAttitudeSpeed": 60.0,
+    "hawkClearance": 3.0,
+    "hawkClimbSpeed": 4.0,
+    "hawkDescentSpeed": 2.0,
+    "hawkLookahead": 12.0,
+    "hawkSeparation": 0.25,
+    "factoryAssemblyGap": 0.4,
+    "hawkRoofSeconds": 1.0,
+    "hawkPlatformSeconds": 1.0,
+    "hawkSpinSeconds": 1.0,
+    "hawkRotorSpeed": 2160.0,
+    "hawkRange": 9.0,
+    "hawkPreparationSeconds": 2.0,
+    "hawkSalvoResearchCost": 300.0,
+    "hawkSalvoResearchSeconds": 30.0,
+    "hawkUpgradedPreparationSeconds": 1.5,
+    "hawkUpgradedSalvoDelay": 0.18,
+    "hawkUpgradedReloadSeconds": 2.0,
+    "hawkDamage": 10.0,
+    "hawkSalvoDelay": 0.5,
+    "hawkReloadSeconds": 2.5,
+    "hawkMissileSpeed": 16.0,
+    "hawkMissileTurn": 0.8,
+    "hawkMissileRadius": 0.07,
+    "groupCorridorMaximumExcessPercent": 15,
+    "schemaVersion": 9,
+    "crowdMotionHeadingIntervals": 16.0,
+    "crowdMotionSpeedBands": 2.0,
+    "crowdMotionLookaheadSeconds": 1.2,
+    "crowdMotionNeighborCap": 8.0,
+    "towerRangeFillOpacity": 0.08,
+    "towerRangeBorderOpacity": 0.75,
+    "towerRangeBorderWidth": 0.1,
+    "towerRangeEdgeFeather": 0.1,
+    "towerRangeLift": 0.045,
+    "towerRangeInnerFade": 0.6,
+    "towerRangeRepairHue": 0.36,
+    "towerRangeCombatHue": 0.12,
+    "towerRangeSaturation": 0.75,
+    "towerRangeBrightness": 1.0,
+    "groundTrailLifetimeSeconds": 10.0,
+    "selectionFrameRed": 0.39,
+    "selectionFrameGreen": 0.9,
+    "selectionFrameBlue": 0.65,
+    "selectionFrameLineWidth": 1.0,
+    "selectionFrameCornerWidth": 2.0,
+    "selectionFrameCornerLength": 18.0,
+    "selectionFrameFillOpacity": 0.07,
+    "selectionFrameLineOpacity": 0.6,
+    "selectionRingPadding": 0.1,
+    "selectionRingWidth": 0.055,
+    "selectionRingLift": 0.045,
+    "hawkSelectionRadius": 0.65,
+    "healthBarWidth": 1.4,
+    "healthBarHeight": 0.075,
+    "healthBarModelGap": 0.2,
+    "healthBarCellGap": 0.012,
+    "healthBarCells": 10,
+    "healthBarOutlineWidth": 0.015,
+    "buildingSelectionPadding": 0.35,
+    "buildingSelectionWidth": 0.1,
+    "hangarHealth": 250,
+    "hangarBuildSeconds": 15,
+    "hangarCreditCost": 300,
+    "factoryUpgradeCost": 300,
+    "hangarUpgradeCost": 300,
+    "factoryUpgradeSeconds": 15.0,
+    "hangarUpgradeSeconds": 15.0,
+    "upgradedProducerSpeedMultiplier": 1.5,
+    "hangarVisionRange": 14.0,
+    "hangarFootprintRadius": 1.45,
+    "hangarModelHeightMeters": 1.25,
+    "hangarModelScale": 1.0,
+    "scienceHealth": 250.0,
+    "scienceBuildSeconds": 20.0,
+    "scienceVisionRange": 14.0,
+    "scienceFootprintRadius": 1.45,
+    "scienceCreditCost": 300.0,
+    "scienceModelHeightMeters": 1.6407,
+    "scienceModelScale": 0.8,
+    "refineryUpgradeCost": 250.0,
+    "refineryUpgradeSeconds": 20.0,
+    "refineryUpgradedIncome": 20.0,
+    "refineryTurbineSpeed": 90.0,
+    "tankChassisGlowIntensity": 1.2,
+    "tankChassisCost": 300.0,
+    "tankChassisSeconds": 30.0,
+    "tankChassisSpeed": 6.0,
+    "tankChassisHealthBonusPercent": 20.0,
+    "maximumHealthRoundingStep": 5.0,
+    "damageRoundingStep": 0.1,
+    "weaponSystemsLevel3Cost": 400.0,
+    "weaponSystemsLevel3Seconds": 60.0,
+    "weaponSystemsLevel3BonusPercent": 50.0,
+    "defensiveSystemsLevel3Cost": 400.0,
+    "defensiveSystemsLevel3Seconds": 60.0,
+    "defensiveSystemsLevel3BonusPercent": 50.0,
+    "scientificCenterUpgradeCost": 300.0,
+    "scientificCenterUpgradeSeconds": 30.0,
+    "weaponSystemsLevel1Cost": 200.0,
+    "weaponSystemsLevel1Seconds": 30.0,
+    "weaponSystemsLevel1BonusPercent": 15.0,
+    "weaponSystemsLevel2Cost": 300.0,
+    "weaponSystemsLevel2Seconds": 45.0,
+    "weaponSystemsLevel2BonusPercent": 30.0,
+    "defensiveSystemsLevel1Cost": 200.0,
+    "defensiveSystemsLevel1Seconds": 30.0,
+    "defensiveSystemsLevel1BonusPercent": 15.0,
+    "defensiveSystemsLevel2Cost": 300.0,
+    "defensiveSystemsLevel2Seconds": 45.0,
+    "defensiveSystemsLevel2BonusPercent": 30.0,
+    "armySystemsMinimumUnits": 10.0,
+    "aiArmySystemsRecruitDelaySeconds": 420.0,
+    "aiArmySystemsRecruitLevel2DelaySeconds": 600.0,
+    "aiArmySystemsRecruitUtilityScale": 0.15,
+    "aiArmySystemsFighterDelaySeconds": 300.0,
+    "aiArmySystemsFighterLevel2DelaySeconds": 480.0,
+    "aiArmySystemsFighterUtilityScale": 1.0,
+    "aiArmySystemsVeteranDelaySeconds": 180.0,
+    "aiArmySystemsVeteranLevel2DelaySeconds": 360.0,
+    "aiArmySystemsVeteranUtilityScale": 3.0,
+    "aiArmySystemsFighterCatchupSeconds": 60.0,
+    "aiArmySystemsVeteranCatchupSeconds": 0.0,
+    "explorerAssaultCost": 300.0,
+    "explorerAssaultSeconds": 30.0,
+    "explorerAssaultBurstSize": 6.0,
+    "explorerAssaultSpreadDeg": 5.0,
+    "shkvalGuidanceCost": 300.0,
+    "shkvalGuidanceSeconds": 30.0,
+    "shkvalGuidanceRange": 16.0,
+    "incomeMarkerFontPixels": 16.0,
+    "incomeMarkerRisePixels": 24.0,
+    "incomeMarkerDurationSeconds": 1.0,
+    "lifecycleMarkerPixels": 30.0,
+    "lifecycleMarkerPulseHz": 1.0,
+    "lifecycleMarkerMinOpacity": 0.4,
+    "lifecycleMarkerOffsetMeters": 0.8,
+    "buildingSaleRefundRatio": 0.75,
+    "buildingSaleCombatLockoutSec": 5.0,
+    "buildingSaleDemolitionSec": 2.0,
+    "buildingRepairDurationSec": 30.0,
+    "buildingRepairCostRatio": 0.5,
+    "buildingRepairCombatLockoutSec": 5.0,
+    "saleMarkerScale": 0.7,
+    "minimapCompactSize": 180.0,
+    "minimapTacticalSize": 600.0,
+    "minimapTerrainSaturation": 0.7,
+    "minimapTerrainBrightness": 1.15,
+    "minimapTerrainTierContrast": 0.12,
+    "teamSignalLifetimeSeconds": 5.0,
+    "teamSignalMaximumPerAuthor": 3.0,
+    "teamSignalPulseSeconds": 1.2,
+    "teamSignalFadeSeconds": 0.6,
+    "teamSignalMinimumAlpha": 0.3,
+    "teamSignalGlyphPixels": 26.0,
+    "teamSignalMapPixels": 16.0,
+    "teamSignalWheelPixels": 240.0,
+    "teamSignalRepeatRadius": 0.5,
+    "minimapMarkerSize": 1.1,
+    "minimapMarkerStroke": 0.35,
+    "minimapTerrainStroke": 0.32,
+    "minimapCameraStroke": 1.5,
+    "fogTintR": 0.035,
+    "fogTintG": 0.05,
+    "fogTintB": 0.06,
+    "fogMemoryBrightness": 0.45,
+    "fogMemoryDesaturation": 0.85,
+    "headquartersVisionRange": 22.0,
+    "outpostVisionRange": 18.0,
+    "factoryVisionRange": 14.0,
+    "refineryVisionRange": 14.0,
+    "mineVisionRange": 16.0,
+    "constructionVisionMultiplier": 0.5,
+    "visionCellSize": 4.0,
+    "fogRevealMs": 180.0,
+    "fogConcealMs": 450.0,
+    "lingeringVisionSeconds": 1.0,
+    "fogEdgeFeather": 1.5,
+    "fogExploredOpacity": 0.46,
+    "fogUnseenOpacity": 0.94,
+    "minimapLandmarkSize": 14.0,
+    "minimapLandmarkOutline": 2.0,
+    "minimapUnitMarkerSize": 0.9,
+    "outpostHealth": 350.0,
+    "outpostBuildSeconds": 20.0,
+    "outpostCreditCost": 300.0,
+    "outpostIncomePerPeriod": 5.0,
+    "outpostFootprintRadius": 1.7,
+    "outpostModelHeightMeters": 4.6,
+    "outpostModelScale": 0.8,
+    "mineHealth": 250.0,
+    "mineBuildSeconds": 15.0,
+    "mineCreditCost": 250.0,
+    "mineIncomePerPeriod": 15.0,
+    "mineFootprintRadius": 1.4,
+    "mineModelHeightMeters": 2.4,
+    "mineModelScale": 0.7,
+    "headquartersCaptureRadius": 4.5,
+    "headquartersCaptureSeconds": 5.0,
+    "outpostCaptureRadius": 3.5,
+    "outpostCaptureSeconds": 5.0,
+    "mineCaptureRadius": 3.0,
+    "mineCaptureSeconds": 5.0,
+    "relayIncomePerPeriod": 5.0,
+    "relayCaptureRadius": 7.0,
+    "relayCaptureSeconds": 5.0,
+    "relayFootprintRadius": 0.75,
+    "relayVisionRange": 10.0,
+    "headquartersSlots": 5.0,
+    "outpostSlots": 3.0,
+    "slotRingRadius": 6.5,
+    "ordinaryPadRadius": 1.6,
+    "padBorderRatio": 0.06,
+    "capturePulseHz": 2.0,
+    "constructionDamageMultiplier": 1.5,
+    "evacuationClearance": 1.0,
+    "evacuationRetrySeconds": 1.0,
+    "outpostX": -16.0,
+    "outpostZ": 20.0,
+    "mineX": 16.0,
+    "mineZ": -20.0,
+    "shkvalCollisionRadius": 0.72,
+    "shkvalModelRadius": 0.6,
+    "shkvalModelScale": 1.4,
+    "shkvalSpeed": 4.0,
+    "shkvalTurnSpeed": 4.5,
+    "shkvalTurretTurnSpeed": 6.0,
+    "shkvalAimToleranceRad": 0.035,
+    "shkvalRange": 16.0,
+    "shkvalVision": 12.0,
+    "shkvalHealth": 70,
+    "shkvalStopForMs": 1800.0,
+    "shkvalPopulationCost": 4,
+    "shkvalCreditCost": 250,
+    "shkvalProductionMenuOrder": 30,
+    "shkvalProductionDurationSec": 20.0,
+    "shkvalDamage": 10,
+    "shkvalDirectHitDamage": 20,
+    "shkvalFireIntervalMs": 1800.0,
+    "shkvalProjectileSpeed": 12.0,
+    "shkvalArcHeight": 4.0,
+    "shkvalBlastRadius": 1.4,
+    "shkvalBaseBlastRadiusMultiplier": 0.8,
+    "shkvalMarkerStartRadius": 1.9,
+    "shkvalMarkerOpacity": 0.22,
+    "shkvalLeadSpeedThreshold": 7.0,
+    "shkvalLeadFalloff": 1.0,
+    "shkvalLaunchHeight": 1.15,
+    "shkvalProjectileRadius": 0.09,
+    "shkvalProjectileLength": 0.65,
+    "shkvalBuildingCollisionHeight": 2.5,
+    "shkvalMaxLeadTimeSec": 30.0,
+    "shkvalFriendlyFirePenalty": 2.0,
+    "shkvalBaseRange": 12.0,
+    "shkvalExhaustStartupSec": 0.16,
+    "shkvalExhaustRadius": 0.1,
+    "shkvalExhaustLength": 0.75,
+    "shkvalExhaustStartBoost": 2.2,
+    "shkvalExhaustOpacity": 0.85,
+    "weaponMuzzleCoreRatio": 0.6,
+    "impactEffectSec": 0.16,
+    "directImpactSparkWidth": 0.035,
+    "directImpactGlow": 1.5,
+    "directImpactSmokeOpacity": 0.22,
+    "directImpactRadius": 0.18,
+    "directImpactSeconds": 0.16,
+    "directImpactSparkLength": 0.45,
+    "explorerImpactScale": 0.4,
+    "unitWreckLifetimeSeconds": 30.0,
+    "wreckReconcileSlotsPerTick": 16,
+    "wreckReconcileCellsPerTick": 1024,
+    "wreckReconcileQueriesPerTick": 2,
+    "wreckResponseTicks": 30,
+    "wreckSinkSeconds": 2.0,
+    "wreckSpawnProtectionSeconds": 1.0,
+    "wreckBurialMin": 0.03,
+    "wreckBurialMax": 0.16,
+    "wreckSinkDepth": 2.0,
+    "hawkWreckChancePercent": 30.0,
+    "hawkWreckFallSeconds": 0.8,
+    "unitDeathSmokeSeconds": 2.0,
+    "wreckHitSmokeSeconds": 0.6,
+    "wreckSmokeSize": 0.8,
+    "wreckSmokeOpacity": 0.35,
+    "wreckSmokeRise": 0.5,
+    "impactEffectRadius": 0.22,
+    "ballisticWallHeight": 1.74,
+    "explorerCollisionRadius": 0.58,
+    "explorerModelRadius": 0.5,
+    "explorerModelScale": 1.0,
+    "explorerSpeed": 7.0,
+    "explorerTurnSpeed": 7.5,
+    "explorerTurretTurnSpeed": 10.0,
+    "explorerAimToleranceRad": 0.034906585,
+    "explorerRange": 6.5,
+    "explorerVision": 15.0,
+    "explorerHealth": 70,
+    "explorerStopForMs": 0,
+    "explorerPopulationCost": 2,
+    "explorerCreditCost": 100,
+    "explorerProductionMenuOrder": 10,
+    "explorerProductionDurationSec": 12,
+    "explorerDamage": 2,
+    "explorerBurstSize": 4,
+    "explorerBurstShotIntervalMs": 90,
+    "explorerBurstPauseMs": 1100,
+    "explorerProjectileSpeed": 32.0,
+    "explorerSpreadDeg": 7.0,
+    "explorerTracerLength": 0.45,
+    "explorerTracerThickness": 0.025,
+    "explorerMuzzleOffset": 0.7,
+    "profileId": "unity-owner-research-queue-u6-v1",
+    "revision": 4,
+    "sourceCommit": "7d0acb8d078451eaf0ed166a6f8b6d748925abf8",
+    "sourceProfileId": "local:main:1788708872201:1",
+    "sourceProfileRevision": 5,
+    "sourceManifestSha256": "a9b40994adc17b96d9079279044b75cd79af2d6a3ab9c2c8ed576e6d1dad86b6",
+    "unitOrderQueueLimit": 64.0,
+    "groupMarchMaximumStretch": 4.0,
+    "idleAutoDefenseMultiplier": 1.1,
+    "defaultCombatPursuitSeconds": 2.0,
+    "followDistance": 2.0,
+    "followArrivalTolerance": 0.25,
+    "tankReverseDistance": 0.0,
+    "tankReverseSpeedRatio": 0.45,
+    "tankReverseConeRadians": 0.4,
+    "tankCollisionRadius": 0.72,
+    "tankModelRadius": 0.65,
+    "tankModelScale": 1.0,
+    "tankSpeed": 4.0,
+    "tankTurnSpeed": 4.5,
+    "tankTurretTurnSpeed": 6.0,
+    "tankAimToleranceRadians": 0.034906585,
+    "tankRange": 8.0,
+    "tankVisionRange": 13.0,
+    "tankHealth": 100,
+    "tankStopForMilliseconds": 0,
+    "tankPopulationCost": 3,
+    "tankCreditCost": 150,
+    "tankProductionMenuOrder": 20,
+    "tankProductionSeconds": 15,
+    "tankWeaponDamage": 8,
+    "tankWeaponReloadMilliseconds": 900,
+    "tankFiresWhileMoving": true,
+    "tankProjectileType": "kinetic-shell",
+    "tankProjectileSpeed": 15.0,
+    "tankProjectileCollisionRadius": 0.06,
+    "projectileExtraRangePercent": 20.0,
+    "startingCredits": 500,
+    "incomePeriodSeconds": 5,
+    "incomeSettlementSeconds": 0.1,
+    "armyCapacity": 100,
+    "matchScoreEarnedCreditsDivisor": 2,
+    "buildingCancellationRefundRatio": 0.75,
+    "unitCancellationRefundRatio": 1.0,
+    "headquartersHealth": 500,
+    "headquartersBuildSeconds": 25,
+    "headquartersCreditCost": 500,
+    "headquartersIncomePerPeriod": 20,
+    "rallyFlagHeight": 1.8,
+    "headquartersFootprintRadius": 2.05,
+    "headquartersModelHeightMeters": 4.6,
+    "headquartersModelScale": 0.7,
+    "factoryHealth": 250,
+    "factoryBuildSeconds": 15,
+    "factoryCreditCost": 300,
+    "factoryFootprintRadius": 1.45,
+    "factoryModelHeightMeters": 2.5,
+    "factoryModelScale": 0.7,
+    "factoryGateSeconds": 0.35,
+    "factoryRolloutSpeed": 3.0,
+    "refineryHealth": 200,
+    "refineryBuildSeconds": 10,
+    "refineryCreditCost": 200,
+    "refineryIncomePerPeriod": 10,
+    "refineryFootprintRadius": 1.35,
+    "refineryModelHeightMeters": 2.6,
+    "refineryModelScale": 0.8,
+    "arenaHalfExtent": 32.0,
+    "playerHeadquartersX": -21.0,
+    "enemyHeadquartersX": 21.0,
+    "headquartersZ": 0.0,
+    "playerFactoryPadX": -15.0,
+    "playerFactoryPadZ": -9.0,
+    "playerRefineryPadX": -15.0,
+    "playerRefineryPadZ": 9.0,
+    "enemyFactoryPadX": 15.0,
+    "enemyFactoryPadZ": 9.0,
+    "enemyRefineryPadX": 15.0,
+    "enemyRefineryPadZ": -9.0,
+    "centralObstacleHalfWidth": 3.0,
+    "centralObstacleHalfDepth": 24.0,
+    "passageHalfWidth": 4.0,
+    "enemyAdvanceDelaySeconds": 180.0,
+    "attackApproachRangeRatio": 0.85,
+    "attackRepathSeconds": 0.5,
+    "factoryExitDistance": 3.0,
+    "defaultRallyDistance": 7.0,
+    "targetPickRadiusMultiplier": 1.8,
+    "buildingPickRadius": 2.3,
+    "defenderOffsetX": 5.0,
+    "defenderOffsetZ": 4.0,
+    "navigationMaxAccruedCredits": 0,
+    "navigationRequestsPerFrame": 4,
+    "renderTargetFramesPerSecond": 60,
+    "cameraEdgePanSpeed": 8.0,
+    "cameraEdgePanZonePixels": 28.0,
+    "cameraOrthoSize": 9.6,
+    "cameraHeight": 26.0,
+    "cameraOffsetX": 0.0,
+    "cameraOffsetZ": -37.0,
+    "cameraPanSpeed": 12.0,
+    "cameraMinZoom": 2.135,
+    "cameraMaxZoom": 25.6,
+    "cameraZoomSpeed": 0.013,
+    "selectionDragPixels": 6.0
+  },
+  "Ai": {
+    "Id": "ai-openings-midgame-v1",
+    "Revision": 1,
+    "Hash": "aa3c79c952d02cb9d7f02eb776ceeaeb1d3ab72a0aceaab72f285d60c7b8a964",
+    "Data": {
+      "schemaVersion": 1,
+      "revision": 1,
+      "id": "ai-openings-midgame-v1",
+      "fields": [
+        {
+          "path": "activeStrategy.developmentSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "activeStrategy.fortificationWeight",
+          "value": 2.0
+        },
+        {
+          "path": "activeStrategy.materialCredits",
+          "value": 200.0
+        },
+        {
+          "path": "activeStrategy.maximumEncounterRatio",
+          "value": 1.2
+        },
+        {
+          "path": "activeStrategy.siegeShare",
+          "value": 0.25
+        },
+        {
+          "path": "armies.assemblyDeadlineSeconds",
+          "value": 20.0
+        },
+        {
+          "path": "armies.minimumUnits",
+          "value": 3.0
+        },
+        {
+          "path": "armies.offensiveOverdueSeconds",
+          "value": 45.0
+        },
+        {
+          "path": "armies.reinforcementMinimumUnits",
+          "value": 2.0
+        },
+        {
+          "path": "armies.retreatThreatRatio",
+          "value": 1.35
+        },
+        {
+          "path": "armies.stallSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "composition.counterMaximumBudgetTransfer",
+          "value": 0.15
+        },
+        {
+          "path": "composition.early.lineBudgetShare",
+          "value": 0.75
+        },
+        {
+          "path": "composition.early.minimumSupport",
+          "value": 0.0
+        },
+        {
+          "path": "composition.early.reconBudgetShare",
+          "value": 0.1
+        },
+        {
+          "path": "composition.early.supportBudgetShare",
+          "value": 0.15
+        },
+        {
+          "path": "composition.late.lineBudgetShare",
+          "value": 0.55
+        },
+        {
+          "path": "composition.late.minimumSupport",
+          "value": 1.0
+        },
+        {
+          "path": "composition.late.reconBudgetShare",
+          "value": 0.05
+        },
+        {
+          "path": "composition.late.supportBudgetShare",
+          "value": 0.4
+        },
+        {
+          "path": "composition.mid.lineBudgetShare",
+          "value": 0.6
+        },
+        {
+          "path": "composition.mid.minimumSupport",
+          "value": 1.0
+        },
+        {
+          "path": "composition.mid.reconBudgetShare",
+          "value": 0.1
+        },
+        {
+          "path": "composition.mid.supportBudgetShare",
+          "value": 0.3
+        },
+        {
+          "path": "crisis.deficitRatio",
+          "value": 0.55
+        },
+        {
+          "path": "crisis.episodeCooldownSeconds",
+          "value": 90.0
+        },
+        {
+          "path": "crisis.maximumLiquidatedValueShare",
+          "value": 0.35
+        },
+        {
+          "path": "crisis.minimumConfidence",
+          "value": 0.6
+        },
+        {
+          "path": "crisis.preparationDeadlineSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "crisis.riskProbability",
+          "value": 0.35
+        },
+        {
+          "path": "crisis.sustainSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "decision.intentAgingSeconds",
+          "value": 10.0
+        },
+        {
+          "path": "decision.repeatOrderSeconds",
+          "value": 2.0
+        },
+        {
+          "path": "decision.retryLimit",
+          "value": 3.0
+        },
+        {
+          "path": "decision.retrySeconds",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.fighter.actionsPerDecision",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.fighter.control.burst",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.fighter.control.fairRun",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.fighter.control.ordersPerMinute",
+          "value": 70.0
+        },
+        {
+          "path": "difficulty.fighter.control.reactionMaxSeconds",
+          "value": 1.5
+        },
+        {
+          "path": "difficulty.fighter.decisionSeconds",
+          "value": 1.5
+        },
+        {
+          "path": "difficulty.fighter.estimateNoise",
+          "value": 0.12
+        },
+        {
+          "path": "difficulty.fighter.majorArmies",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.fighter.micro.airFocusEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.fighter.micro.chaseEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.fighter.micro.combatRepairHealth",
+          "value": 0.3
+        },
+        {
+          "path": "difficulty.fighter.micro.cooldownSeconds",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.fighter.micro.focusAttackers",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.fighter.micro.focusEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.fighter.micro.focusGroupSize",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.fighter.micro.idleRepairHealth",
+          "value": 0.85
+        },
+        {
+          "path": "difficulty.fighter.micro.intensity",
+          "value": 0.65
+        },
+        {
+          "path": "difficulty.fighter.micro.lossPerSecond",
+          "value": 0.12
+        },
+        {
+          "path": "difficulty.fighter.micro.maxPhaseSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "difficulty.fighter.micro.maxWithdrawal",
+          "value": 12.0
+        },
+        {
+          "path": "difficulty.fighter.micro.observedFireSeconds",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.fighter.micro.overkillRatio",
+          "value": 1.2
+        },
+        {
+          "path": "difficulty.fighter.micro.repairEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.fighter.micro.repairReturnHealth",
+          "value": 0.9
+        },
+        {
+          "path": "difficulty.fighter.micro.repairTravelSeconds",
+          "value": 45.0
+        },
+        {
+          "path": "difficulty.fighter.micro.returnCoreHealth",
+          "value": 0.4
+        },
+        {
+          "path": "difficulty.fighter.micro.returnCoreUnits",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.fighter.micro.safeSeconds",
+          "value": 1.5
+        },
+        {
+          "path": "difficulty.fighter.micro.safetyMargin",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.fighter.micro.shortStep",
+          "value": 4.0
+        },
+        {
+          "path": "difficulty.fighter.micro.supportRadius",
+          "value": 18.0
+        },
+        {
+          "path": "difficulty.fighter.micro.withdrawEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.fighter.micro.withdrawHealth",
+          "value": 0.7
+        },
+        {
+          "path": "difficulty.fighter.reactionSeconds",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.fighter.scoutAssignments",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.recruit.actionsPerDecision",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.recruit.control.burst",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.recruit.control.fairRun",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.recruit.control.ordersPerMinute",
+          "value": 30.0
+        },
+        {
+          "path": "difficulty.recruit.control.reactionMaxSeconds",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.recruit.decisionSeconds",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.recruit.estimateNoise",
+          "value": 0.25
+        },
+        {
+          "path": "difficulty.recruit.majorArmies",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.recruit.micro.airFocusEnabled",
+          "value": 0.0
+        },
+        {
+          "path": "difficulty.recruit.micro.chaseEnabled",
+          "value": 0.0
+        },
+        {
+          "path": "difficulty.recruit.micro.combatRepairHealth",
+          "value": 0.3
+        },
+        {
+          "path": "difficulty.recruit.micro.cooldownSeconds",
+          "value": 8.0
+        },
+        {
+          "path": "difficulty.recruit.micro.focusAttackers",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.recruit.micro.focusEnabled",
+          "value": 0.0
+        },
+        {
+          "path": "difficulty.recruit.micro.focusGroupSize",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.recruit.micro.idleRepairHealth",
+          "value": 0.85
+        },
+        {
+          "path": "difficulty.recruit.micro.intensity",
+          "value": 0.1
+        },
+        {
+          "path": "difficulty.recruit.micro.lossPerSecond",
+          "value": 0.12
+        },
+        {
+          "path": "difficulty.recruit.micro.maxPhaseSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "difficulty.recruit.micro.maxWithdrawal",
+          "value": 12.0
+        },
+        {
+          "path": "difficulty.recruit.micro.observedFireSeconds",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.recruit.micro.overkillRatio",
+          "value": 1.2
+        },
+        {
+          "path": "difficulty.recruit.micro.repairEnabled",
+          "value": 0.0
+        },
+        {
+          "path": "difficulty.recruit.micro.repairReturnHealth",
+          "value": 0.9
+        },
+        {
+          "path": "difficulty.recruit.micro.repairTravelSeconds",
+          "value": 45.0
+        },
+        {
+          "path": "difficulty.recruit.micro.returnCoreHealth",
+          "value": 0.4
+        },
+        {
+          "path": "difficulty.recruit.micro.returnCoreUnits",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.recruit.micro.safeSeconds",
+          "value": 1.5
+        },
+        {
+          "path": "difficulty.recruit.micro.safetyMargin",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.recruit.micro.shortStep",
+          "value": 4.0
+        },
+        {
+          "path": "difficulty.recruit.micro.supportRadius",
+          "value": 18.0
+        },
+        {
+          "path": "difficulty.recruit.micro.withdrawEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.recruit.micro.withdrawHealth",
+          "value": 0.7
+        },
+        {
+          "path": "difficulty.recruit.reactionSeconds",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.recruit.scoutAssignments",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.veteran.actionsPerDecision",
+          "value": 4.0
+        },
+        {
+          "path": "difficulty.veteran.control.burst",
+          "value": 4.0
+        },
+        {
+          "path": "difficulty.veteran.control.fairRun",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.veteran.control.ordersPerMinute",
+          "value": 120.0
+        },
+        {
+          "path": "difficulty.veteran.control.reactionMaxSeconds",
+          "value": 0.7
+        },
+        {
+          "path": "difficulty.veteran.decisionSeconds",
+          "value": 0.5
+        },
+        {
+          "path": "difficulty.veteran.estimateNoise",
+          "value": 0.04
+        },
+        {
+          "path": "difficulty.veteran.majorArmies",
+          "value": 4.0
+        },
+        {
+          "path": "difficulty.veteran.micro.airFocusEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.veteran.micro.chaseEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.veteran.micro.combatRepairHealth",
+          "value": 0.3
+        },
+        {
+          "path": "difficulty.veteran.micro.cooldownSeconds",
+          "value": 1.5
+        },
+        {
+          "path": "difficulty.veteran.micro.focusAttackers",
+          "value": 3.0
+        },
+        {
+          "path": "difficulty.veteran.micro.focusEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.veteran.micro.focusGroupSize",
+          "value": 4.0
+        },
+        {
+          "path": "difficulty.veteran.micro.idleRepairHealth",
+          "value": 0.85
+        },
+        {
+          "path": "difficulty.veteran.micro.intensity",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.veteran.micro.lossPerSecond",
+          "value": 0.12
+        },
+        {
+          "path": "difficulty.veteran.micro.maxPhaseSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "difficulty.veteran.micro.maxWithdrawal",
+          "value": 12.0
+        },
+        {
+          "path": "difficulty.veteran.micro.observedFireSeconds",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.veteran.micro.overkillRatio",
+          "value": 1.2
+        },
+        {
+          "path": "difficulty.veteran.micro.repairEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.veteran.micro.repairReturnHealth",
+          "value": 0.9
+        },
+        {
+          "path": "difficulty.veteran.micro.repairTravelSeconds",
+          "value": 45.0
+        },
+        {
+          "path": "difficulty.veteran.micro.returnCoreHealth",
+          "value": 0.4
+        },
+        {
+          "path": "difficulty.veteran.micro.returnCoreUnits",
+          "value": 2.0
+        },
+        {
+          "path": "difficulty.veteran.micro.safeSeconds",
+          "value": 1.5
+        },
+        {
+          "path": "difficulty.veteran.micro.safetyMargin",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.veteran.micro.shortStep",
+          "value": 4.0
+        },
+        {
+          "path": "difficulty.veteran.micro.supportRadius",
+          "value": 18.0
+        },
+        {
+          "path": "difficulty.veteran.micro.withdrawEnabled",
+          "value": 1.0
+        },
+        {
+          "path": "difficulty.veteran.micro.withdrawHealth",
+          "value": 0.7
+        },
+        {
+          "path": "difficulty.veteran.reactionSeconds",
+          "value": 0.4
+        },
+        {
+          "path": "difficulty.veteran.scoutAssignments",
+          "value": 3.0
+        },
+        {
+          "path": "economy.earlyMinePaybackSeconds",
+          "value": 120.0
+        },
+        {
+          "path": "economy.enemyMainProtectedIncomeSites",
+          "value": 2.0
+        },
+        {
+          "path": "economy.excessBankDeadlineSeconds",
+          "value": 20.0
+        },
+        {
+          "path": "economy.expansionRiskRatio",
+          "value": 0.8
+        },
+        {
+          "path": "economy.factoryLaunchCycles",
+          "value": 2.0
+        },
+        {
+          "path": "economy.factoryUtilization",
+          "value": 0.8
+        },
+        {
+          "path": "economy.idleLineDeadlineSeconds",
+          "value": 8.0
+        },
+        {
+          "path": "economy.incomeWindowSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "economy.minimumIncomeToSpendRatio",
+          "value": 0.8
+        },
+        {
+          "path": "economy.remoteExpansionShare",
+          "value": 0.1
+        },
+        {
+          "path": "economy.repairPriorityHealthRatio",
+          "value": 0.6
+        },
+        {
+          "path": "economy.reservationExpirySeconds",
+          "value": 45.0
+        },
+        {
+          "path": "economy.reserveSeconds",
+          "value": 15.0
+        },
+        {
+          "path": "economy.reservedProductionSlots",
+          "value": 1.0
+        },
+        {
+          "path": "economy.reservedScienceSlots",
+          "value": 1.0
+        },
+        {
+          "path": "economy.surplusIncomeToSpendRatio",
+          "value": 1.2
+        },
+        {
+          "path": "endgame.growDeadlineSeconds",
+          "value": 120.0
+        },
+        {
+          "path": "opening.deadlineSeconds",
+          "value": 120.0
+        },
+        {
+          "path": "opening.forceUnits",
+          "value": 3.0
+        },
+        {
+          "path": "opening.greedyRefineries",
+          "value": 2.0
+        },
+        {
+          "path": "opening.weights.blindRush",
+          "value": 1.0
+        },
+        {
+          "path": "opening.weights.expansion",
+          "value": 1.0
+        },
+        {
+          "path": "opening.weights.greedy",
+          "value": 1.0
+        },
+        {
+          "path": "opening.weights.safe",
+          "value": 1.0
+        },
+        {
+          "path": "opening.weights.scoutPressure",
+          "value": 1.0
+        },
+        {
+          "path": "openingsMidgame.adaptation.firstMaxSeconds",
+          "value": 360.0
+        },
+        {
+          "path": "openingsMidgame.adaptation.firstMinSeconds",
+          "value": 180.0
+        },
+        {
+          "path": "openingsMidgame.adaptation.probability",
+          "value": 0.3
+        },
+        {
+          "path": "openingsMidgame.adaptation.secondMinSeconds",
+          "value": 240.0
+        },
+        {
+          "path": "openingsMidgame.adaptation.secondProbability",
+          "value": 0.25
+        },
+        {
+          "path": "openingsMidgame.aggressiveFirst",
+          "value": 2.0
+        },
+        {
+          "path": "openingsMidgame.airCalm",
+          "value": 4.0
+        },
+        {
+          "path": "openingsMidgame.airCore",
+          "value": 3.0
+        },
+        {
+          "path": "openingsMidgame.airFactoryCalm",
+          "value": 4.0
+        },
+        {
+          "path": "openingsMidgame.airFactoryThreat",
+          "value": 3.0
+        },
+        {
+          "path": "openingsMidgame.airFirst",
+          "value": 3.0
+        },
+        {
+          "path": "openingsMidgame.allInMax",
+          "value": 4.0
+        },
+        {
+          "path": "openingsMidgame.allInMin",
+          "value": 3.0
+        },
+        {
+          "path": "openingsMidgame.allyWait",
+          "value": 5.0
+        },
+        {
+          "path": "openingsMidgame.antiAir.explorer",
+          "value": 1.0
+        },
+        {
+          "path": "openingsMidgame.antiAir.tank",
+          "value": 2.0
+        },
+        {
+          "path": "openingsMidgame.balanced.explorer",
+          "value": 3.0
+        },
+        {
+          "path": "openingsMidgame.balanced.shkval",
+          "value": 1.0
+        },
+        {
+          "path": "openingsMidgame.balanced.tank",
+          "value": 3.0
+        },
+        {
+          "path": "openingsMidgame.combined.balancedSmallAir",
+          "value": 20.0
+        },
+        {
+          "path": "openingsMidgame.combined.hawksExplorers",
+          "value": 30.0
+        },
+        {
+          "path": "openingsMidgame.combined.hawksTanks",
+          "value": 30.0
+        },
+        {
+          "path": "openingsMidgame.combined.heavySmallAir",
+          "value": 20.0
+        },
+        {
+          "path": "openingsMidgame.doubleIncome",
+          "value": 2.0
+        },
+        {
+          "path": "openingsMidgame.greedyAirShare",
+          "value": 0.5
+        },
+        {
+          "path": "openingsMidgame.greedyIncome",
+          "value": 3.0
+        },
+        {
+          "path": "openingsMidgame.ground.balanced",
+          "value": 35.0
+        },
+        {
+          "path": "openingsMidgame.ground.explorers",
+          "value": 20.0
+        },
+        {
+          "path": "openingsMidgame.ground.heavy",
+          "value": 20.0
+        },
+        {
+          "path": "openingsMidgame.ground.tanks",
+          "value": 25.0
+        },
+        {
+          "path": "openingsMidgame.groundStay",
+          "value": 0.8
+        },
+        {
+          "path": "openingsMidgame.heavy.shkval",
+          "value": 1.0
+        },
+        {
+          "path": "openingsMidgame.heavy.tank",
+          "value": 4.0
+        },
+        {
+          "path": "openingsMidgame.opening.aggressive",
+          "value": 20.0
+        },
+        {
+          "path": "openingsMidgame.opening.air",
+          "value": 10.0
+        },
+        {
+          "path": "openingsMidgame.opening.allIn",
+          "value": 18.0
+        },
+        {
+          "path": "openingsMidgame.opening.doubleIncome",
+          "value": 40.0
+        },
+        {
+          "path": "openingsMidgame.opening.greedy",
+          "value": 20.0
+        },
+        {
+          "path": "openingsMidgame.openingExplorerShare",
+          "value": 0.5
+        },
+        {
+          "path": "openingsMidgame.outpostMax",
+          "value": 5.0
+        },
+        {
+          "path": "openingsMidgame.outpostMin",
+          "value": 4.0
+        },
+        {
+          "path": "openingsMidgame.personality.aggressive",
+          "value": 30.0
+        },
+        {
+          "path": "openingsMidgame.personality.defensive",
+          "value": 40.0
+        },
+        {
+          "path": "openingsMidgame.personality.harassing",
+          "value": 30.0
+        },
+        {
+          "path": "openingsMidgame.personality.harassingRetreatRatio",
+          "value": 1.0
+        },
+        {
+          "path": "openingsMidgame.personality.harassingScoutScale",
+          "value": 0.75
+        },
+        {
+          "path": "openingsMidgame.personality.holdSeconds",
+          "value": 180.0
+        },
+        {
+          "path": "openingsMidgame.personality.maximumChanges",
+          "value": 2.0
+        },
+        {
+          "path": "openingsMidgame.reinforceShare",
+          "value": 0.5
+        },
+        {
+          "path": "openingsMidgame.reinforcedMax",
+          "value": 4.0
+        },
+        {
+          "path": "openingsMidgame.reinforcedMin",
+          "value": 3.0
+        },
+        {
+          "path": "openingsMidgame.smallAir",
+          "value": 1.0
+        },
+        {
+          "path": "openingsMidgame.specializedLiving",
+          "value": 5.0
+        },
+        {
+          "path": "openingsMidgame.teamAir2",
+          "value": 0.25
+        },
+        {
+          "path": "openingsMidgame.teamAir3",
+          "value": 0.3333333333333333
+        },
+        {
+          "path": "openingsMidgame.teamAirOnly",
+          "value": 0.5
+        },
+        {
+          "path": "orbital.baseSearchBonus",
+          "value": 35.0
+        },
+        {
+          "path": "orbital.choiceVariation",
+          "value": 5.0
+        },
+        {
+          "path": "orbital.engagementBonus",
+          "value": 35.0
+        },
+        {
+          "path": "orbital.hackSurvivalFloor",
+          "value": 0.25
+        },
+        {
+          "path": "orbital.hackThreatBonus",
+          "value": 80.0
+        },
+        {
+          "path": "orbital.hackValueScale",
+          "value": 0.3
+        },
+        {
+          "path": "orbital.mineContactBonus",
+          "value": 35.0
+        },
+        {
+          "path": "orbital.mineGuardRadius",
+          "value": 24.0
+        },
+        {
+          "path": "orbital.mineSafetyMargin",
+          "value": 2.0
+        },
+        {
+          "path": "orbital.mineSpacing",
+          "value": 5.0
+        },
+        {
+          "path": "orbital.mineUtility",
+          "value": 35.0
+        },
+        {
+          "path": "orbital.minimumUtility",
+          "value": 20.0
+        },
+        {
+          "path": "orbital.personalityBonus",
+          "value": 20.0
+        },
+        {
+          "path": "orbital.replacementGain",
+          "value": 15.0
+        },
+        {
+          "path": "orbital.scanUtility",
+          "value": 45.0
+        },
+        {
+          "path": "phase.lateFallbackSeconds",
+          "value": 600.0
+        },
+        {
+          "path": "phase.lateIncomeStartingRatio",
+          "value": 4.0
+        },
+        {
+          "path": "phase.midFallbackSeconds",
+          "value": 240.0
+        },
+        {
+          "path": "phase.midIncomeStartingRatio",
+          "value": 2.0
+        },
+        {
+          "path": "phase.minimumResidenceSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "positionDevelopment.airGroundThreat",
+          "value": 4.0
+        },
+        {
+          "path": "positionDevelopment.concreteValue",
+          "value": 1.0
+        },
+        {
+          "path": "positionDevelopment.investmentHorizonSeconds",
+          "value": 180.0
+        },
+        {
+          "path": "positionDevelopment.localThreatRange",
+          "value": 40.0
+        },
+        {
+          "path": "positionDevelopment.maximumThreatRatio",
+          "value": 2.0
+        },
+        {
+          "path": "positionDevelopment.repairHealth",
+          "value": 0.55
+        },
+        {
+          "path": "positionDevelopment.repairReturnHealth",
+          "value": 0.85
+        },
+        {
+          "path": "positionDevelopment.repairWaitSeconds",
+          "value": 20.0
+        },
+        {
+          "path": "positionDevelopment.towerValue",
+          "value": 1.2
+        },
+        {
+          "path": "safeReinforcements.coreHealthShare",
+          "value": 0.65
+        },
+        {
+          "path": "safeReinforcements.coreRadius",
+          "value": 16.0
+        },
+        {
+          "path": "safeReinforcements.maximumThreatRatio",
+          "value": 1.2
+        },
+        {
+          "path": "scouting.blindRushBudgetScale",
+          "value": 0.25
+        },
+        {
+          "path": "scouting.contactHalfLifeSeconds",
+          "value": 60.0
+        },
+        {
+          "path": "scouting.revisitSeconds",
+          "value": 45.0
+        },
+        {
+          "path": "strategy.commitmentSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "strategy.switchMargin",
+          "value": 0.15
+        },
+        {
+          "path": "team.claimTtlSeconds",
+          "value": 30.0
+        },
+        {
+          "path": "team.maximumAssemblyWaitSeconds",
+          "value": 15.0
+        },
+        {
+          "path": "team.minimumHomeReserveShare",
+          "value": 0.2
+        },
+        {
+          "path": "technology.minimumIncomeBuildings",
+          "value": 3.0
+        },
+        {
+          "path": "technology.minimumUnitsForScienceCenter",
+          "value": 10.0
+        },
+        {
+          "path": "technology.mixedBaseIncomeBuildings",
+          "value": 4.0
+        },
+        {
+          "path": "utility.forceHorizonSeconds",
+          "value": 5.0
+        },
+        {
+          "path": "utility.scout.informationGain",
+          "value": 0.5
+        },
+        {
+          "path": "utility.scout.riskCost",
+          "value": 0.3
+        },
+        {
+          "path": "utility.scout.travelCost",
+          "value": 0.2
+        },
+        {
+          "path": "utility.target.economicValue",
+          "value": 0.25
+        },
+        {
+          "path": "utility.target.newFrontCost",
+          "value": 0.1
+        },
+        {
+          "path": "utility.target.opportunity",
+          "value": 0.15
+        },
+        {
+          "path": "utility.target.reachability",
+          "value": 0.2
+        },
+        {
+          "path": "utility.target.threat",
+          "value": 0.3
+        }
+      ]
+    }
+  },
+  "Roster": [
+    {
+      "Id": "player-1",
+      "LogicalPlayer": 1,
+      "Team": 2,
+      "Control": "Ai"
+    },
+    {
+      "Id": "foundry-2",
+      "LogicalPlayer": 2,
+      "Team": 1,
+      "Control": "Ai"
+    },
+    {
+      "Id": "foundry-3",
+      "LogicalPlayer": 3,
+      "Team": 2,
+      "Control": "Ai"
+    },
+    {
+      "Id": "foundry-4",
+      "LogicalPlayer": 4,
+      "Team": 1,
+      "Control": "Ai"
+    }
+  ],
+  "SourceRevision": "e3485e954639452f3200440a9ac1623547e1689b",
+  "SourceDiffSha256": "7fd126c488e15eb294cbd8bec426ddbc005d39e42cffe863d49a53e8e7060443",
+  "StopTick": 12042,
+  "Difficulties": [
+    "Fighter",
+    "Veteran",
+    "Fighter",
+    "Veteran"
+  ]
+}

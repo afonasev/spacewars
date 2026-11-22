@@ -49,7 +49,7 @@ namespace Spacewars.Tests.EditMode
             const BindingFlags hidden=BindingFlags.Instance|BindingFlags.NonPublic;
             var data=Newtonsoft.Json.JsonConvert.DeserializeObject<PlayableProfileData>(File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(),"Assets/Spacewars/Content/Resources/PlayableProfile.json")));
             var baseline=PlayableProfile.Create(data,new AiTestMap());var folder=Path.GetFullPath("../.local/three-cpu/ready");Directory.CreateDirectory(folder);
-            var store=new NativeBalanceStore(baseline,Path.Combine(folder,"balance-control.json"),false);store.Select(NativeBalanceStore.NewMatchProfileId,NativeBalanceStore.NewMatchProfileVersion);
+            var store=new NativeBalanceStore(baseline,Path.Combine(folder,"balance-control.json"),false);store.Select(NativeBalanceStore.CorridorExperimentId,NativeBalanceStore.CorridorExperimentVersion);
             var p=store.Active;var ai=store.ActiveAiProfile;var setup=new NativeLobbyConfiguration{AiTestMap=true,HasExplicitSeed=true,ExplicitSeed=7};setup.InitializeParticipants();OfflineMatchConfiguration config;
             using(var runtime=PlayableRuntime.CreateEightPlayerPerformanceMatch(p,1,setup,startPaused:true,aiProfile:ai)){Assert.AreEqual(400,runtime.DiagnosticGlobalUnits);config=(OfflineMatchConfiguration)typeof(PlayableRuntime).GetField("offlineConfiguration",hidden).GetValue(runtime);}
             var authority=new PlayableAuthorityTick(config,1,aiProfile:ai);

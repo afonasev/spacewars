@@ -10,6 +10,25 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class AsyncRouteDeliveryTests
     {
+        [TestCase(false)][TestCase(true)] public void ObservedWorkerReleasesNativePagesBeforeStoppedSignal(bool fault)
+        {
+            var lane=new ObservedPathLane();var geometry=new NavGeometry(181,new[]{new NavObstacle(-.8,-7,.8,7)},1);
+            var basis=new NavigationProfile("native-worker-lifetime",1,.3,4,4.5,1,.15,3.6,.08);
+            var work=new ObservedPathWork(PlayableOwner.Player,geometry,basis,.3,4,4.5,new NavPoint(-5,0),new NavPoint(5,0));
+            SharedFlowRouter router=null;
+            try{
+                Assert.True(SpinWait.SpinUntil(()=>lane.TryGet(work,1,2,PlayableRouteTargetKind.VisibleEnemy,0,out _),5000));
+                // The only job is settled. Capture the actual pool's router, then
+                // prove its native blocks are freed while this strong reference lives.
+                var caches=(System.Collections.IDictionary)typeof(ObservedPathWorkPool).GetField("caches",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(lane.PoolForTests);
+                var profiles=(System.Collections.IList)caches[PlayableOwner.Player];Assert.AreEqual(1,profiles.Count);
+                router=(SharedFlowRouter)profiles[0].GetType().GetField("Router",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(profiles[0]);Assert.Greater(router.NativeDistanceBytes,0);
+                if(fault)lane.TryGet(work,3,2,PlayableRouteTargetKind.VisibleEnemy,0,out _,()=>throw new InvalidOperationException("Native worker lifetime fault"));
+                else lane.Stop();
+                Assert.True(SpinWait.SpinUntil(()=>lane.IsStopped,5000));Assert.Zero(router.NativeDistanceBytes,"Stopped is published only after deterministic disposal, no GC");
+                Assert.Throws<ObjectDisposedException>(()=>router.FindPath(work.Origin,work.Goal));
+            }finally{lane.Stop();Assert.True(SpinWait.SpinUntil(()=>lane.IsStopped,5000));}
+        }
         [Test] public void ObservedLaneBoundsTransportWithoutStarvingLargerObservation()
         {
             var lane=new ObservedPathLane();using var entered=new ManualResetEventSlim();using var release=new ManualResetEventSlim();
@@ -34,6 +53,38 @@ namespace Spacewars.Tests.EditMode
                 var error=Assert.Throws<InvalidOperationException>(()=>lane.TryGet(query,1,2,PlayableRouteTargetKind.VisibleEnemy,0,out _));StringAssert.Contains("Observed test fault",error.InnerException.Message);
             }finally{lane.Stop();Assert.True(SpinWait.SpinUntil(()=>lane.IsStopped,5000));}
         }
+        [Test] public void ObservedLanePreservesOverflowOrderWhenQueuedOwnerWorkExpires()
+        {
+            var lane=new ObservedPathLane();
+            using var entered=new ManualResetEventSlim();
+            using var release=new ManualResetEventSlim();
+            var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);
+            var profile=PlayableProfile.Default.Navigation;
+            ObservedPathWork Work(PlayableOwner owner)=>new ObservedPathWork(owner,geometry,profile,.5,2,2,new NavPoint(-5,0),new NavPoint(5,0));
+            var player=Work(PlayableOwner.Player);
+            var enemy=Work(PlayableOwner.Enemy);
+            var kind=PlayableRouteTargetKind.VisibleEnemy;
+            var executed=new System.Collections.Generic.List<int>();
+            try{
+                Assert.False(lane.TryGet(player,1,2,kind,0,out _,()=>{entered.Set();Assert.True(release.Wait(5000));}));
+                Assert.True(entered.Wait(5000));
+                for(int actor=2;actor<=ObservedPathLane.Capacity;actor++)
+                    Assert.False(lane.TryGet(player,actor,2,kind,0,out _,()=>Assert.Fail("Expired queued work executed.")));
+                Assert.False(lane.TryGet(enemy,1,2,kind,0,out _,()=>executed.Add(1)));
+                Assert.False(lane.TryGet(enemy,2,2,kind,0,out _,()=>executed.Add(2)));
+                Assert.AreEqual(ObservedPathLane.Capacity,lane.Count);
+                lane.BeginProjection(PlayableOwner.Player);
+                Assert.False(lane.TryGet(player,1,2,kind,0,out _));
+                lane.EndProjection(PlayableOwner.Player);
+                Assert.AreEqual(3,lane.RetainedCount);
+                release.Set();
+                lane.DrainForCapture(()=>false);
+                CollectionAssert.AreEqual(new[]{1,2},executed);
+                Assert.True(lane.TryGet(enemy,1,2,kind,0,out var first));
+                Assert.True(lane.TryGet(enemy,2,2,kind,0,out var second));
+                CollectionAssert.AreEqual(first,second);
+            }finally{release.Set();lane.Stop();Assert.True(SpinWait.SpinUntil(()=>lane.IsStopped,5000));}
+        }
         [Test] public void ObservedLanePreservesSettledAnswersExactlyAndRebindsMovingEndpoints()
         {
             var lane=new ObservedPathLane();ObservedPathLane restored=null;
@@ -52,6 +103,34 @@ namespace Spacewars.Tests.EditMode
                 var changed=new ObservedPathWork(PlayableOwner.Player,geometry,profile,.6,2,2,query.Origin,query.Goal);
                 Assert.False(restored.TryGet(changed,1,2,PlayableRouteTargetKind.VisibleEnemy,0,out _),"Changed footprint must not consume the old proof.");
             }finally{lane.Stop();restored?.Stop();Assert.True(SpinWait.SpinUntil(()=>lane.IsStopped&&(restored==null||restored.IsStopped),5000));}
+        }
+        [Test] public void ObservedLaneReplacesAnUnqueuedRequestWithoutLosingTheNextJob()
+        {
+            var lane=new ObservedPathLane();
+            using var entered=new ManualResetEventSlim();
+            using var release=new ManualResetEventSlim();
+            var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);
+            var profile=PlayableProfile.Default.Navigation;
+            var query=new ObservedPathWork(PlayableOwner.Player,geometry,profile,.5,2,2,new NavPoint(-5,0),new NavPoint(5,0));
+            var replacement=new ObservedPathWork(query.Owner,geometry,profile,.6,2,2,query.Origin,query.Goal);
+            var kind=PlayableRouteTargetKind.VisibleEnemy;
+            int firstUnqueued=ObservedPathLane.Capacity+1;
+            var tail=new System.Collections.Generic.List<int>();
+            try{
+                Assert.False(lane.TryGet(query,1,2,kind,0,out _,()=>{entered.Set();Assert.True(release.Wait(5000));}));
+                Assert.True(entered.Wait(5000));
+                for(int id=2;id<firstUnqueued;id++)
+                    Assert.False(lane.TryGet(query,id,2,kind,0,out _));
+                Assert.False(lane.TryGet(query,firstUnqueued,2,kind,0,out _,()=>Assert.Fail("Retired request executed.")));
+                Assert.False(lane.TryGet(query,firstUnqueued+1,2,kind,0,out _,()=>tail.Add(1)));
+                Assert.False(lane.TryGet(replacement,firstUnqueued,2,kind,0,out _,()=>tail.Add(2)));
+                Assert.AreEqual(ObservedPathLane.Capacity,lane.Count);
+                Assert.AreEqual(firstUnqueued+1,lane.RetainedCount);
+                release.Set();lane.DrainForCapture(()=>false);
+                CollectionAssert.AreEqual(new[]{1,2},tail);
+                Assert.True(lane.TryReadReady(replacement,firstUnqueued,2,kind,0,out var path));
+                Assert.AreEqual(replacement.Goal,path.Last());
+            }finally{release.Set();lane.Stop();Assert.True(SpinWait.SpinUntil(()=>lane.IsStopped,5000));}
         }
         [Test] public void ObservedPathWorkCanRunWithOnlyDetachedSolverInputs()
         {
@@ -81,8 +160,8 @@ namespace Spacewars.Tests.EditMode
                 var owner=scheduler.Owners.Single();long decision=owner.Checkpoint.DecisionTick;
                 if(pause){runtime.RequestPause(true);Assert.True(SpinWait.SpinUntil(()=>runtime.Latest.Paused||runtime.IsStopped,2000));Assert.False(runtime.IsStopped,runtime.Latest.Failure);}
                 else {runtime.RequestStop();Assert.True(SpinWait.SpinUntil(()=>runtime.IsStopped,2000),"Stop must finish before the detached review is released.");}
-                Assert.False(release.IsSet);Assert.False(scheduler.ReviewWorkerStopped);
-                release.Set();Assert.True(SpinWait.SpinUntil(()=>scheduler.ReviewWorkerStopped,5000));
+                Assert.False(release.IsSet);Assert.False(scheduler.ReviewIdle);
+                release.Set();Assert.True(SpinWait.SpinUntil(()=>scheduler.ReviewIdle,5000));
                 if(pause){var capture=runtime.RequestCaptureBytes();Assert.True(capture.Wait(10000));var restored=PlayableAuthorityTick.RestoreBytes(capture.Result,config);
                     try{Assert.AreEqual(decision,scheduler.Owners.Single().Checkpoint.DecisionTick);Assert.AreEqual(decision,restored.Scheduler.Owners.Single().Checkpoint.DecisionTick,"Paused review must not adopt a late result.");}
                     finally{restored.Stop();restored.Domain.DestroyOwnedNavigation();}}

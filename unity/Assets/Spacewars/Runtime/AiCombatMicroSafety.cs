@@ -39,7 +39,7 @@ namespace Spacewars.Runtime
         internal static bool Covers(PlayableAiObservation o,PlayableProfile p,PlayableBuildingSnapshot tower,PlayableEntitySnapshot u,NavPoint at)
         {
             bool air=u.Kind==PlayableEntityKind.Hawk;
-            double range=tower.Kind==PlayableBuildingKind.GaussTower?p.GaussRange:p.ExplorerRange*p.TurretRangeMultiplier;
+            double range=TerritoryRules.AiDefenseRange(p,tower.Kind);
             if(air&&tower.Kind==PlayableBuildingKind.GaussTower||Distance(tower.Position,at)>range)return false;
             // The half body height is the existing authored Hawk collision extent
             // used in PlayableHawkCombat, not a new gameplay tuning value.
@@ -52,14 +52,15 @@ namespace Spacewars.Runtime
             return PlayableBallistics.TerrainLineClear(muzzle,target,radius,PlayableMap.SolidObstacles(p),p.BallisticWallHeight,q=>Height(p,q))&&
                 !o.Buildings.Where(b=>b.Id!=tower.Id&&b.Id!=u.Id&&b.Phase!=ConstructionPhase.Pending&&b.Health>0).Any(b=>BuildingCombatGeometry.Pose(p,b.Kind,b.ModelUpgraded,b.Position,Height(p,b.Position),b.Heading,constructionProgress:b.Progress).Segment(muzzle,target,radius,out _,out _));
         }
-        internal static bool FireClear(PlayableAiObservation o,PlayableProfile p,PlayableEntitySnapshot unit,PlayableEntitySnapshot target)
+        internal static bool FireClear(PlayableAiObservation o,PlayableProfile p,PlayableEntitySnapshot unit,PlayableEntitySnapshot target,NavPoint? firingPoint=null)
         {
             double direct=p.AuthoredMap?.DirectFireHeight??1;
+            var origin=firingPoint??unit.Position;
             // Same authored air collision extent as ordinary combat. This is a
             // conservative current shot candidate, not a prediction of future fire.
-            double FromHeight()=>unit.Kind==PlayableEntityKind.Hawk?unit.Altitude+1.8145018368959427*p.HawkModelScale/2:Height(p,unit.Position)+direct;
+            double FromHeight()=>unit.Kind==PlayableEntityKind.Hawk?unit.Altitude+1.8145018368959427*p.HawkModelScale/2:Height(p,origin)+direct;
             double ToHeight()=>target.Kind==PlayableEntityKind.Hawk?target.Altitude+1.8145018368959427*p.HawkModelScale/2:Height(p,target.Position)+direct;
-            var from=new BallisticPoint(unit.Position.X,FromHeight(),unit.Position.Z);var to=new BallisticPoint(target.Position.X,ToHeight(),target.Position.Z);
+            var from=new BallisticPoint(origin.X,FromHeight(),origin.Z);var to=new BallisticPoint(target.Position.X,ToHeight(),target.Position.Z);
             double radius=unit.Kind==PlayableEntityKind.Tank?p.TankProjectileCollisionRadius:0;
             return PlayableBallistics.TerrainLineClear(from,to,radius,PlayableMap.SolidObstacles(p),p.BallisticWallHeight,q=>Height(p,q))&&
                 !o.Buildings.Where(b=>b.Id!=unit.Id&&b.Id!=target.Id&&b.Health>0&&b.Phase!=ConstructionPhase.Pending).Any(b=>BuildingCombatGeometry.Pose(p,b.Kind,b.ModelUpgraded,b.Position,Height(p,b.Position),b.Heading,constructionProgress:b.Progress).Segment(from,to,radius,out _,out _));
@@ -102,7 +103,7 @@ namespace Spacewars.Runtime
                 var tower=o.Buildings.FirstOrDefault(b=>b.Id==action.ParentId&&b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.RepairTower&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true);
                 double length=0;var at=unit.Position;foreach(var point in path){length+=Distance(at,point);at=point;}
                 if(!micro.RepairEscapeAllowed(o,profile,ai,difficulty,unit,path))return "observed incoming loss makes repair escape futile";
-                if(tower==null||path.Length==0||Distance(path.Last(),tower.Position)>profile.TurretRange||!AiCombatMicroPolicy.RepairTimeAllowed(profile,ai,difficulty,unit,length))return "repair route or healing exceeds recovery limit";
+                if(tower==null||path.Length==0||Distance(path.Last(),tower.Position)>profile.RepairTowerRange||!AiCombatMicroPolicy.RepairTimeAllowed(profile,ai,difficulty,unit,length))return "repair route or healing exceeds recovery limit";
             }
             return AiCombatMicroSafety.Path(o,profile,unit,path,withdrawal,knowledge)?null:"known static fire blocks micro path";
         }

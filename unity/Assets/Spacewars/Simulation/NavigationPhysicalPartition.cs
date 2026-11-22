@@ -45,19 +45,21 @@ namespace Spacewars.Simulation
         }
         internal void WritePhysicalBody(NavPhysicalBodyWriter writer,NavDeclarationStorage storage)
         {
-            if(storage.StorageBytes!=NavStorageLayout.Charge(512)||storage.First!=geometry.StorageRoot||!(storage.Second is NavRetainedArray<MapSupport> supports)||!ReferenceEquals(supports.ReadOnlyBacking,regions)||!(storage.Third is NavPartitionEdges sourceEdges)||!ReferenceEquals(sourceEdges.Values,edges)||storage.Fourth!=byId||storage.Fifth!=seams||storage.Sixth!=exterior||storage.Seventh!=Transitions||storage.Eighth!=Seams)throw new ArgumentException("Physical TerrainLocations ownership contradiction.");
+            if(storage.StorageBytes!=NavStorageLayout.Charge(PhysicalLayoutBytes)||storage.First!=geometry.StorageRoot||!(storage.Second is NavRetainedArray<MapSupport> supports)||!ReferenceEquals(supports.ReadOnlyBacking,regions)||!(storage.Third is NavPartitionEdges sourceEdges)||!ReferenceEquals(sourceEdges.Values,edges)||storage.Fourth!=byId||storage.Fifth!=seams||storage.Sixth!=exterior||storage.Seventh!=Transitions||storage.Eighth!=Seams)throw new ArgumentException("Physical TerrainLocations ownership contradiction.");
             writer.Edge(storage.First);writer.Edge(storage.Second);writer.Edge(storage.Third);writer.Edge(storage.Fourth);writer.Edge(storage.Fifth);writer.Edge(storage.Sixth);writer.Edge(storage.Seventh);writer.Edge(storage.Eighth);
         }
-        internal static NavDeclarationStorage ReadPhysicalBody(NavPhysicalBodyReader reader)
+        internal static NavDeclarationStorage ReadPhysicalBody(NavPhysicalBodyReader reader,bool queries=false)
         {
+            using(var scratch=queries?NavStorageScratch.Reserve(reader.Reservation,8192):null)
             using(var allocation=new NavStorageAllocation(reader.Reservation.TryReserve)){
-                allocation.Reserve(512);var geometry=reader.Edge<NavGeometry.OwnedBuffers>();var supports=reader.Edge<NavRetainedArray<MapSupport>>();var edges=reader.Edge<NavPartitionEdges>();var index=reader.Edge<NavCowDictionary<NavNameKey,int>>();var seams=reader.Edge<NavRetainedArray<Seam>>();var exterior=reader.Edge<NavRetainedArray<Seam>>();var transitions=reader.Edge<NavRetainedArray<NavSurfaceTransition>>();var publicSeams=reader.Edge<NavRetainedArray<NavPartitionSeam>>();
+                var geometry=reader.Edge<NavGeometry.OwnedBuffers>();var supports=reader.Edge<NavRetainedArray<MapSupport>>();var edges=reader.Edge<NavPartitionEdges>();var index=reader.Edge<NavCowDictionary<NavNameKey,int>>();var seams=reader.Edge<NavRetainedArray<Seam>>();var exterior=reader.Edge<NavRetainedArray<Seam>>();var transitions=reader.Edge<NavRetainedArray<NavSurfaceTransition>>();var publicSeams=reader.Edge<NavRetainedArray<NavPartitionSeam>>();
                 if(geometry?.Facade==null||supports==null||edges==null||index==null||seams==null||exterior==null||transitions==null||publicSeams==null)throw new ArgumentException("Missing physical TerrainLocations edge.");
-                var storage=allocation.Register(new NavDeclarationStorage(512));
+                long layout=checked(512+(queries?MeasureOwnedQueries(geometry.Facade.HalfExtent,supports,edges.Values,exterior,seams):0));allocation.Reserve(layout);
+                var storage=allocation.Register(new NavDeclarationStorage(layout));
                 void Own(NavOwnedStorage child){storage.RequireEdge(child);child.Retain();}
                 Own(geometry);storage.First=geometry;Own(supports);storage.Second=supports;Own(edges);storage.Third=edges;Own(index);storage.Fourth=index;Own(seams);storage.Fifth=seams;Own(exterior);storage.Sixth=exterior;Own(transitions);storage.Seventh=transitions;Own(publicSeams);storage.Eighth=publicSeams;
                 var value=new TerrainLocations(geometry.Facade){owned=storage,regions=supports.ReadOnlyBacking,edges=edges.Values,byId=index,seams=seams,exterior=exterior,Transitions=transitions,Seams=publicSeams};storage.Facade=value;
-                value.ValidatePhysicalArrangement(reader.Reservation);return storage;
+                value.ValidatePhysicalArrangement(reader.Reservation);value.TraceScratchBound=value.ComputeTraceScratchBound();if(queries)value.InitializeOwnedQueries();return storage;
             }
         }
         // Replays only the existing boundary predicates for verification. No
@@ -134,7 +136,7 @@ namespace Spacewars.Simulation
                     }
                     foreach(var obstacle in locations.Geometry.Obstacles){if(obstacle.Polygon!=null&&obstacle.Polygon.Vertices.Count>256)throw new ArgumentException("Physical Partition movement geometry capacity exceeded.");polygonVertices=checked(polygonVertices+(obstacle.Polygon?.Vertices.Count??0));}
                 }
-                long estimate=RetainedPayloadEstimate(surfaces.Count,supportVertices,locations.Seams.Count,locations.Transitions.Count,locations.Geometry.Obstacles.Count,polygonVertices);
+                long estimate=RetainedPayloadEstimate(surfaces.Count,supportVertices,locations.Seams.Count,locations.Transitions.Count,locations.Geometry.Obstacles.Count,polygonVertices)+locations.OwnedQueryRetainedBytes+locations.Geometry.SpatialIndexRetainedBytes;
                 var storage=allocation.Register(new NavDeclarationStorage(bytes));storage.RequireEdge(locationsRoot);storage.RequireEdge(surfaces);storage.RequireEdge(index);storage.RequireEdge(portals);
                 locationsRoot.Retain();storage.First=locationsRoot;surfaces.Retain();storage.Second=surfaces;index.Retain();storage.Third=index;portals.Retain();storage.Fourth=portals;
                 var value=new PartitionNavigationProvider(id,revision,semantics,hold,extent,binding,locations,surfaces,index,portals,estimate){owned=storage};storage.Facade=value;

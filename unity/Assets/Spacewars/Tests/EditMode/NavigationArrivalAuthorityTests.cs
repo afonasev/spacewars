@@ -215,6 +215,26 @@ namespace Spacewars.Tests.EditMode
             Domain.GetProperty("Geometry",F).SetValue(domain,next);nav.ChangeGeometry(next);Complete();
             var installed=nav.ArrivalReservations.Single();Assert.Greater(installed.Request,request);Assert.AreEqual(original.GroupId,installed.Group);Assert.AreEqual(original.CommandSequence,installed.Command);Assert.False(Interrupted(id,"Active"));RestoreOnlyBytes(Bytes());
         }
+        [Test]
+        public void RequestedRouteSeesOnlyTheIssuingOwnersObservedObstacles()
+        {
+            int id = Spawn(-18, -14);
+            var wall = new NavObstacle(-14, -32, -13, 32);
+            var visible = new NavObstacle(-17, -13, -16, -12);
+            var geometryProperty = Domain.GetProperty("Geometry", F);
+            var old = (NavGeometry)geometryProperty.GetValue(domain);
+            var basis = new NavGeometry(old.HalfExtent, old.Obstacles.Concat(new[] { wall, visible }).ToArray(), old.Revision + 1);
+            geometryProperty.SetValue(domain, basis);
+            nav.ChangeGeometry(basis);
+            Call("RefreshVision");
+            Move(new[] { id }, new NavPoint(-10, -14));
+            var request = nav.PendingRequestFor(id);
+            Assert.NotNull(request);
+            Assert.True(request.Geometry.Obstacles.Any(o => o.GeometryEquals(visible)));
+            Assert.False(request.Geometry.Obstacles.Any(o => o.GeometryEquals(wall)));
+            Assert.True(request.BaseGeometry.Obstacles.Any(o => o.GeometryEquals(wall)), "physical authority retains the hidden wall");
+        }
+
         [TestCase(false,false)][TestCase(true,false)][TestCase(false,true)][TestCase(true,true)] public void HiddenOccupancyAndObstacleFactsCannotChangeVisibleArmyPreflight(bool withdrawal,bool asynchronous)
         {
             int id=Spawn(-18,-14);var action=new PlayableAiAction(1,"player-1",PlayableProfile.Default.ProfileId,PlayableProfile.Default.Revision,1,0,PlayableCommandKind.Move,new[]{id},new NavPoint(-10,-14),seed:7);

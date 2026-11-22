@@ -158,7 +158,7 @@ namespace Spacewars.Tests.EditMode
             Set("nextId",43L);Set("pendingId",local);Set("pendingGeneration",107L);
             Set("completed",new Dictionary<string,long>{{"repair-use:20:30:"+(changed=="memo"?43:42),issued}});
             var action=new PlayableAiAction(global,changed=="owner"?"foreign-owner":o.OwnerId,p.ProfileId,p.Revision,changed=="generation"?108:107,o.SnapshotSequence,
-                PlayableCommandKind.Move,new[]{changed=="unit"?99:20},goal,parentId:changed=="tower"?31:30,seed:o.Seed,
+                PlayableCommandKind.Move,new[]{changed=="unit"?99:20},goal,parentId:changed=="tower"?31:30,buildingKind:PlayableBuildingKind.RepairTower,seed:o.Seed,
                 sourceIdentity:changed=="source"?"foreign-source":PlayableAiOpeningComposition.SourceIdentity);
             bool valid=planner.CanDeliverRepairReturn(o,p,ai,registry,action,changed=="local-id"?43:local);
             Assert.AreEqual(expected,valid,changed);
@@ -210,7 +210,7 @@ namespace Spacewars.Tests.EditMode
             planner.ObserveReceipt(record);
             Assert.True(registry.CaptureArmy(id).Single().Reinforcements.Contains(20));
             Assert.True(planner.Capture().RepairClients.ContainsKey("repair-use:20:30:"+action.ActionId+":7"));
-            var global=new PlayableAiAction(314,o.OwnerId,p.ProfileId,p.Revision,107,o.SnapshotSequence,PlayableCommandKind.Move,new[]{20},goal,parentId:30,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            var global=new PlayableAiAction(314,o.OwnerId,p.ProfileId,p.Revision,107,o.SnapshotSequence,PlayableCommandKind.Move,new[]{20},goal,parentId:30,buildingKind:PlayableBuildingKind.RepairTower,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
             // A separate pending delivery is tested by the existing saved-client
             // matrix; this test proves the actual planner reaches and commits repair.
             Assert.False(planner.OwnsPendingRepairReturn(global,action.ActionId),"terminal callback clears pending, retaining the client");

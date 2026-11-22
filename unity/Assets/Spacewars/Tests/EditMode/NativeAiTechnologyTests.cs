@@ -40,10 +40,33 @@ namespace Spacewars.Tests.EditMode
             var p=PlayableProfile.Default;var o=View(p,unit);var planner=new AiTechnologyPlanner();var plan=planner.Plan(o,p,AiProfile.Initial,Budget(o).Capture());
             CollectionAssert.AreEquivalent(Enum.GetValues(typeof(PlayableResearchKind)).Cast<PlayableResearchKind>().Where(k=>k!=PlayableResearchKind.ReinforcedConcrete),AiResearchCatalog.All.Select(d=>d.Kind));
             Assert.AreEqual(kind,plan.Action.ResearchKind);Assert.AreEqual(4,plan.Action.EntityIds.Single());Assert.AreEqual(Enum.GetValues(typeof(PlayableResearchKind)).Length-1,plan.Branches.Count);
-            foreach(var b in plan.Branches){Assert.AreEqual(b.Descriptor.Affects(unit)?PlayableUnitRules.Cost(p,unit):0,b.AffectedValue);Assert.AreEqual(!b.Descriptor.Global&&b.Descriptor.Unit==unit,b.Utility>0,"global branches stay below the army threshold in this old-branch fixture");}
+            foreach(var b in plan.Branches){Assert.AreEqual(b.Descriptor.Affects(unit)?PlayableUnitRules.Cost(p,unit):0,b.AffectedValue);Assert.AreEqual(!b.Descriptor.Global&&b.Descriptor.Unit==unit&&b.Descriptor.Kind!=PlayableResearchKind.ExplorerRocketLauncher,b.Utility>0,"global branches stay below the army threshold in this old-branch fixture");}
             var d=AiResearchCatalog.For(kind);double expected=unit==PlayableEntityKind.Tank?p.TankChassisSpeed/p.TankSpeed-1:unit==PlayableEntityKind.Explorer?PlayableUnitRules.DamagePerSecond(p,unit,true)/PlayableUnitRules.DamagePerSecond(p,unit)-1:p.ShkvalGuidanceRange/p.ShkvalBaseRange-1;
             Assert.AreEqual(expected,d.RelativeGain(p),1e-12);
         }
+        [TestCase(2,0,0,0,false)]
+        [TestCase(3,3,0,0,true)]
+        [TestCase(3,4,0,0,false)]
+        [TestCase(5,7,5,7,true)]
+        [TestCase(5,7,4,7,false)]
+        public void MassAirRequiresCombatAircraftAndUsesPerOpponentComposition(int firstAir,int firstGround,int secondAir,int secondGround,bool expected)
+        {
+            var p=PlayableProfile.Default;
+            var o=View(p);
+            var contacts=new System.Collections.Generic.List<AiKnownContact>();
+            void Add(PlayableOwner owner,int air,int ground)
+            {
+                foreach(var kind in Enumerable.Repeat(PlayableEntityKind.Hawk,air)
+                    .Concat(Enumerable.Repeat(PlayableEntityKind.Tank,ground))
+                    .Append(PlayableEntityKind.Skat))
+                    contacts.Add(new AiKnownContact(100+contacts.Count,owner,false,(int)kind,new NavPoint(50,50),10,o.Tick,1,false));
+            }
+            Add(PlayableOwner.Enemy,firstAir,firstGround);
+            Add((PlayableOwner)2,secondAir,secondGround);
+            var knowledge=new AiKnowledgeState(o.OwnerId,o.Generation,o.Tick,contacts,Array.Empty<AiVisitedArea>());
+            Assert.AreEqual(expected,AiTechnologyPlanner.MassAirThreat(o,AiProfile.Initial,knowledge));
+        }
+
         [Test] public void ReadyCenter_FullHoldForOwnBranchMakesThatBranchPayable()
         {
             var p=PlayableProfile.Default;var o=View(p,PlayableEntityKind.Shkval,credits:(int)p.ShkvalGuidanceCost);var budget=WithTechnologyHold(o,p,PlayableResearchKind.ShkvalGuidance,(int)p.ShkvalGuidanceCost);
@@ -232,7 +255,12 @@ namespace Spacewars.Tests.EditMode
             Call("AdvanceFoundations");Call("AdvanceBuildings",config.Profile.HangarBuildSeconds+1d);
             Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,1,o.OwnerId,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:home.Site.Id,slotId:home.Site.Slots[0].Id,parentId:home.CenterId,buildingKind:PlayableBuildingKind.ScientificCenter)).Status);
             Call("AdvanceFoundations");Call("AdvanceBuildings",config.Profile.ScienceBuildSeconds+1);
-            for(int i=0;i<3;i++)Call("SpawnUnit",new NavPoint(home.Site.Position.X+i*2,home.Site.Position.Z+3),o.Owner,PlayableEntityKind.Tank);
+            // Cancellation requires useful research. Early concrete is no longer
+            // eligible, so provide the real productive military prerequisites.
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",home.Site.Id,home.Site.Slots[1].Id,PlayableBuildingKind.Factory,home.CenterId,o.Owner,null));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",config.Profile.FactoryBuildSeconds+1d);
+            int researchUnits=(int)AiProfile.Initial.Value("openingsMidgame.specializedLiving");
+            for(int i=0;i<researchUnits;i++)Call("SpawnUnit",new NavPoint(home.Site.Position.X+i*2,home.Site.Position.Z+3),o.Owner,PlayableEntityKind.Tank);
             var ledger=(AiBudgetLedger)Get(owner,"budget");AiBudgetEntry pending=null;
             using(var host=new UnityHostRouteService())
             {
@@ -260,7 +288,7 @@ namespace Spacewars.Tests.EditMode
             a.Stop();
         }
 
-        [Test] public void LostCenterWaitingOrderRebuildsThroughS2AndPaysOnlyOnOrdinaryActivation()
+        [Test] public void DestroyedCenterRefundsPaidOrderAndReleasesDeferredAiPayment()
         {
             var config=Config();var a=new PlayableAuthorityTick(config,71);var domain=Get(a,"domain");
             object Call(string method,params object[] args)=>domain.GetType().GetMethod(method,F).Invoke(domain,args);
@@ -280,17 +308,27 @@ namespace Spacewars.Tests.EditMode
             var ledger=Budget(O());var action=new PlayableAiAction(90,o.OwnerId,o.ProfileId,o.ProfileRevision,71,O().SnapshotSequence,PlayableCommandKind.QueueResearch,new[]{center.Id},researchKind:waiting.Kind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
             var receipt=new AiReceiptIdentity(71,o.OwnerId,1,1);var entry=new AiBudgetEntry("o5-waiting","research",action,(int)config.Profile.ExplorerAssaultCost,0,o.Tick,o.Tick+100,"terminal receipt",new[]{"recipient:"+center.Id,"policy:research"},config.Profile.ProfileId+"@"+config.Profile.Revision,receipt);
             Assert.True(ledger.Accept(entry));Assert.True(ledger.Reconcile(entry.Id,receipt,PlayableAiDeliveryStatus.Applied,false));Assert.AreEqual(config.Profile.ExplorerAssaultCost,ledger.Unpaid);
-            Call("Damage",center.Id,(int)config.Profile.ScienceHealth+1);o=O();Assert.AreEqual(waiting.Id,o.OwnerResearch.Single().Id);Assert.AreEqual(before-config.Profile.TankChassisCost,(double)Call("Balance",o.Owner),"Lost paid chassis has no refund; waiting is still unpaid.");
-            // Leave exactly construction cash beyond the already held waiting price: no double reservation.
-            Call("AddCredits",o.Owner,config.Profile.ScienceCreditCost+config.Profile.ExplorerAssaultCost-(double)Call("Balance",o.Owner));ledger.ObserveBank(O().Credits);
-            var plan=new AiTechnologyPlanner().Plan(O(),config.Profile,AiProfile.Initial,ledger.Capture());Assert.NotNull(plan.Infrastructure);Assert.AreEqual(waiting.Kind,plan.Infrastructure.Research);Assert.IsNull(plan.Action);
-            var candidate=new AiEconomyPlanner().InfrastructureRequests(O(),config.Profile,plan.Infrastructure).First(c=>c.Legal);
-            Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,sequence++,o.OwnerId,candidate.Action.Kind,candidate.Action.CopyEntityIds(),siteId:candidate.Action.SiteId,slotId:candidate.Action.SlotId,parentId:candidate.Action.ParentId,buildingKind:candidate.Action.BuildingKind)).Status);
-            Call("AdvanceFoundations");Call("AdvanceBuildings",config.Profile.ScienceBuildSeconds+1);Call("AdvanceResearch",0d);
-            var active=O().OwnerResearch.Single();Assert.AreEqual(waiting.Id,active.Id);Assert.True(active.Active);Assert.AreNotEqual(center.Id,active.CenterId);Assert.AreEqual(config.Profile.ExplorerAssaultCost,active.PaidCost);Assert.Zero((double)Call("Balance",o.Owner));
-            Call("ReconcileAiPayments",ledger);Assert.Zero(ledger.Unpaid);Assert.AreEqual(config.Profile.ExplorerAssaultCost,ledger.PaidTotal);Assert.AreEqual(receipt.Id,ledger.Capture().Paid.Single().Receipt.Id);
-            Call("AdvanceResearch",config.Profile.ExplorerAssaultSeconds);Assert.True(O().OwnerResearch.Single().Complete);Assert.True(O().Entities.Single(e=>e.Kind==PlayableEntityKind.Explorer).Upgraded);
-            Assert.IsNull(new AiTechnologyPlanner().Plan(O(),config.Profile,AiProfile.Initial,ledger.Capture()).Action);a.Stop();
+            Call("Damage",center.Id,(int)config.Profile.ScienceHealth+1);
+            Assert.IsEmpty(O().OwnerResearch);
+            Assert.AreEqual(before,(double)Call("Balance",o.Owner));
+            Call("ReconcileAiPayments",ledger);
+            Assert.Zero(ledger.Unpaid);
+            Assert.Zero(ledger.PaidTotal);
+
+            Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,sequence++,o.OwnerId,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:home.Site.Id,slotId:home.Site.Slots[2].Id,parentId:home.CenterId,buildingKind:PlayableBuildingKind.ScientificCenter)).Status);
+            Call("AdvanceFoundations");Call("AdvanceBuildings",config.Profile.ScienceBuildSeconds+1);
+            int rebuilt=O().Buildings.Single(b=>b.Kind==PlayableBuildingKind.ScientificCenter).Id;
+            double afterRebuild=(double)Call("Balance",o.Owner);
+            Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,sequence++,o.OwnerId,PlayableCommandKind.QueueResearch,new[]{rebuilt},researchKind:waiting.Kind)).Status);
+            var active=O().OwnerResearch.Single();
+            Assert.AreNotEqual(waiting.Id,active.Id);
+            Assert.True(active.Active);
+            Assert.AreEqual(config.Profile.ExplorerAssaultCost,active.PaidCost);
+            Assert.AreEqual(afterRebuild-config.Profile.ExplorerAssaultCost,(double)Call("Balance",o.Owner));
+            Call("AdvanceResearch",config.Profile.ExplorerAssaultSeconds);
+            Assert.True(O().OwnerResearch.Single().Complete);
+            Assert.True(O().Entities.Single(e=>e.Kind==PlayableEntityKind.Explorer).Upgraded);
+            a.Stop();
         }
 
         [TestCase("covered")][TestCase("member-loss")][TestCase("other-front")]

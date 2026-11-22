@@ -13,13 +13,13 @@ namespace Spacewars.Tests.PlayMode
 {
     public sealed class UnitWreckPresentationTests
     {
-        GameObject host;PlayableWorld world;
+        GameObject host;PlayableWorld world;bool wrecksEnabled;
         static PlayableWreckSnapshot Wreck(long destroyed=-1)=>new PlayableWreckSnapshot(41,PlayableOwner.Player,PlayableEntityKind.Tank,default,.75,.72,0,.1,1,0,0,5,905,965,destroyed);
         static PlayableSnapshot Frame(long tick,PlayableWreckSnapshot[] wrecks=null,TeamVisionSnapshot vision=null,long generation=1,bool paused=false,PlayableSoundEvent[] sounds=null)
             =>new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,generation,7,1,tick,RuntimeStatus.Running,paused,PlayableMatchOutcome.Playing,0,null,Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision,sounds:sounds,wrecks:wrecks);
         GameObject Model()=>host.GetComponentsInChildren<Transform>(true).Single(t=>t.name=="Unit wreck 41").gameObject;
-        [SetUp]public void Setup(){host=new GameObject("Wreck lifetime test");host.layer=11;world=new PlayableWorld(host.transform,PlayableProfile.Default);world.SetPresentationLayer(11);}
-        [TearDown]public void Cleanup(){if(host.GetComponent<PlayableBootstrap>())UnityEngine.Object.DestroyImmediate(host);else{world.Dispose();UnityEngine.Object.DestroyImmediate(host);}}
+        [SetUp]public void Setup(){wrecksEnabled=NativeGraphicsSettings.UnitWrecksEnabled;NativeGraphicsSettings.UnitWrecksEnabled=true;host=new GameObject("Wreck lifetime test");host.layer=11;world=new PlayableWorld(host.transform,PlayableProfile.Default);world.SetPresentationLayer(11);}
+        [TearDown]public void Cleanup(){NativeGraphicsSettings.UnitWrecksEnabled=wrecksEnabled;if(host.GetComponent<PlayableBootstrap>())UnityEngine.Object.DestroyImmediate(host);else{world.Dispose();UnityEngine.Object.DestroyImmediate(host);}}
         [Serializable]class SourceManifest{public SourceModel[] models,hawkModels,upgradedModels;}
         [Serializable]class SourceModel{public string kind;public int variant;public SourceLod lod0;}
         [Serializable]class SourceLod{public string file,sha256;public SourceBounds bounds;}
@@ -117,6 +117,31 @@ namespace Spacewars.Tests.PlayMode
             world.Clear();yield return null;world.RenderUnitWrecks(Frame(5,new[]{Wreck()},generation:2));renderer=Model().GetComponentInChildren<MeshRenderer>();renderer.GetPropertyBlock(block,0);Assert.AreEqual(Color.white,block.GetColor("_BaseColor"),"Generation reset must retain the active neutral lighting finish.");
             Assert.AreEqual(color,source.GetColor("_BaseColor"));Assert.AreEqual(metallic,source.GetFloat("_Metallic"));
             var controls=NativeGraphicsSettings.Parameters.Where(p=>p.Path.StartsWith("visual.actorFinish.wreck")).ToArray();Assert.AreEqual(3,controls.Length);Assert.True(controls.All(p=>NativeGraphicsSettings.Group(p)=="Остовы · обгоревший металл"));
+        }
+        [UnityTest]public IEnumerator VisualPreferenceSkipsBothViewsAndRestoresCurrentPausedSnapshot()
+        {
+            var secondHost=new GameObject("Second local wreck view");var second=new PlayableWorld(secondHost.transform,PlayableProfile.Default);
+            try{
+                var snapshot=Frame(5,new[]{Wreck()},paused:true);
+                foreach(var view in new[]{world,second}){view.RenderUnitWrecks(snapshot);Assert.AreEqual(1,view.UnitWreckCount);}
+                var oldModels=host.GetComponentsInChildren<Transform>(true).Concat(secondHost.GetComponentsInChildren<Transform>(true)).Where(n=>n.name=="Unit wreck 41").Select(n=>n.gameObject).ToArray();
+                NativeGraphicsSettings.UnitWrecksEnabled=false;
+                foreach(var view in new[]{world,second}){view.RenderUnitWrecks(snapshot);Assert.Zero(view.UnitWreckCount);}
+                Assert.True(oldModels.All(m=>!m.activeSelf),"Old renderers hidden immediately before deferred destruction");
+                yield return null;
+                foreach(var view in new[]{world,second})view.RenderUnitWrecks(snapshot);
+                Assert.False(host.GetComponentsInChildren<Transform>(true).Any(n=>n.name=="Unit wreck 41"));
+                Assert.False(secondHost.GetComponentsInChildren<Transform>(true).Any(n=>n.name=="Unit wreck 41"));
+                NativeGraphicsSettings.UnitWrecksEnabled=true;
+                foreach(var view in new[]{world,second}){view.RenderUnitWrecks(snapshot);Assert.AreEqual(1,view.UnitWreckCount);}
+                Assert.True(Model().activeSelf,"Same paused tick is rebuilt");
+                NativeGraphicsSettings.UnitWrecksEnabled=false;
+                foreach(var view in new[]{world,second})view.RenderUnitWrecks(Frame(50,generation:2));
+                NativeGraphicsSettings.UnitWrecksEnabled=true;
+                foreach(var view in new[]{world,second}){view.RenderUnitWrecks(Frame(50,generation:2));Assert.Zero(view.UnitWreckCount);}
+                yield return null;
+                Assert.False(host.GetComponentsInChildren<Transform>(true).Any(n=>n.name=="Unit wreck 41"),"Expired or fog-omitted wreck cannot resurrect after reset");
+            }finally{second.Dispose();UnityEngine.Object.DestroyImmediate(secondHost);}
         }
         [Test]public void ProfileKeepsLifetimeControlsRangeValidated()
         {

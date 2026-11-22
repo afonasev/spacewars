@@ -42,10 +42,10 @@ namespace Spacewars.Runtime
 
         internal PlayableAiAction Admit(PlayableAiObservation observation,PlayableAiAction candidate)
         {
-            if(HasPendingObligation||candidate.Kind!=PlayableCommandKind.BuildAt&&candidate.Kind!=PlayableCommandKind.UpgradeRefinery)throw new InvalidOperationException("Invalid economy commit.");
+            if(HasPendingObligation||candidate.Kind!=PlayableCommandKind.BuildAt&&candidate.Kind!=PlayableCommandKind.UpgradeRefinery&&candidate.Kind!=PlayableCommandKind.UpgradeProducer)throw new InvalidOperationException("Invalid economy commit.");
             pending=candidate.BuildingKind==PlayableBuildingKind.Factory?Obligation.Factory:candidate.BuildingKind==PlayableBuildingKind.Refinery?Obligation.Refinery:Obligation.Mine;
             pendingGeneration=observation.Generation;pendingActionId=nextActionId++;
-            return new PlayableAiAction(pendingActionId,candidate.PlayerId,candidate.ProfileId,candidate.ProfileRevision,candidate.Generation,candidate.SnapshotSequence,candidate.Kind,candidate.CopyEntityIds(),siteId:candidate.SiteId,slotId:candidate.SlotId,parentId:candidate.ParentId,buildingKind:candidate.BuildingKind,seed:candidate.Seed,sourceIdentity:candidate.SourceIdentity);
+            return new PlayableAiAction(pendingActionId,candidate.PlayerId,candidate.ProfileId,candidate.ProfileRevision,candidate.Generation,candidate.SnapshotSequence,candidate.Kind,candidate.CopyEntityIds(),siteId:candidate.SiteId,slotId:candidate.SlotId,parentId:candidate.ParentId,buildingKind:candidate.BuildingKind,unitKind:candidate.UnitKind,seed:candidate.Seed,sourceIdentity:candidate.SourceIdentity);
         }
 
         public void ObserveReceipt(PlayableAiTraceRecord record)
@@ -78,7 +78,8 @@ namespace Spacewars.Runtime
                 int slot=freeSlot.Id;
                 return new PlayableAiAction(actionId,observation.OwnerId,observation.ProfileId,observation.ProfileRevision,observation.Generation,observation.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:home.Site.Id,slotId:slot,parentId:home.CenterId,buildingKind:obligation==Obligation.Factory?PlayableBuildingKind.Factory:PlayableBuildingKind.Refinery,seed:observation.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
             }
-            var mine=observation.Sites.First(x=>x.Site.Kind==PlayableBuildingKind.Mine&&x.Owner==observation.Owner&&x.CenterId==0&&!x.Contested);
+            var mine=observation.Sites.Where(x=>x.Site.Kind==PlayableBuildingKind.Mine&&x.Owner==observation.Owner&&x.CenterId==0&&!x.Contested)
+                .OrderByDescending(x=>x.MineReserve??double.MaxValue).First();
             return new PlayableAiAction(actionId,observation.OwnerId,observation.ProfileId,observation.ProfileRevision,observation.Generation,observation.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:mine.Site.Id,slotId:0,parentId:0,buildingKind:PlayableBuildingKind.Mine,seed:observation.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         }
 

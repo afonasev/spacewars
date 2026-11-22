@@ -14,6 +14,74 @@ namespace Spacewars.Tests.PlayMode
     {
         static PlayableBuildingSnapshot Building(int id=10,double progress=1)=>new PlayableBuildingSnapshot(id,PlayableOwner.Player,PlayableBuildingKind.Mine,default,250,progress,0,0,default,phase:progress<1?ConstructionPhase.Constructing:ConstructionPhase.Ready);
         static Transform Node(Component root,string name)=>root.GetComponentsInChildren<Transform>(true).Single(t=>t.name==name);
+        [Test] public void MineRelayAndRotorUseTheSameBoundedMatchClock()
+        {
+            var root=new GameObject("Spectator animation clock");
+            var profile=PlayableProfile.Default;
+            var world=new PlayableWorld(root.transform,profile);
+            try
+            {
+                var mine=world.Building(10,"Mine",true);
+                var aircraft=world.Tank(12,true,PlayableEntityKind.Hawk);
+                var relay=new TerritorySite(11,PlayableBuildingKind.RelayTower,new NavPoint(5,0),profile);
+                var building=Building();
+                var hawk=new PlayableEntitySnapshot(12,PlayableOwner.Player,PlayableEntityKind.Hawk,
+                    new NavPoint(-4,0),50,false,0,0,0,altitude:3);
+                var terrain=(Material)typeof(PlayableWorld).GetField("material",
+                    System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).GetValue(world);
+
+                PlayableSnapshot Frame(long tick,bool paused=false,bool showRelay=true)
+                {
+                    var live=showRelay?new[]{new TerritorySiteSnapshot(relay,PlayableOwner.Player,PlayableOwner.Player,
+                        1,false,0,true,controlledSeconds:tick/30d)}:Array.Empty<TerritorySiteSnapshot>();
+                    return new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,tick,tick,
+                        RuntimeStatus.Running,paused,PlayableMatchOutcome.Playing,0,null,new[]{hawk},
+                        new[]{building},Array.Empty<PlayableProjectileSnapshot>(),null,null,sites:live,publicSites:new[]{relay});
+                }
+
+                void Render(PlayableSnapshot view,double age,double rate)
+                {
+                    world.UpdateMatchAnimation(view,age,rate);
+                    world.RenderSites(view);
+                    world.UpdateFactoryModel(mine,building,view);
+                    world.UpdateAircraft(aircraft,hawk,view);
+                }
+
+                RelayTowerPresentation Relay()=>world.GraphicsRoot.Find("Relay site 11").GetComponent<RelayTowerPresentation>();
+                void Check(PlayableSnapshot view,double expected)
+                {
+                    Assert.That(terrain.GetFloat("_MatchAnimationTime"),Is.EqualTo(expected).Within(.00001));
+                    float phase=Mathf.Repeat((float)expected/mine.Mine.Profile.cycleSeconds+10*.61803398875f,1);
+                    Assert.That(mine.Mine.Phase,Is.EqualTo(phase).Within(.00001));
+                    Assert.That(Relay().YawDegrees,Is.EqualTo(expected*Relay().Profile.rotationDegreesPerSecond%360).Within(.0001));
+                    var rotation=Quaternion.Euler(0,(float)(expected*profile.HawkRotorSpeed),0);
+                    Assert.That(Quaternion.Angle(Node(aircraft.Hawk,"mainRotor").localRotation,rotation),Is.LessThan(.06));
+                    Assert.LessOrEqual(expected,view.Tick/30d);
+                }
+
+                long tick=90;
+                foreach(double rate in new[]{.5,1,2,4})
+                {
+                    var view=Frame(++tick);
+                    const double age=.005;
+                    Render(view,age,rate);
+                    Check(view,(tick-1)/30d+age*rate);
+                    Render(view,10,rate);
+                    Check(view,tick/30d);
+                    Render(view,0,rate);
+                    Check(view,tick/30d); // A repeated tick cannot run backward.
+                }
+
+                var paused=Frame(tick,true);
+                Render(paused,5,4);
+                Check(paused,tick/30d);
+                var lastSeen=Relay().YawDegrees;
+                Render(Frame(++tick,showRelay:false),.03,4);
+                Assert.AreEqual(lastSeen,Relay().YawDegrees,"A hidden relay must not advance its antenna.");
+            }
+            finally{world.Dispose();Object.DestroyImmediate(root);}
+        }
+
         [UnityTest] public IEnumerator SharedMinePathConnectedCyclePauseAndOwnerPaint()
         {
             var host=new GameObject("Mine runtime witness");var world=new PlayableWorld(host.transform,PlayableProfile.Default);

@@ -5,7 +5,12 @@ namespace Spacewars.Presentation
     {
         private PlayableWorld world;private string mapId;private Light sun;private Camera view;private bool configured;private IndustrialLightingProfile selectedLighting;
         private IndustrialLightingProfile Lighting=>selectedLighting??IndustrialLightingProfile.Load(mapId);
-        public void Configure(PlayableWorld value,string map,Light light,IndustrialLightingProfile selected=null){world=value;mapId=map;sun=light;selectedLighting=selected;view=GetComponent<Camera>();configured=true;}
+        public void Configure(PlayableWorld value,string map,Light light,IndustrialLightingProfile selected=null)
+        {
+            world=value;mapId=map;sun=light;selectedLighting=selected;view=GetComponent<Camera>();configured=true;
+            view.GetComponent<VisibleShadowCoverage>()?.FollowDisplayShadowSetting();
+            NativeGraphicsSettings.ApplyRenderScale();
+        }
         private void OnEnable()=>NativeGraphicsSettings.Changed+=Refresh;
         private void OnDisable()=>NativeGraphicsSettings.Changed-=Refresh;
         private void Refresh(string path)

@@ -42,6 +42,8 @@ namespace Spacewars.Runtime
         AiCombatMicroCoverWork cover;int phase,validatePiece,validateSupport,lengthLeg,threat,piece,leg,grid,steps;
         bool closestDone,complete,allowed,unsupported,disposed,transferred;double closest;NavPoint sample;
         internal bool Complete=>complete;internal bool Supported=>!unsupported;
+        // A chord-only refusal may be resolved by a different local maneuver.
+        internal bool RejectedRemainingBranch=>complete&&!unsupported&&!allowed&&(phase==9||phase==10);
         internal bool Allowed{get{if(!complete||unsupported)throw new InvalidOperationException("Path verdict unavailable.");return allowed;}}
         internal long Consumed{get;private set;}internal double RemainingLength{get;private set;}
         AiCombatMicroExecutionPathWork(AiCombatMicroCoverScene scene,AiCombatMicroExecutionStorage storage,MotionExecutionPrimitive primitive,PlayableEntitySnapshot unit,Threat[] threats,EscapeEntry[] entries,int entryCount,bool withdrawal,string intent,int sourceCount,int priorCount,AiCombatMicroExecutionStorage.Lease memory,AiCombatMicroExecutionStorage.Lease scenePin,AiCombatMicroExecutionStorage.Lease catalogPin)

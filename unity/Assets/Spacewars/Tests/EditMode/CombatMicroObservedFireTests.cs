@@ -12,6 +12,57 @@ namespace Spacewars.Tests.EditMode
     public sealed class CombatMicroObservedFireTests
     {
         const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public;
+        [TestCase(false)]
+        [TestCase(true)]
+        public void WoundedWithdrawalUsesStrictThresholdAndKeepsFiringWhenRearIsBlocked(bool blocked)
+        {
+            const long generation=901;
+            var profile=PlayableProfile.Default;
+            var data=AiProfile.Initial.CopyData();
+            data.fields.Single(f=>f.path=="difficulty.veteran.micro.withdrawHealth").value=.6;
+            var ai=new AiProfile(data);
+            var difficulty=AiDifficulty.Veteran;
+            var vision=new PlayableVision(0,50,50,1,1);
+            vision.Refresh(new[]{new VisionSource(new NavPoint(0,0),50)},Array.Empty<KnownBuilding>());
+            PlayableAiObservation View(long tick,int health,bool fire)
+            {
+                PlayableEntitySnapshot Tank(int id,PlayableOwner owner,double x,double z,int hp=100)=>
+                    new PlayableEntitySnapshot(id,owner,PlayableEntityKind.Tank,new NavPoint(x,z),hp,false,0,0,0,maxHealth:100);
+                var tanks=new[]{Tank(1,PlayableOwner.Player,-10,0,health),
+                    Tank(2,PlayableOwner.Player,blocked?-11.45:-9,blocked?0:-3),Tank(3,PlayableOwner.Player,-9,3),
+                    Tank(4,PlayableOwner.Enemy,-2,-2),Tank(5,PlayableOwner.Enemy,-2,2)};
+                var shots=fire?new[]{4,5}.Select(id=>new PlayableProjectileSnapshot(id+100,id,1,
+                    tanks[id-1].Position,faction:PlayableOwner.Enemy,directLaunchTick:tick-1)).ToArray():Array.Empty<PlayableProjectileSnapshot>();
+                return PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,generation,7,tick,tick,
+                    RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,tanks,Array.Empty<PlayableBuildingSnapshot>(),
+                    shots,new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision.Snapshot()));
+            }
+
+            var first=View(10,100,false);
+            var registry=new AiArmyRegistry(first.OwnerId,generation,ai,difficulty);
+            Assert.True(registry.TryCreate(first,AiArmyRole.Attack,AiArmyPlanner.Policy,new[]{1,2,3},out _));
+            var micro=new AiCombatMicroPolicy();
+            micro.Observe(first,profile,ai,difficulty,registry);
+            var hit=View(20,60,true);
+            micro.Observe(hit,profile,ai,difficulty,registry);
+            Assert.AreNotEqual(AiCombatMicroPhase.Withdraw,micro.Plan(hit,profile,ai,difficulty,registry)?.Phase);
+            var saved=WorldWire.Pack(micro.Write);
+            var restored=WorldWire.Unpack(saved,reader=>AiCombatMicroPolicy.Read(reader,20,generation));
+            var second=View(30,59,true);
+            foreach(var state in new[]{micro,restored})
+            {
+                state.Observe(second,profile,ai,difficulty,registry);
+                var plan=state.Plan(second,profile,ai,difficulty,registry);
+                if(blocked){Assert.AreNotEqual(AiCombatMicroPhase.Withdraw,plan?.Phase);continue;}
+                Assert.NotNull(plan);
+                Assert.AreEqual(AiCombatMicroPhase.Withdraw,plan.Phase);
+                CollectionAssert.AreEqual(new[]{1},plan.Action.CopyEntityIds());
+                Assert.Less(plan.Action.Target.X,-10);
+                Assert.True(AiCombatMicroPolicy.WithdrawalSpaceFree(second,profile,second.Entities[0],new[]{plan.Action.Target}));
+            }
+            CollectionAssert.AreEqual(WorldWire.Pack(micro.Write),WorldWire.Pack(restored.Write));
+        }
+
         [Test]
         public void EnemyIntentStaysRedactedAndOnlyVisibleKnownActualShotsBecomeFocusFacts()
         {

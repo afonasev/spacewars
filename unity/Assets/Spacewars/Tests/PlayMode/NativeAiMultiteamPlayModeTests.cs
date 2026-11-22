@@ -44,8 +44,6 @@ public sealed class NativeAiMultiteamPlayModeTests
         {
             var runtime=Get<PlayableRuntime>("runtime");if(runtime!=null){runtime.RequestStop();System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped,3000);}
             UnityEngine.InputSystem.InputSystem.RemoveDevice(keyboard);UnityEngine.InputSystem.InputSystem.RemoveDevice(mouse);
-            foreach(var camera in UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsSortMode.None))UnityEngine.Object.DestroyImmediate(camera.gameObject);
-            foreach(var light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None))UnityEngine.Object.DestroyImmediate(light.gameObject);
             UnityEngine.Object.DestroyImmediate(host);
         }
     }

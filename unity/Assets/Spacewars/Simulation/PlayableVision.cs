@@ -62,17 +62,54 @@ namespace Spacewars.Simulation
     {
         private readonly VisionSource[] sourceValues;
         private readonly VisionQueryBounds queryBounds;
+        private readonly IReadOnlyList<long> sortedDiscovery;
         internal TeamVisionSnapshot(int team,long revision,long fogRevision,double halfWidth,double halfDepth,double cellSize,VisionSource[] sources,long[] cells,byte[] coverage,KnownBuilding[] memory,KnownRelay[] relays=null)
+            :this(team,revision,fogRevision,halfWidth,halfDepth,cellSize,sources,
+                Array.AsReadOnly((long[])cells.Clone()),Array.AsReadOnly((byte[])coverage.Clone()),memory,relays)
+        {sortedDiscovery=cells.OrderBy(cell=>cell).ToArray();}
+        // Live vision supplies its sorted detached history.
+        internal TeamVisionSnapshot(int team,long revision,long fogRevision,double halfWidth,double halfDepth,double cellSize,VisionSource[] sources,
+            System.Collections.ObjectModel.ReadOnlyCollection<long> cells,System.Collections.ObjectModel.ReadOnlyCollection<byte> coverage,KnownBuilding[] memory,KnownRelay[] relays=null)
         {
             KnownRelays=Array.AsReadOnly((KnownRelay[])(relays??Array.Empty<KnownRelay>()).Clone());Team=team;Revision=revision;FogRevision=fogRevision;HalfWidth=halfWidth;HalfDepth=halfDepth;CellSize=cellSize;
-            sourceValues=(VisionSource[])sources.Clone();queryBounds=VisionQueryBounds.Create(sourceValues);Sources=Array.AsReadOnly(sourceValues);DiscoveredCells=Array.AsReadOnly((long[])cells.Clone());
-            Coverage=Array.AsReadOnly((byte[])coverage.Clone());KnownBuildings=Array.AsReadOnly((KnownBuilding[])memory.Clone());
+            sourceValues=(VisionSource[])sources.Clone();queryBounds=VisionQueryBounds.Create(sourceValues);Sources=Array.AsReadOnly(sourceValues);DiscoveredCells=sortedDiscovery=cells;
+            Coverage=coverage;KnownBuildings=Array.AsReadOnly((KnownBuilding[])memory.Clone());
         }
         public int Team{get;} public long Revision{get;} public long FogRevision{get;} public double HalfWidth{get;} public double HalfDepth{get;} public double CellSize{get;}
         public IReadOnlyList<VisionSource> Sources{get;} public IReadOnlyList<long> DiscoveredCells{get;}
         public IReadOnlyList<KnownRelay> KnownRelays{get;}
         public IReadOnlyList<byte> Coverage{get;} public IReadOnlyList<KnownBuilding> KnownBuildings{get;}
         public bool IsVisible(NavPoint p)=>queryBounds.MayContain(p)&&PlayableVision.VisibleArray(sourceValues,p);
+        internal bool IsVisible(NavPoint point,ref int lastSource)
+        {
+            if(!queryBounds.MayContain(point)||!VisionSource.Finite(point.X)||!VisionSource.Finite(point.Z))return false;
+            if(lastSource>=0 && Covers(sourceValues[lastSource],point))return true;
+            for(int i=0;i<sourceValues.Length;i++){
+                if(!Covers(sourceValues[i],point))continue;
+                lastSource=i;return true;
+            }
+            return false;
+        }
+        internal static bool Covers(VisionSource source,NavPoint point)
+        {
+            double x=point.X-source.Position.X,z=point.Z-source.Position.Z,r=source.Radius+0.0001;
+            return x*x+z*z<=r*r;
+        }
+        internal bool IsDiscovered(NavPoint point)
+        {
+            if(!VisionSource.Finite(point.X)||!VisionSource.Finite(point.Z)||
+                Math.Abs(point.X)>HalfWidth||Math.Abs(point.Z)>HalfDepth)return false;
+            long key=PlayableVision.CellKey((int)Math.Floor(point.X/CellSize),(int)Math.Floor(point.Z/CellSize));
+            int low=0,high=sortedDiscovery.Count-1;
+            while(low<=high){
+                int middle=low+(high-low)/2;
+                long current=sortedDiscovery[middle];
+                if(current==key)return true;
+                if(current<key)low=middle+1;
+                else high=middle-1;
+            }
+            return false;
+        }
     }
 
     // One owner-thread instance per team. No renderer, terrain or camera dependency.
@@ -91,13 +128,20 @@ namespace Spacewars.Simulation
         public void ObserveRelays(IEnumerable<TerritorySiteSnapshot> sites)
         {
             foreach(var site in sites)
-                if(site.Site.Kind==PlayableBuildingKind.RelayTower&&IsVisible(site.Site.Position)&&
-                    (!knownRelays.TryGetValue(site.Site.Id,out var owner)||owner!=site.Owner))
-                {knownRelays[site.Site.Id]=site.Owner;revision++;cached=null;}
+                if(site.Site.Kind==PlayableBuildingKind.RelayTower)ObserveRelay(site.Site.Id,site.Site.Position,site.Owner);
+        }
+        internal void ObserveRelay(int id,NavPoint position,PlayableOwner? owner)
+        {
+            if(!IsVisible(position)||knownRelays.TryGetValue(id,out var previous)&&previous==owner)return;
+            knownRelays[id]=owner;revision++;cached=null;
         }
         private readonly byte[] coverage=new byte[RasterResolution*RasterResolution];
         private long revision;
         private TeamVisionSnapshot cached;
+        // Monotone history changes less often than current sight. Only closed,
+        // immutable copies cross publications; live sets/raster remain private.
+        private System.Collections.ObjectModel.ReadOnlyCollection<long> snapshotCells;
+        private System.Collections.ObjectModel.ReadOnlyCollection<byte> snapshotCoverage;
         // Derived owner-thread inputs only. Their storage is bounded by this vision's
         // largest source/building input sets; it is never serialized or exposed to callers.
         private readonly List<VisionSource> refreshInput=new List<VisionSource>();
@@ -132,8 +176,7 @@ namespace Spacewars.Simulation
             if(!VisionSource.Finite(point.X)||!VisionSource.Finite(point.Z))return false;
             foreach(var s in current)
             {
-                double x=point.X-s.Position.X,z=point.Z-s.Position.Z;
-                if(x*x+z*z<=(s.Radius+0.0001)*(s.Radius+0.0001))return true;
+                if(TeamVisionSnapshot.Covers(s,point))return true;
             }
             return false;
         }
@@ -213,7 +256,7 @@ namespace Spacewars.Simulation
                 for(int z=minZ;z<=maxZ;z++)for(int x=minX;x<=maxX;x++)
                 {
                     double dx=(x+.5)*cellSize-s.Position.X,dz=(z+.5)*cellSize-s.Position.Z;
-                    if(dx*dx+dz*dz<=reach*reach)discovered.Add(CellKey(x,z));
+                    if(dx*dx+dz*dz<=reach*reach&&discovered.Add(CellKey(x,z)))snapshotCells=null;
                 }
                 int left=Pixel(s.Position.X-s.Radius-feather,halfWidth),right=Pixel(s.Position.X+s.Radius+feather,halfWidth);
                 int bottom=Pixel(s.Position.Z-s.Radius-feather,halfDepth),top=Pixel(s.Position.Z+s.Radius+feather,halfDepth);
@@ -222,7 +265,8 @@ namespace Spacewars.Simulation
                     int i=y*RasterResolution+x;if(coverage[i]==255)continue;
                     double dx=((x+.5)/RasterResolution*2-1)*halfWidth-s.Position.X,dz=((y+.5)/RasterResolution*2-1)*halfDepth-s.Position.Z;
                     double amount=Math.Max(0,Math.Min(1,(s.Radius+feather-Math.Sqrt(dx*dx+dz*dz))/feather));
-                    coverage[i]=Math.Max(coverage[i],(byte)Math.Round(amount*255));
+                    byte next=Math.Max(coverage[i],(byte)Math.Round(amount*255));
+                    if(next!=coverage[i]){coverage[i]=next;snapshotCoverage=null;}
                 }
             }
         }
@@ -234,14 +278,18 @@ namespace Spacewars.Simulation
         private static int Pixel(double n,double half)=>Math.Max(0,Math.Min(RasterResolution-1,(int)Math.Floor((n+half)/(2*half)*RasterResolution)));
         public TeamVisionSnapshot Snapshot()
         {
-            if(cached==null)cached=new TeamVisionSnapshot(team,revision,CoverageUpdates,halfWidth,halfDepth,cellSize,sources,discovered.OrderBy(x=>x).ToArray(),coverage,known.Values.OrderBy(b=>b.Id).ToArray(),knownRelays.OrderBy(r=>r.Key).Select(r=>new KnownRelay(r.Key,r.Value)).ToArray());
+            if(cached==null){
+                snapshotCells??=Array.AsReadOnly(discovered.OrderBy(x=>x).ToArray());
+                snapshotCoverage??=Array.AsReadOnly((byte[])coverage.Clone());
+                cached=new TeamVisionSnapshot(team,revision,CoverageUpdates,halfWidth,halfDepth,cellSize,sources,snapshotCells,snapshotCoverage,known.Values.OrderBy(b=>b.Id).ToArray(),knownRelays.OrderBy(r=>r.Key).Select(r=>new KnownRelay(r.Key,r.Value)).ToArray());
+            }
             return cached;
         }
         public static double BuildingRadius(PlayableProfile p,PlayableBuildingKind kind,ConstructionPhase phase)
         {
             if(phase==ConstructionPhase.Pending)return 0;
             double radius;
-            switch(kind){case PlayableBuildingKind.GaussTower:radius=p.GaussRange;break;case PlayableBuildingKind.RepairTower:case PlayableBuildingKind.SentryTurret:radius=p.TurretVision;break;case PlayableBuildingKind.Hangar:radius=p.HangarVisionRange;break;case PlayableBuildingKind.ScientificCenter:radius=p.ScienceVisionRange;break;case PlayableBuildingKind.Headquarters:radius=p.HeadquartersVisionRange;break;case PlayableBuildingKind.Outpost:radius=p.OutpostVisionRange;break;case PlayableBuildingKind.Factory:radius=p.FactoryVisionRange;break;case PlayableBuildingKind.Refinery:radius=p.RefineryVisionRange;break;case PlayableBuildingKind.Mine:radius=p.MineVisionRange;break;default:throw new ArgumentOutOfRangeException(nameof(kind));}
+            switch(kind){case PlayableBuildingKind.GaussTower:radius=p.GaussVision;break;case PlayableBuildingKind.RepairTower:radius=p.RepairTowerVision;break;case PlayableBuildingKind.SentryTurret:radius=p.TurretVision;break;case PlayableBuildingKind.Hangar:radius=p.HangarVisionRange;break;case PlayableBuildingKind.ScientificCenter:radius=p.ScienceVisionRange;break;case PlayableBuildingKind.Headquarters:radius=p.HeadquartersVisionRange;break;case PlayableBuildingKind.Outpost:radius=p.OutpostVisionRange;break;case PlayableBuildingKind.Factory:radius=p.FactoryVisionRange;break;case PlayableBuildingKind.Refinery:radius=p.RefineryVisionRange;break;case PlayableBuildingKind.Mine:radius=p.MineVisionRange;break;default:throw new ArgumentOutOfRangeException(nameof(kind));}
             return phase==ConstructionPhase.Ready?radius:radius*p.ConstructionVisionMultiplier;
         }
     }

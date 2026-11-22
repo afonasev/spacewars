@@ -72,17 +72,54 @@ namespace Spacewars.Presentation
             if(building!=null&&building.Kind!=PlayableBuildingKind.Mine)return "Из зданий можно захватить только шахту";
             double ratio=entity!=null?PlayableUnitRules.HealthRatio(profile,entity):building.Health/TerritoryRules.MaximumHealth(profile,building);
             double threshold=ScanData.orbitalHackHealthPercent;
+            if(entity?.StasisRemaining>0)return "Юнит в стазисе";
             if(ratio<=0)return "Цель уничтожена";
             if(ratio*100>=threshold)return "HP "+(ratio*100).ToString("0.#")+"% — нужно ниже "+threshold.ToString("0.#")+"%";
             valid=true;return (entity!=null?"Юнит":"Шахта")+" · HP "+(ratio*100).ToString("0.#")+"% · можно захватить";
         }
+        private const string MineTooCloseMessage = "Слишком близко к врагу";
+        private bool MineTooCloseToVisibleEnemy(NavPoint point)
+            => view.Entities.Any(unit => unit.Health>0 && !PlayableUnitRules.Aircraft(unit.Kind) &&
+                IsOpponent(unit.Owner) && view.Vision.IsVisible(unit.Position) &&
+                OrbitalMinePlacement.Blocks(profile,point,unit.Position,unit.Location));
+
         private string AbilityTargetFeedback(NavPoint? point,int target,out bool valid)
         {
             valid=false;
+            if(BoostTargeting)return BoostTargetFeedback(target,out valid);
             if(!point.HasValue)return scanTargetAbility==OrbitalAbilities.ControlHack?"Наведитесь на вражеского юнита или шахту":"Наведитесь на точку на поле или карте";
             if(scanTargetAbility==OrbitalAbilities.ControlHack)return HackTargetFeedback(target,out valid);
+            if(NuclearTargeting)
+            {
+                if(!TryRepairTarget(point.Value,out _))return "Нужна поверхность карты";
+                if(!view.Vision.IsVisible(point.Value))return "Центр удара должен быть в текущем командном обзоре";
+                valid=true;
+                return $"Радиус {TargetPreviewRadius:0.#} м · урон своим и вражеским целям";
+            }
+            if(RepairNanobotsTargeting)
+            {
+                if(!TryRepairTarget(point.Value,out var center))return "Нужна поверхность карты";
+                if(!view.Vision.IsVisible(point.Value))return "Зону можно поставить в текущем командном обзоре";
+                valid=true;
+                return $"В зоне раненых: {RepairPreviewUnits(center).Count()+RepairPreviewBuildings(center).Count()} · радиус {TargetPreviewRadius:0.#} м";
+            }
+            if(scanTargetAbility==OrbitalAbilities.Stasis)
+            {
+                var hawk=StasisHawk(target);
+                if(!view.Vision.IsVisible(hawk?.Position??point.Value))return "Стазис возможен только в текущем обзоре";
+                int count=StasisPreviewTargets(point.Value,hawk?.Id??0).Length;
+                valid=count>0;
+                return valid?$"Целей: {count} из {ScanData.orbitalStasisTargets:0} · {(hawk==null?"радиус":"воздух, радиус")} {TargetPreviewRadius:0.#} м":"В области нет подходящих юнитов";
+            }
+            if(scanTargetAbility==OrbitalAbilities.Reinforcement)
+            {
+                if(!view.Vision.IsVisible(point.Value))return "Призыв возможен только в текущем обзоре";
+                ReinforcementPreview(point.Value,out valid);
+                return valid?ReinforcementQuoteText():"Здесь нельзя разместить всю волну";
+            }
             if(scanTargetAbility==OrbitalAbilities.SystemFailure&&!view.Vision.IsVisible(point.Value))return "Сбой систем — только в текущем обзоре";
             if(scanTargetAbility==2&&!view.Vision.IsVisible(point.Value))return "Установка мины — только в текущем обзоре";
+            if(scanTargetAbility==2&&MineTooCloseToVisibleEnemy(point.Value))return MineTooCloseMessage;
             valid=true;
             return (scanTargetAbility==OrbitalAbilities.SystemFailure?"Два ближайших больших здания и все башни · радиус ":scanTargetAbility==2?"Радиус взрыва: ":"Радиус обзора: ")+TargetPreviewRadius.ToString("0.#")+" м";
         }
@@ -97,16 +134,18 @@ namespace Spacewars.Presentation
             if(!show){abilityHoveredTarget=0;return;}
             var point=AbilityCursorPoint(out int target);
             if(target==0&&point.HasValue&&scanTargetAbility==OrbitalAbilities.ControlHack)target=HackTargetAt(point.Value);
+            if(target==0&&point.HasValue&&BoostTargeting)target=BoostTargetAt(point.Value);
             if(target!=abilityPreviousTarget||point.HasValue!=abilityPreviousPoint.HasValue||point.HasValue&&abilityPreviousPoint.HasValue&&
                 (Math.Abs(point.Value.X-abilityPreviousPoint.Value.X)>double.Epsilon||Math.Abs(point.Value.Z-abilityPreviousPoint.Value.Z)>double.Epsilon))abilityTargetFailure=null;
             abilityPreviousTarget=target;abilityPreviousPoint=point;abilityHoveredTarget=target;
             string feedback=AbilityTargetFeedback(point,target,out abilityTargetValid);
-            abilityTargetIcon.SetId(scanTargetAbility);
+            if(!completed || scanTargetAbility!=OrbitalAbilities.Reinforcement)
+                abilityTargetIcon.SetId(scanTargetAbility,view.Orbital.ReinforcementQuote.Kind);
             abilityTargetTitle.text=OrbitalAbilities.Name(scanTargetAbility)+(completed?" · применено":" · выбор цели");
-            abilityTargetStatus.text=completed?(scanTargetAbility==OrbitalAbilities.SystemFailure?"Системы отключены":scanTargetAbility==OrbitalAbilities.ControlHack?"Контроль передан вам":scanTargetAbility==2?"Мина установлена":"Область сканируется"):
+            abilityTargetStatus.text=completed?(NuclearTargeting?"Удар подтверждён":BoostTargeting?"Выработка ускорена":RepairNanobotsTargeting?"Зона ремонта активна":scanTargetAbility==OrbitalAbilities.Stasis?"Юниты заморожены":scanTargetAbility==OrbitalAbilities.Reinforcement?"Подкрепление прибывает":scanTargetAbility==OrbitalAbilities.SystemFailure?"Системы отключены":scanTargetAbility==OrbitalAbilities.ControlHack?"Контроль передан вам":scanTargetAbility==2?"Мина установлена":"Область сканируется"):
                 scanPendingSequence>=0?"Применение…":abilityTargetFailure??feedback;
             abilityTargetStatus.style.color=completed||abilityTargetValid?OrbitalTheme.Cyan:OrbitalTheme.Amber;
-            string action=scanTargetAbility==OrbitalAbilities.SystemFailure?"Отключить":scanTargetAbility==OrbitalAbilities.ControlHack?"Захватить":scanTargetAbility==2?"Установить":"Сканировать";
+            string action=NuclearTargeting?"Подтвердить удар":BoostTargeting?"Ускорить":RepairNanobotsTargeting?"Поставить зону":scanTargetAbility==OrbitalAbilities.Stasis?"Заморозить":scanTargetAbility==OrbitalAbilities.Reinforcement?"Призвать":scanTargetAbility==OrbitalAbilities.SystemFailure?"Отключить":scanTargetAbility==OrbitalAbilities.ControlHack?"Захватить":scanTargetAbility==2?"Установить":"Сканировать";
             abilityTargetApply.text=scanTargetPad?action:"ЛКМ — "+action;
             abilityTargetCancel.text=scanTargetPad?"Отменить":"ПКМ — отменить";
             // Persist the mode for each badge's recurring Refresh, rather than racing
@@ -139,7 +178,7 @@ namespace Spacewars.Presentation
         }
         private void DrawHackTarget(MeshGenerationContext context)
         {
-            if(!scanTargeting||scanTargetAbility!=OrbitalAbilities.ControlHack||abilityHoveredTarget==0||mapOpen)return;
+            if(!scanTargeting||(scanTargetAbility!=OrbitalAbilities.ControlHack&&!BoostTargeting)||abilityHoveredTarget==0||mapOpen)return;
             var entity=view.Entities.FirstOrDefault(e=>e.Id==abilityHoveredTarget);
             var building=view.Buildings.FirstOrDefault(b=>b.Id==abilityHoveredTarget);
             if(entity==null&&building==null)return;

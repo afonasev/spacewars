@@ -18,6 +18,15 @@ namespace Spacewars.Runtime
             internal void ReleaseReissueEdges(){ReissueRegistrations?.Release();if(ReissueDestinations){NextOrders?.Release();NextIdentities?.Release();foreach(var op in Operations)op.Replacement?.Release();foreach(var row in HeldRows)row.Replacement.Replacement?.Release();}NextOrders?.ReleaseStorage();NextIdentities?.ReleaseStorage();RetiredOrders?.Release();RetiredIdentities?.Release();foreach(var op in Operations)op.Replacement?.ReleaseStorage();foreach(var row in HeldRows)row.Replacement.Replacement?.ReleaseStorage();}
             internal long ProjectedSequence(long original)=>ReissueObserved?NextSequence:original;
         }
+        // A scalar route can legally walk back to its old start after an actor
+        // changes support while the answer is in flight. Its typed cursor cannot:
+        // cursor zero belongs to the captured origin surface. Reissue that stale
+        // answer through the existing owned replacement transaction instead.
+        private static bool ReadyPhysicalOriginCurrent(NavigationAnswer answer,NavUnit actor)
+            =>answer.Corridor?.RecastPlan==null||answer.Corridor.Origin.SurfaceId==actor.Location.SurfaceId;
+        private static bool ReadySourceMoved(NavigationRequest request,NavUnit actor)
+            =>Math.Abs(actor.Position.X-request.Start.X)>1e-4||Math.Abs(actor.Position.Z-request.Start.Z)>1e-4||
+              request.StartLocation.HasValue&&actor.Location.SurfaceId!=request.StartLocation.Value.SurfaceId;
         private bool ObserveResultReissue(PreparedResultBatch c)
         {
             if(c.ReissueObserved)return true;
@@ -81,8 +90,9 @@ namespace Spacewars.Runtime
             try{next=NavigationAuthorityGroup.CopyWithMemberAndMarchOwned(previous,memberIndex,changed,previous.Data,scope.OwnedReservation());}finally{changed.ReleaseStorage();}c.Groups[g]?.ReleaseStorage();c.Groups[g]=next;
             op.Kind=ResultOperationKind.Reissue;op.Group=g;op.Member=memberIndex;c.NextSequence=op.Replacement.Request.Request;c.ReissueCount++;return true;
         }
-        private static NavGeometry ResultMovementGeometry(PreparedResultBatch c,RebindActor mover,NavGeometry basis)
+        private NavGeometry ResultMovementGeometry(PreparedResultBatch c,RebindActor mover,NavGeometry basis)
         {
+            basis = OwnerMovementGeometry?.Invoke(mover.Id, basis) ?? basis;
             int held=0;foreach(var other in c.Actors)if(other.Id!=mover.Id&&other.Held&&other.Team==mover.Team)held++;
             if(held==0)return basis;var solids=new NavObstacle[checked(basis.Obstacles.Count+held)];for(int i=0;i<basis.Obstacles.Count;i++)solids[i]=basis.Obstacles[i];
             int at=basis.Obstacles.Count;foreach(var other in c.Actors)if(other.Id!=mover.Id&&other.Held&&other.Team==mover.Team)solids[at++]=new NavObstacle(other.Position,other.Radius);

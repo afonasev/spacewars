@@ -22,6 +22,37 @@ public sealed class PlayableBattleHudTests
     [SetUp] public void Setup(){host=new GameObject("battle HUD test");hud=host.AddComponent<PlayableBootstrap>();hud.enabled=false;Set("profile",PlayableProfile.Default);Call("CreateHud");}
     [TearDown] public void Cleanup(){Get<PlayableRuntime>("runtime")?.RequestStop();UnityEngine.Object.DestroyImmediate(host);}
     PlayableSnapshot Snapshot(PlayableEntitySnapshot[] units=null,PlayableBuildingSnapshot[] buildings=null,int credits=1000)=>new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,credits,null,units??Array.Empty<PlayableEntitySnapshot>(),buildings??Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(4,3,100),activeProfile:PlayableProfile.Default);
+    [Test] public void ConstructionControlsRefreshWhenAnUnselectedPadReopens()
+    {
+        var profile=PlayableProfile.Default;
+        var site=new TerritorySite(7,PlayableBuildingKind.Headquarters,default,profile);
+        var owned=new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,42,true);
+        PlayableSnapshot View(int credits)=>new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,
+            RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,credits,null,
+            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),
+            Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:new[]{owned});
+        Set("view",View(1000));
+        Set("selectedSite",site.Id);
+        Set("selectedSlot",site.Slots[0].Id);
+        Call("UpdateSiteHud");
+        var factory=Get<Button>("buildFactory");
+        Assert.AreEqual(DisplayStyle.Flex,factory.style.display.value);
+        Assert.True(factory.enabledSelf);
+
+        Set("selectedSite",0);
+        Set("selectedSlot",0);
+        Set("view",View(0));
+        Call("UpdateSiteHud");
+        Assert.AreEqual(DisplayStyle.None,factory.style.display.value);
+        Assert.False(factory.enabledSelf);
+
+        Set("selectedSite",site.Id);
+        Set("selectedSlot",site.Slots[0].Id);
+        Call("UpdateSiteHud");
+        Assert.AreEqual(DisplayStyle.Flex,factory.style.display.value);
+        Assert.False(factory.enabledSelf);
+        Assert.That(factory.tooltip,Does.Contain("Недостаточно кредитов"));
+    }
     [UnityTest] public IEnumerator HoldFeedbackDoesNotPaintQuickTapsInEitherRing()
     {
         var root=Get<VisualElement>("root");var panel=host.GetComponent<UIDocument>().panelSettings;
@@ -37,9 +68,9 @@ public sealed class PlayableBattleHudTests
         try{
             foreach(string state in new[]{"idle","quick-tap","hold","before-quick-tap"}){
                 double feedback=0;
-                if(state=="quick-tap"){gesture.StepDetailed(10+profile.holdFeedbackDelayMs/2,1,true,true,profile,sector:action.Sector);feedback=gesture.Progress;Assert.Zero(feedback);}
-                if(state=="hold"){gesture.StepDetailed(10+(profile.holdFeedbackDelayMs+profile.holdMs)/2,1,true,true,profile,sector:action.Sector);feedback=gesture.Progress;Assert.AreEqual(.5,feedback,.00001);}
-                if(state=="before-quick-tap")feedback=(profile.holdFeedbackDelayMs/2)/profile.holdMs;
+                if(state=="quick-tap"){gesture.StepDetailed(10+profile.RadialHoldFeedbackDelayMs/2,1,true,true,profile,sector:action.Sector);feedback=gesture.Progress;Assert.Zero(feedback);}
+                if(state=="hold"){gesture.StepDetailed(10+(profile.RadialHoldFeedbackDelayMs+profile.RadialHoldMs)/2,1,true,true,profile,sector:action.Sector);feedback=gesture.Progress;Assert.AreEqual(.5,feedback,.00001);}
+                if(state=="before-quick-tap")feedback=(profile.RadialHoldFeedbackDelayMs/2)/profile.RadialHoldMs;
                 // Ordinary HUDs set the ring every frame; do the same until retained
                 // layout/artwork positions settle, instead of comparing first-layout pixels.
                 for(int frame=0;frame<8;frame++){
@@ -52,7 +83,7 @@ public sealed class PlayableBattleHudTests
                 if(state=="idle")idle=sample;if(state=="quick-tap")CollectionAssert.AreEqual(idle,sample,"Quick tap must paint exactly the same ring pixels as the unpressed highlighted state.");
                 if(state=="hold"){changed=sample.Where((c,i)=>!c.Equals(idle[i])).Count();Assert.Greater(changed,100,"Real hold feedback must remain visibly painted.");}
             }
-            if(!string.IsNullOrEmpty(folder))System.IO.File.WriteAllText(System.IO.Path.Combine(folder,"result.txt"),"delayMs="+profile.holdFeedbackDelayMs+" actionMs="+profile.holdMs+" quickPixelsEqual=true holdChangedPixels="+changed);
+            if(!string.IsNullOrEmpty(folder))System.IO.File.WriteAllText(System.IO.Path.Combine(folder,"result.txt"),"delayMs="+profile.RadialHoldFeedbackDelayMs+" actionMs="+profile.RadialHoldMs+" quickPixelsEqual=true holdChangedPixels="+changed);
         }finally{panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(pixels);}
     }
     [Test] public void RoutineStatusesStayQuietButErrorsAndDisconnectStayVisible()
@@ -73,6 +104,68 @@ public sealed class PlayableBattleHudTests
         var colors=map.Texture.GetPixels32();Assert.Greater(colors.Distinct().Count(),2);Assert.True(colors.Any(c=>c.r>30||c.g>30||c.b>30),"visible landscape contrast");
         CollectionAssert.AreEqual(beforeA,a.Texture.GetPixels32());CollectionAssert.AreEqual(beforeB,b.Texture.GetPixels32());
     }
+    [Test] public void SharedMinimapReusesMarkersWhileFogAndNewPublicationsUpdate()
+    {
+        var profile=PlayableProfile.Default;
+        using var world=new PlayableWorld(host.transform,profile);
+        using var terrain=new PlayableMapTerrain(profile);
+        var surface=new PlayableMapSurface(profile,terrain.Texture);
+        Set("world",world);
+        Set("sharedMapTerrain",terrain);
+        Set("sharedLocalMap",surface);
+        Set("sharedMapFrame",new VisualElement());
+        Set("sharedMapClock",new Label());
+        var seats=Get<List<PlayableBootstrap>>("localPresentations");
+        seats.Add(hud);
+        try
+        {
+            OfflinePresentationFrame Publish(double x)
+            {
+                var unit=new PlayableEntitySnapshot(41,PlayableOwner.Player,PlayableEntityKind.Tank,
+                    new NavPoint(x,0),100,false,0,0,0);
+                var view=Snapshot(new[]{unit});
+                Set("view",view);
+                return new OfflinePresentationFrame(
+                    new Dictionary<string,PlayableSnapshot>{{view.OwnerId,view}},Array.Empty<OfflineReceipt>(),0);
+            }
+            var marksField=typeof(PlayableMapSurface).GetField("marks",Flags);
+            var first=Publish(-6);
+            Call("UpdateSharedLocalMap",first);
+            var marks=(IReadOnlyList<PlayableMapMark>)marksField.GetValue(surface);
+            Assert.AreEqual(new NavPoint(-6,0),marks.Single().Position);
+            long uploads=terrain.Uploads;
+
+            world.Fog.ShowPublic();
+            Call("UpdateSharedLocalMap",first);
+            Assert.AreSame(marks,marksField.GetValue(surface));
+            Assert.AreEqual(uploads+1,terrain.Uploads);
+
+            var next=Publish(7);
+            Assert.AreEqual(first.Tick,next.Tick);
+            Call("UpdateSharedLocalMap",next);
+            var updated=(IReadOnlyList<PlayableMapMark>)marksField.GetValue(surface);
+            Assert.AreNotSame(marks,updated);
+            Assert.AreEqual(new NavPoint(7,0),updated.Single().Position);
+        }
+        finally
+        {
+            seats.Clear();
+            Set("world",null);
+            Set("sharedMapTerrain",null);
+        }
+    }
+    [Test] public void ArmySummaryListsCerberusLastWithItsOwnCount()
+    {
+        Set("view",Snapshot(new[]{
+            new PlayableEntitySnapshot(5,PlayableOwner.Player,PlayableEntityKind.Cerberus,default,100,false,0,0,0),
+            new PlayableEntitySnapshot(6,PlayableOwner.Player,PlayableEntityKind.Igla,default,100,false,0,0,0),
+            new PlayableEntitySnapshot(7,PlayableOwner.Player,PlayableEntityKind.Igla,default,100,false,0,0,0)}));
+        Call("UpdateArmyCompositionCounts");
+        var visible=Get<Label[]>("armyCounts").Where(label=>label.style.display.value==DisplayStyle.Flex).ToArray();
+        CollectionAssert.AreEqual(new[]{"igla","cerberus"},visible.Select(label=>label.Q<OrbitalGlyph>().Kind));
+        CollectionAssert.AreEqual(new[]{"2","1"},visible.Select(label=>label.text));
+    }
+
     [Test] public void ArmyPopoverUsesWholeOwnLivingArmyAndFocus()
     {
         var units=new[]{new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Explorer,default,100,false,0,0,0),new PlayableEntitySnapshot(2,PlayableOwner.Player,PlayableEntityKind.Tank,default,100,false,0,0,0),new PlayableEntitySnapshot(3,PlayableOwner.Enemy,PlayableEntityKind.Shkval,default,100,false,0,0,0)};
@@ -86,6 +179,31 @@ public sealed class PlayableBattleHudTests
         CollectionAssert.AreEqual(new[]{DisplayStyle.None,DisplayStyle.None,DisplayStyle.None,DisplayStyle.Flex},counts.Select(label=>label.style.display.value));
         Set("view",Snapshot(Array.Empty<PlayableEntitySnapshot>()));Call("UpdateHud");Assert.True(counts.All(label=>label.style.display.value==DisplayStyle.None),"No army leaves no icon slots.");
         Get<VisualElement>("root").Focus();Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("armyComposition").style.display.value);
+    }
+    [Test]
+    public void ClearedPrecisionDockReopensWithNewSelection()
+    {
+        var units = new[]
+        {
+            new PlayableEntitySnapshot(1, PlayableOwner.Player, PlayableEntityKind.Explorer, default, 100, false, 0, 0, 0),
+            new PlayableEntitySnapshot(2, PlayableOwner.Player, PlayableEntityKind.Tank, default, 100, false, 0, 0, 0),
+        };
+        var selection = Get<HashSet<int>>("selection");
+        var roster = Get<VisualElement>("selectionRoster");
+        var dock = Get<VisualElement>("armyRegion");
+        selection.UnionWith(new[] { 1, 2 });
+        Set("view", Snapshot(units));
+        Call("UpdateHud");
+        Assert.AreEqual(2, roster.childCount);
+        selection.Clear();
+        Call("UpdateHud");
+        Call("UpdateHud");
+        Assert.Zero(roster.childCount);
+        Assert.AreEqual(DisplayStyle.None, dock.style.display.value);
+        selection.Add(2);
+        Call("UpdateHud");
+        Assert.AreEqual(DisplayStyle.Flex, dock.style.display.value);
+        Assert.AreEqual(2, Get<PlayableEntitySnapshot[]>("selectionDockUnits").Single().Id);
     }
     [Test] public void TacticalCompositionStaysVisibleWithoutHoverThenRestoresPopover()
     {
@@ -104,9 +222,9 @@ public sealed class PlayableBattleHudTests
         var actions=Get<OfflinePadAction[]>("battleActions");var production=actions.First(a=>a.Sector.Hold=="repeat");Assert.IsNull(production.Command);Assert.NotNull(production.HoldCommand);
         var settings=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text);var gestures=new OfflinePadGestures();gestures.SetMode("buildingWheel");
         gestures.StepDetailed(0,0,true,true,settings,false,production.Sector);gestures.StepDetailed(1,1,true,true,settings,false,production.Sector);
-        Assert.AreEqual("repeat",gestures.StepDetailed(settings.holdMs+2,1,true,true,settings,false,production.Sector).Single().Kind);
-        Assert.IsEmpty(gestures.StepDetailed(settings.holdMs+3,0,true,true,settings,false,production.Sector),"Hold release must not emit a tap purchase.");
-        gestures.StepDetailed(settings.holdMs+4,1,true,true,settings,false,null);Assert.IsEmpty(gestures.StepDetailed(settings.holdMs+5,0,true,true,settings,false,null),"Controller neutral does not execute a sector.");
+        Assert.AreEqual("repeat",gestures.StepDetailed(settings.RadialHoldMs+2,1,true,true,settings,false,production.Sector).Single().Kind);
+        Assert.IsEmpty(gestures.StepDetailed(settings.RadialHoldMs+3,0,true,true,settings,false,production.Sector),"Hold release must not emit a tap purchase.");
+        gestures.StepDetailed(settings.RadialHoldMs+4,1,true,true,settings,false,null);Assert.IsEmpty(gestures.StepDetailed(settings.RadialHoldMs+5,0,true,true,settings,false,null),"Controller neutral does not execute a sector.");
         var ring=Get<OrbitalBattleRing>("battleRing");Assert.AreEqual(DisplayStyle.Flex,ring.style.display.value);
         int activated=0;ring.InvokeAction=(id,repeat)=>{Assert.AreEqual(production.Sector.Id,id);Assert.False(repeat);activated++;};var control=ring.Q<Button>("radial-"+production.Sector.Id);control.Focus();
         using(var submit=NavigationSubmitEvent.GetPooled()){submit.target=control;control.SendEvent(submit);}Assert.AreEqual(1,activated,"Focused radial button submits exactly one ordinary activation.");
@@ -209,7 +327,7 @@ public sealed class PlayableBattleHudTests
         var texture=new RenderTexture(1280,760,24);texture.Create();panel.targetTexture=texture;
         OfflinePadAction[] Actions(bool repeat=false)=>new[]{
             new OfflinePadAction("7:explorer","Исслед.",true){Price=100},
-            new OfflinePadAction("7:tank","Танк",true,hold:"repeat"){Price=150,Progress=.4,Repeat=repeat,Command=new OfflinePadActionCommand()},
+            new OfflinePadAction("7:tank","Вепрь",true,hold:"repeat"){Price=150,Progress=.4,Repeat=repeat,Command=new OfflinePadActionCommand()},
             new OfflinePadAction("7:shkval","Шквал",true){Price=200},
             new OfflinePadAction("7:repair","Ремонт",true),new OfflinePadAction("7:sale","Продать",true,hold:"sell"){Price=300},
             new OfflinePadAction("rally","Сбор",true)};

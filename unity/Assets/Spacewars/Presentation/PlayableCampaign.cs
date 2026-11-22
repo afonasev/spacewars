@@ -37,7 +37,7 @@ namespace Spacewars.Presentation
             EnsureBalanceStore();
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             if(Array.IndexOf(Environment.GetCommandLineArgs(),"-splitScreenPerformanceEvidence")>=0)
-                return PlayableRuntime.CreateSplitScreenPerformanceMatch(profile,nextGeneration,matchSetup,startPaused:preparing,aiProfile:balanceStore.ActiveAiProfile);
+                return PlayableRuntime.CreateSplitScreenPerformanceMatch(profile,nextGeneration,matchSetup,startPaused:preparing,aiProfile:balanceStore.ActiveAiProfile,unitsPerSeat:SplitScaleRequested?SplitScaleArgument("-splitScaleUnits",20):50,allowAi:SplitScaleRequested);
             if(Array.IndexOf(Environment.GetCommandLineArgs(),"-smallFivePerformanceEvidence")>=0)
                 return PlayableRuntime.CreateSmallFivePerformanceMatch(profile,nextGeneration,matchSetup,startPaused:preparing,aiProfile:balanceStore.ActiveAiProfile);
             if(Array.IndexOf(Environment.GetCommandLineArgs(),"-eightPlayerPerformanceEvidence")>=0)
@@ -154,7 +154,7 @@ namespace Spacewars.Presentation
         {
             string A=NativeControllerGlyph.Symbol("A",pad),B=NativeControllerGlyph.Symbol("B",pad),Y=NativeControllerGlyph.Symbol("Y",pad);
             string family=(pad?.layout+" "+pad?.description.manufacturer).ToLowerInvariant();bool sony=family.Contains("dual")||family.Contains("sony"),nintendo=family.Contains("switch")||family.Contains("nintendo");string shoulder=sony?"R1":nintendo?"R":"RB";
-            return new[]{A+" — выбрать машину; удерживайте для выделения области.",B+" — отправить выбранных к указателю.","Нажмите "+shoulder+", выберите сектор и отпустите для выбора отряда.",B+" на видимом противнике — атаковать.",Y+" — двигаться в атаке к точке.","Нажмите "+shoulder+", выберите сектор отряда и удерживайте, чтобы назначить выделенных.","Быстро нажмите "+shoulder+" дважды, чтобы выбрать всю боевую армию."}[i];
+            return new[]{A+" — выбрать машину; удерживайте для выделения области.",B+" — отправить выбранных к указателю.","Удерживайте "+shoulder+", выберите сектор и коротко нажмите "+A+".",B+" на видимом противнике — атаковать.",Y+" — двигаться в атаке к точке.","Удерживайте "+shoulder+", выберите сектор, затем удерживайте и отпустите "+A+", чтобы назначить выделенных.","Быстро нажмите "+shoulder+" дважды, чтобы выбрать всю боевую армию."}[i];
         }
         private bool NonPadInputChanged()
         {

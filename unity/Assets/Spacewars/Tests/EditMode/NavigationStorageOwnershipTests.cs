@@ -712,6 +712,45 @@ namespace Spacewars.Tests.EditMode
             scope.RequestCancel();scratch.Dispose();scratch.Dispose();Assert.AreEqual(NavigationRetentionBudget.ScopeBytes,budget.HeldBytes);Assert.AreEqual(retained,budget.PeakRetainedBytes);
             Assert.True(scope.Discard());Assert.AreEqual(NavigationRetentionBudget.RootBytes,budget.RetainedBytes);
         }
+        [Test] public void PartitionTraceReleasesTemporaryBytesBeforeTheEnclosingFrameResolves()
+        {
+            var map=ThreeCrossingsMap.Default;
+            var provider=new PartitionNavigationProvider(map,new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision),null);
+            var clearance=new NavClearanceProfile("explorer",1,"ground",1,.58);
+            Assert.True(provider.TryLocate(new NavPoint(-18,0),clearance,out var start));
+            var target=new NavPoint(18,0);
+            Assert.True(provider.TryTrace(start,target,clearance,out var expectedEnd,out var expected));
+            var budget=new NavigationRetentionBudget();
+
+            Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,1,1,out var scope));
+            using(scope){
+                for(int pass=0;pass<2;pass++){
+                    Assert.True(provider.TryTraceOwned(start,target,clearance,out var end,out var trace,scope.OwnedReservation()));
+                    var root=(NavOwnedStorage)trace;
+                    try{
+                        Assert.AreEqual(expectedEnd,end);
+                        Assert.AreEqual(expected.Count,trace.Count);
+                        for(int i=0;i<trace.Count;i++){
+                            Assert.AreEqual(expected[i].From,trace[i].From);
+                            Assert.AreEqual(expected[i].To,trace[i].To);
+                            Assert.AreEqual(expected[i].PortalId,trace[i].PortalId);
+                        }
+                        Assert.AreEqual(Unique(root),budget.PhysicalBytes);
+                    }finally{root.ReleaseOwner();}
+                    Assert.Zero(budget.PhysicalBytes,"A consumed trace leaves no allocation pins in the live frame.");
+                    Assert.AreEqual(NavigationRetentionBudget.ScopeBytes,budget.HeldBytes);
+                }
+                int allocations=0;
+                budget.AllocationAdmission=_=>++allocations!=5;
+                try{
+                    Assert.Throws<InvalidOperationException>(()=>provider.TryTraceOwned(start,target,clearance,out _,out _,scope.OwnedReservation()));
+                    Assert.Zero(budget.PhysicalBytes);
+                }finally{budget.AllocationAdmission=null;}
+            }
+            Assert.Zero(budget.ActiveScopes);
+            Assert.Zero(budget.HeldBytes);
+        }
+
         [Test] public void RealPartitionTraceOwnsEveryLegAndReturnsScratchBeforeCommitOrEveryNthRefusal()
         {
             var map=ThreeCrossingsMap.Default;var provider=new PartitionNavigationProvider(map,new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision),null);

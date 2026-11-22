@@ -101,7 +101,7 @@ namespace Spacewars.Simulation
             foreach (var pair in nextKnown) known.Add(pair.Key, pair.Value);
             foreach(var relay in state.KnownRelays)knownRelays.Add(relay.SiteId,relay.Owner);
             Array.Copy(nextCoverage, coverage, coverage.Length);
-            revision = state.Revision; CoverageUpdates = state.CoverageUpdates; cached = null;
+            revision = state.Revision; CoverageUpdates = state.CoverageUpdates; cached = null; snapshotCells=null; snapshotCoverage=null;
             lastRefreshSources = null; lastRefreshBuildings = null; refreshInput.Clear();
         }
     }

@@ -47,6 +47,8 @@ namespace Spacewars.Tests.EditMode
             int a=Enemy(d,new NavPoint(at.X,at.Z+8));int b=Enemy(d,new NavPoint(at.X,at.Z+9.6));int c=Enemy(d,new NavPoint(at.X,at.Z+11.2));int off=Enemy(d,new NavPoint(at.X+3,at.Z+9));int air=Enemy(d,new NavPoint(at.X,at.Z+7),PlayableEntityKind.Hawk);
             double airHp=Hp(d,air);Tick(d,1);double damage=PlayableProfile.Default.TankHealth*.5;
             Assert.AreEqual(PlayableProfile.Default.TankHealth-damage,Hp(d,a),1e-8);Assert.AreEqual(PlayableProfile.Default.TankHealth-damage*.7,Hp(d,b),1e-8);Assert.AreEqual(PlayableProfile.Default.TankHealth-damage*.49,Hp(d,c),1e-8);Assert.AreEqual(PlayableProfile.Default.TankHealth,Hp(d,off));Assert.AreEqual(airHp,Hp(d,air));
+            var shot=View(d).Sounds.Single(e=>e.Kind==PlayableSoundKind.Shot&&e.UnitId==tower);
+            Assert.True(shot.Building);
         }
         [Test]public void FriendlyGroundBodyDoesNotStopTheBeamOrTakeDamage()
         {

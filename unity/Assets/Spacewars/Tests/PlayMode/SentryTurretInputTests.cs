@@ -22,6 +22,58 @@ namespace Spacewars.Input.Tests
   object Call(string n,params object[] args)=>typeof(PlayableBootstrap).GetMethods(F).Single(m=>m.Name==n&&m.GetParameters().Length==args.Length).Invoke(hud,args);
   [SetUp]public override void Setup(){base.Setup();host=new GameObject("Sentry mouse adapter");hud=host.AddComponent<PlayableBootstrap>();hud.enabled=false;input=host.AddComponent<PlayableInput>();mouse=InputSystem.AddDevice<Mouse>();keyboard=InputSystem.AddDevice<Keyboard>();input.AssignedMouse=mouse;input.AssignedKeyboard=keyboard;input.SourceSeatSemantics=true;input.Order=(p,a,s)=>Call("Order",p,a,s);}
   [TearDown]public override void TearDown(){Get<PlayableRuntime>("runtime")?.RequestStop();UnityEngine.Object.DestroyImmediate(host);base.TearDown();}
+  [TestCase(PlayableCommandKind.Move)]
+  [TestCase(PlayableCommandKind.AttackMove)]
+  public void EmptySpatialSelectionDoesNotSubmitACommand(PlayableCommandKind kind)
+  {
+   var profile=PlayableProfile.Default;
+   using var runtime=new PlayableRuntime(profile,1,7,autonomousOwnerAi:false,startPaused:true);
+   Set("runtime",runtime);Set("generation",1L);Set("profile",profile);Set("view",runtime.Latest);
+   try{
+    Assert.IsEmpty(Get<HashSet<int>>("selection"));
+    Call("Submit",kind,null,new NavPoint(0,4),0,0L,PlayableEntityKind.Tank,
+     PlayableResearchKind.TankChassis,PlayableOrderMode.Replace,0);
+    Assert.Zero(Get<long>("sequence"));
+    Assert.IsEmpty(runtime.ReceiptsAfter(0));
+    var queue=Get<HumanMoveOrderQueue>("humanOrders");
+    Assert.Zero(queue.Count);
+   }finally{
+    runtime.RequestStop();
+    Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped,10000));
+   }
+  }
+  [UnityTest,Timeout(30000)]public IEnumerator StopAndHoldGoThroughWhileLocalMoveIsStillQueued()
+  {
+   var setup=new ProvingGroundSetup(PlayableProfile.Default);
+   Assert.IsNull(setup.PlaceUnit(0,PlayableEntityKind.Explorer,new NavPoint(-10,0)));
+   Assert.IsNull(setup.PlaceUnit(0,PlayableEntityKind.Tank,new NavPoint(-14,0)));
+   using var runtime=new PlayableRuntime(setup.Configuration(),1);
+   using var routes=new UnityHostRouteService();
+   double until=Time.realtimeSinceStartupAsDouble+20;
+   while(!runtime.IsPrepared&&Time.realtimeSinceStartupAsDouble<until){routes.Service(runtime,setup.Profile.NavigationRequestsPerFrame);yield return null;}
+   Assert.True(runtime.IsPrepared,runtime.Latest.Failure);
+   Set("runtime",runtime);Set("generation",1L);Set("profile",setup.Profile);Set("view",runtime.Latest);
+   Call("ReconcileHumanOrders");
+   var units=runtime.Latest.Entities.Where(e=>e.Owner==runtime.Latest.Owner).ToArray();
+   Assert.AreEqual(2,units.Length);
+   var queue=Get<HumanMoveOrderQueue>("humanOrders");
+   var move=new PlayableCommand(1,0,"player-1",PlayableCommandKind.Move,units.Select(u=>u.Id).ToArray(),new NavPoint(10,12));
+   Assert.True(queue.Enqueue(setup.Profile,runtime.Latest,move));
+   void Submit(PlayableCommandKind kind,int id)=>Call("Submit",kind,new[]{id},default(NavPoint),0,0L,PlayableEntityKind.Tank,PlayableResearchKind.TankChassis,PlayableOrderMode.Replace,0);
+   Submit(PlayableCommandKind.Stop,units[0].Id);
+   Assert.AreEqual(1,Get<long>("sequence"),"Stop reaches transport in the issuing frame.");
+   Assert.AreEqual(1,queue.Count,"The other recipient retains its queued Move.");
+   Submit(PlayableCommandKind.Hold,units[1].Id);
+   Assert.AreEqual(2,Get<long>("sequence"),"HOLD reaches transport in the issuing frame.");
+   Assert.Zero(queue.Count);
+   while(runtime.ReceiptsAfter(0).Count<2&&!runtime.IsStopped&&Time.realtimeSinceStartupAsDouble<until){routes.Service(runtime,setup.Profile.NavigationRequestsPerFrame);yield return null;}
+   CollectionAssert.AreEqual(new[]{PlayableCommandStatus.Applied,PlayableCommandStatus.Applied},runtime.ReceiptsAfter(0).Select(r=>r.Status));
+   while(!runtime.Latest.Entities.Single(e=>e.Id==units[1].Id).Held&&Time.realtimeSinceStartupAsDouble<until)yield return null;
+   var stopped=runtime.Latest.Entities.Single(e=>e.Id==units[0].Id);
+   var held=runtime.Latest.Entities.Single(e=>e.Id==units[1].Id);
+   Assert.IsFalse(stopped.Moving);Assert.IsFalse(stopped.Held);Assert.AreEqual(units[0].Position,stopped.Position);
+   Assert.IsTrue(held.Held);Assert.AreEqual(units[1].Position,held.Position);
+  }
   [UnityTest,Timeout(30000)]public IEnumerator RightClickAssignsVisibleEnemyToSelectedReadyTurretAndGroundDoesNotMoveIt()
   {
    // Focused input/command projection with a ready scenario building, not a repeat of the construction/navigation witness.

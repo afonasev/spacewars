@@ -24,6 +24,21 @@ namespace Spacewars.Simulation
  }
  public readonly partial struct BuildingCombatPose
  {
+#if UNITY_INCLUDE_TESTS
+  [ThreadStatic] internal static bool DisableQueryBroadPhaseForTests;
+  [ThreadStatic] internal static long NarrowQueryCallsForTests;
+#endif
+  bool OutsideQuerySquare(NavPoint center,double halfWidth)
+  {
+#if UNITY_INCLUDE_TESTS
+   if(DisableQueryBroadPhaseForTests)return false;
+#endif
+   // The authored animated bound includes doors, petals, turret articulation and
+   // recoil. Reject only wholly disjoint horizontal squares; exact triangle
+   // predicates and contact ordering remain unchanged for every candidate.
+   return OutsideBlastSquare(center,halfWidth+1e-7);
+  }
+
   readonly CombatMesh mesh;readonly V origin;readonly double scale,cos,sin,opening,platform,height;
   internal BuildingCombatPose(CombatMesh mesh,NavPoint at,double y,double scale,double yaw,double opening,double platform,double height){this.mesh=mesh;origin=new V(at.X,y,at.Z);this.scale=scale;cos=Math.Cos(yaw);sin=Math.Sin(yaw);this.opening=opening;this.platform=platform;this.height=height;sentry=null;}
   readonly SentryCombatPose? sentry;
@@ -40,9 +55,22 @@ namespace Spacewars.Simulation
   }
   V Local(BallisticPoint p){var d=new V(p.X,p.Y,p.Z)-origin;return new V(cos*d.X-sin*d.Z,d.Y,sin*d.X+cos*d.Z)/scale;}
   BallisticPoint World(V p){p=p*scale;return new BallisticPoint(origin.X+cos*p.X+sin*p.Z,origin.Y+p.Y,origin.Z-sin*p.X+cos*p.Z);}
-  public bool Overlaps(BallisticPoint p,double radius)=>sentry.HasValue?sentry.Value.Overlaps(p,radius):mesh.Overlaps(Local(p),radius/scale,opening,platform,height);
+  public bool Overlaps(BallisticPoint p,double radius)
+  {
+   if(OutsideQuerySquare(p.Ground,radius))return false;
+#if UNITY_INCLUDE_TESTS
+   NarrowQueryCallsForTests++;
+#endif
+   return sentry.HasValue?sentry.Value.Overlaps(p,radius):mesh.Overlaps(Local(p),radius/scale,opening,platform,height);
+  }
   public bool Segment(BallisticPoint from,BallisticPoint to,double radius,out double fraction,out BallisticPoint contact)
-  {if(sentry.HasValue)return sentry.Value.Segment(from,to,radius,out fraction,out contact);fraction=mesh.Segment(Local(from),Local(to),radius/scale,opening,platform,height);contact=double.IsPositiveInfinity(fraction)?to:new BallisticPoint(from.X+(to.X-from.X)*fraction,from.Y+(to.Y-from.Y)*fraction,from.Z+(to.Z-from.Z)*fraction);return !double.IsPositiveInfinity(fraction);}
+  {
+   double halfWidth=Math.Max(Math.Abs(to.X-from.X),Math.Abs(to.Z-from.Z))/2+radius;
+   if(OutsideQuerySquare(new NavPoint((from.X+to.X)/2,(from.Z+to.Z)/2),halfWidth)){fraction=double.PositiveInfinity;contact=to;return false;}
+#if UNITY_INCLUDE_TESTS
+   NarrowQueryCallsForTests++;
+#endif
+   if(sentry.HasValue)return sentry.Value.Segment(from,to,radius,out fraction,out contact);fraction=mesh.Segment(Local(from),Local(to),radius/scale,opening,platform,height);contact=double.IsPositiveInfinity(fraction)?to:new BallisticPoint(from.X+(to.X-from.X)*fraction,from.Y+(to.Y-from.Y)*fraction,from.Z+(to.Z-from.Z)*fraction);return !double.IsPositiveInfinity(fraction);}
   public BallisticPoint Closest(BallisticPoint p)=>sentry.HasValue?sentry.Value.Closest(p):World(mesh.Closest(Local(p),opening,platform,height));
  }
  internal readonly struct V

@@ -1,0 +1,11 @@
+--- a/mono/utils/mono-threads-mach-helper.c
++++ b/mono/utils/mono-threads-mach-helper.c
+@@ -60,7 +60,7 @@
+ 	struct objc_super super;
+ 	super.receiver = self;
+ #if !defined(__cplusplus) && !__OBJC2__
+-	super.class = nsobject;
++	super.super_class = nsobject;
+ #else
+ 	super.super_class = nsobject;
+ #endif

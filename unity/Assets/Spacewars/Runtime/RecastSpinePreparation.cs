@@ -8,7 +8,7 @@ namespace Spacewars.Runtime
     internal sealed class RecastSpinePreparation : NavOwnedStorage,IDisposable
     {
         internal enum Result { Pending,Succeeded,Failed }
-        private enum Phase { Scan,Strict,Height,Authority,Repair,Helper,HelperCopy,Append,Allocate,Copy,Done }
+        private enum Phase { Scan,Strict,Height,Authority,Adjust,Repair,Helper,HelperCopy,Append,Allocate,Copy,Done }
         private const int Capacity=8192;
         private readonly RecastPayload source;
         private readonly RecastRoutePoint[] raw,points;
@@ -17,7 +17,7 @@ namespace Spacewars.Runtime
         private NavLocation cursor,target;
         private RecastRoutePoint point;
         private Phase phase;
-        private int corner,count,copy,helperCopy;
+        private int corner,count,copy,helperCopy,adjustment;
         private bool strict,height,disposed;
         internal Result Status{get;private set;}
         internal long Work{get;private set;}
@@ -77,7 +77,25 @@ namespace Spacewars.Runtime
                                 try{if(Finite(geometry.Point(point.Location)[1])){target=reached;phase=Phase.Append;break;}}catch(ArgumentException){}
                             }}finally{(trace as NavOwnedStorage)?.ReleaseOwner();}
                         }
-                        phase=Phase.Repair;break;
+                        // The native raster can put a turn on the wrong side of
+                        // a clearance boundary even when the raw support name is
+                        // correct. Keep the authored endpoints and explicit links.
+                        if(eligible&&height&&!provider.IsValid(target,clearance)){adjustment=0;phase=Phase.Adjust;}
+                        else phase=Phase.Repair;
+                        break;
+                    }
+                    case Phase.Adjust:{
+                        int ring=adjustment/8+1;
+                        double offset=ring*request.Profile.LocalGridCell;
+                        if(offset>request.Profile.Radius+request.Profile.LocalGridCell){phase=Phase.Repair;break;}
+                        int direction=adjustment++%8;
+                        int x=direction<3?-1:direction<6?1:0;
+                        int z=direction<6?direction%3-1:direction==6?-1:1;
+                        double shift=x!=0&&z!=0?offset/Math.Sqrt(2):offset;
+                        var position=point.Location.Position;
+                        var candidate=new NavLocation(new NavPoint(position.X+x*shift,position.Z+z*shift),point.Location.SurfaceId);
+                        if(Height(geometry,candidate,point.Height)&&Trace(provider,request,cursor,candidate,r)){target=candidate;phase=Phase.Append;}
+                        break;
                     }
                     case Phase.Repair:
                         if(point.PortalId==null&&height&&provider.IsValid(cursor,clearance)&&provider.IsValid(target,clearance)&&!request.Geometry.SegmentFree(cursor.Position,target.Position,request.Profile.Radius)){

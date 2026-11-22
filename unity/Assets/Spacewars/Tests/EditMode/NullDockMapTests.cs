@@ -78,6 +78,26 @@ namespace Spacewars.Tests.EditMode
             var config=map.Configuration(p,26102026,roster);Assert.AreEqual(2,config.Starts.Count);
             foreach(var start in config.Starts)Assert.True(map.SupportsFootprint(start.ExplorerAnchor,p.ExplorerCollisionRadius));
         }
+        [Test] public void CentralRelaysRequireLeavingEveryRaisedSupport()
+        {
+            var map=new NullDockMap();
+            var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);
+            var relays=map.Sites(p).Where(site=>site.Kind==PlayableBuildingKind.RelayTower).ToArray();
+            var captureLimit=PlayableProfileMetadata.Fields.Single(field=>field.Path=="relay.captureRadius").Maximum;
+            CollectionAssert.AreEqual(new[]{map.Point(74,80),map.Point(118,80)},relays.Select(relay=>relay.Position));
+            foreach(var relay in relays){
+                Assert.AreEqual("station-deck",map.SupportAt(relay.Position)?.Id);
+                Assert.Zero(map.SurfaceHeight(relay.Position));
+                Assert.True(map.SupportsFootprint(relay.Position,p.RelayFootprintRadius*Math.Sqrt(2)+p.TankCollisionRadius));
+                foreach(var support in map.Supports.Where(s=>s.Id!="station-deck"))
+                    Assert.Greater(support.Bounds.DistanceSquared(relay.Position),captureLimit*captureLimit,support.Id);
+            }
+            Assert.True(map.SupportsSweep(map.Point(58,80),map.Point(71,80),p.TankCollisionRadius));
+            Assert.True(map.SupportsSweep(map.Point(134,80),map.Point(121,80),p.TankCollisionRadius));
+            var old=new NullDockMap(new NullDockProfileData{revision=3});
+            CollectionAssert.AreEqual(new[]{map.Point(80,110),map.Point(112,50)},
+                old.Sites(p).Where(site=>site.Kind==PlayableBuildingKind.RelayTower).Select(site=>site.Position));
+        }
         [Test] public void PocketMinesOccupyCornersWithClearApproaches()
         {
             var map=new NullDockMap();var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);var sites=map.Sites(p);

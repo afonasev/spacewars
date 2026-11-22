@@ -4,6 +4,7 @@ using NUnit.Framework;
 using Spacewars.Presentation;
 using Spacewars.Simulation;
 using UnityEngine;
+using Unity.Profiling;
 
 namespace Spacewars.Tests.PlayMode
 {
@@ -11,6 +12,116 @@ namespace Spacewars.Tests.PlayMode
     {
         private static ThreeCrossingsMap Map()=>new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text));
         private static PlayableProfile Gameplay(ThreeCrossingsMap map)=>PlayableProfile.Create(JsonUtility.FromJson<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text),map);
+        [Test] public void SupportLookupKeepsFirstMatchWithoutManagedAllocations()
+        {
+            var map=Map();
+            var points=Enumerable.Range(0,4096).Select(i=>new NavPoint(
+                (i%64)*map.HalfExtent/31-map.HalfExtent,
+                (i/64)*map.HalfExtent/31-map.HalfExtent)).Concat(new[]{
+                    new NavPoint(0,0),new NavPoint(0,map.CrossingZ),new NavPoint(0,-map.CrossingZ),
+                    new NavPoint(map.RiverHalfWidth,0),new NavPoint(-map.RiverHalfWidth,0),
+                }).ToArray();
+            var expected=new MapSupport[points.Length];
+            var actual=new MapSupport[points.Length];
+            void FillReference(){for(int i=0;i<points.Length;i++){var point=points[i];expected[i]=map.Supports.FirstOrDefault(s=>s.Contains(point));}}
+            void FillCandidate(){for(int i=0;i<points.Length;i++)actual[i]=map.SupportAt(points[i]);}
+            FillReference();
+            FillCandidate();
+            long before=CountAllocations(FillReference),after=CountAllocations(FillCandidate);
+            Assert.Greater(before,0,"The allocating predecessor must be visible to the recorder.");
+            Assert.Zero(after);
+            for(int i=0;i<points.Length;i++)Assert.AreSame(expected[i],actual[i],"support priority at "+points[i]);
+            TestContext.WriteLine($"SUPPORT_LOOKUP points={points.Length} reference_allocations={before} candidate_allocations={after}");
+        }
+
+        [Test]
+        public void PresentationSurfaceMatchesHeightAndGradientAtContoursAndTankPoses()
+        {
+            var map = Map();
+            var profile = Gameplay(map);
+            var points = new System.Collections.Generic.List<NavPoint>();
+            const double seamOffset = 1e-10;
+            for (int z = 0; z <= 64; z++)
+            for (int x = 0; x <= 64; x++)
+                points.Add(new NavPoint((x / 32.0 - 1) * map.HalfExtent, (z / 32.0 - 1) * map.HalfExtent));
+
+            int firstContour = points.Count;
+            var offsets = new[] { -seamOffset, 0, seamOffset };
+            foreach (var support in map.Supports)
+            {
+                var b = support.Bounds;
+                var vertices = b.Polygon?.Vertices ?? new[] {
+                    new NavPoint(b.MinX, b.MinZ), new NavPoint(b.MaxX, b.MinZ),
+                    new NavPoint(b.MaxX, b.MaxZ), new NavPoint(b.MinX, b.MaxZ),
+                };
+                for (int i = 0; i < vertices.Count; i++)
+                {
+                    var a = vertices[i];
+                    var c = vertices[(i + 1) % vertices.Count];
+                    var middle = new NavPoint((a.X + c.X) / 2, (a.Z + c.Z) / 2);
+                    foreach (var at in new[] { a, middle })
+                    foreach (double dx in offsets)
+                    foreach (double dz in offsets)
+                        points.Add(new NavPoint(at.X + dx, at.Z + dz));
+                }
+            }
+            int pastContours = points.Count;
+            points.Add(new NavPoint(double.NaN, 0));
+            points.Add(new NavPoint(0, double.PositiveInfinity));
+            points.Add(new NavPoint(map.HalfExtent + 1, -map.HalfExtent - 1));
+            int slopes = 0, water = 0;
+            foreach (var p in points)
+            {
+                var sample = map.SamplePresentationSurface(p);
+                var expectedHeight = map.SurfaceHeight(p);
+                var expectedGradient = map.SurfaceGradient(p);
+                Assert.AreEqual(BitConverter.DoubleToInt64Bits(expectedHeight), BitConverter.DoubleToInt64Bits(sample.Height), $"height at {p}");
+                Assert.AreEqual(expectedGradient, sample.Gradient, $"gradient at {p}");
+                if (!expectedGradient.Equals(default(NavPoint))) slopes++;
+                if (expectedHeight == -map.WaterDepth) water++;
+            }
+            Assert.Positive(slopes);
+            Assert.Positive(water);
+
+            var host = new GameObject("Crossings pose comparison");
+            using var world = new PlayableWorld(host.transform, profile, staged: true);
+            var actor = world.Tank(7300, true);
+            var reference = new GameObject("Stock surface pose").transform;
+            reference.SetParent(world.GraphicsRoot, false);
+            try
+            {
+                for (int i = firstContour; i < pastContours; i++)
+                {
+                    var p = points[i];
+                    var slope = map.SurfaceGradient(p);
+                    var position = new Vector3((float)p.X, (float)map.SurfaceHeight(p), (float)p.Z);
+                    var rotation = Quaternion.FromToRotation(Vector3.up,
+                        new Vector3((float)-slope.X, 1, (float)-slope.Z).normalized);
+                    reference.SetPositionAndRotation(position, rotation);
+                    world.ApplyUnitPose(actor, PlayableEntityKind.Tank, new PlayableDisplayPose(p, 0, 0));
+                    Assert.AreEqual(reference.position, actor.Root.position);
+                    Assert.AreEqual(reference.rotation, actor.Root.rotation);
+                    Assert.AreEqual(position, world.Point(p));
+                }
+            }
+            finally { UnityEngine.Object.Destroy(host); }
+            TestContext.WriteLine($"PRESENTATION_SUPPORT points={points.Count} slopes={slopes} water={water}");
+        }
+
+        private static long CountAllocations(Action action)
+        {
+            const int capacity=32768;
+            using var recorder=ProfilerRecorder.StartNew(ProfilerCategory.Memory,"GC.Alloc",capacity,
+                ProfilerRecorderOptions.StartImmediately|ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
+            action();
+            recorder.Stop();
+            Assert.True(recorder.Valid);
+            Assert.Less(recorder.Count,capacity);
+            long count=0;
+            for(int i=0;i<recorder.Count;i++)count+=recorder.GetSample(i).Count;
+            return count;
+        }
+
         [Test] public void ShippedRoadCorridorsStayOnAcceptedSupport()
         {
             var map=Map();var p=ThreeCrossingsSurfaceProfile.Load();
@@ -96,6 +207,22 @@ namespace Spacewars.Tests.PlayMode
                     bool reserve=mines.Any(m=>Math.Pow(p.X-m.Position.X,2)+Math.Pow(p.Z-m.Position.Z,2)<=gameplay.MineFootprintRadius*gameplay.MineFootprintRadius);
                     if(reserve||!map.SupportsFootprint(p,0))Assert.Less(pixels[y*size+x].r,.01f,"Paint on blocked/unsupported terrain");
                 }
+                var bank=surfaces.Profile.roads.Single(road=>road.id=="west-pocket").points;
+                Assert.AreEqual(-map.BaseCoordinate,bank[0].z);
+                Assert.AreEqual(map.BaseCoordinate,bank[bank.Length-1].z);
+                foreach(int side in new[]{-1,1})
+                    for(int i=1;i<bank.Length;i++)
+                    {
+                        var start=new Vector2(bank[i-1].x,bank[i-1].z);
+                        var end=new Vector2(bank[i].x,bank[i].z);
+                        int steps=Mathf.CeilToInt(Vector2.Distance(start,end));
+                        for(int j=0;j<=steps;j++)
+                        {
+                            var point=Vector2.Lerp(start,end,j/(float)steps)*side;
+                            var uv=point/(float)(2*map.HalfExtent)+Vector2.one*.5f;
+                            Assert.Greater(surfaces.RoadMask.GetPixelBilinear(uv.x,uv.y).r,.5f,"Gap in bank road at "+point);
+                        }
+                    }
                 foreach(var bridge in map.Supports.Where(s=>s.IsBridge))foreach(int side in new[]{-1,1})
                 {
                     double x=side*(bridge.Bounds.MaxX+1),z=(bridge.Bounds.MinZ+bridge.Bounds.MaxZ)/2;
@@ -440,7 +567,13 @@ namespace Spacewars.Tests.PlayMode
             var root=new GameObject("Detail fog test");
             try{using(var world=new PlayableWorld(root.transform,gameplay))
             {
-                var details=root.GetComponentsInChildren<MeshRenderer>().Where(r=>r.name.StartsWith("Detail —")).ToArray();Assert.AreEqual(6,details.Length);Assert.AreEqual(1,details.Count(r=>r.name=="Detail — parked service equipment"));
+                var renderers=root.GetComponentsInChildren<MeshRenderer>();
+                Assert.False(renderers.Any(r=>r.name=="Detail — parked service equipment"));
+                Assert.AreEqual(1,renderers.Count(r=>r.name=="Yard — BankPump"));
+                Assert.AreEqual(4,renderers.Count(r=>r.name=="Yard — MineWorkModule"));
+                Assert.False(renderers.Any(r=>new[]{"Yard — PumpNode","Yard — VentilationBlock","Yard — CableCabinet","Yard — CargoModule","Yard — ExtractionSkid"}.Contains(r.name)));
+                Assert.AreEqual(1,renderers.Count(r=>r.name=="Detail — geological debris"));
+                var details=renderers.Where(r=>r.name.StartsWith("Detail —")||r.name=="Yard — BankPump"||r.name=="Yard — MineWorkModule").ToArray();
                 foreach(var r in details){Assert.IsNull(r.GetComponent<Collider>());Assert.AreSame(world.Fog.Texture,r.sharedMaterial.GetTexture("_FogMask"));}
                 world.InspectionHide();foreach(var r in details)Assert.AreSame(Texture2D.whiteTexture,r.sharedMaterial.GetTexture("_FogMask"));
             }}finally{UnityEngine.Object.DestroyImmediate(root);}

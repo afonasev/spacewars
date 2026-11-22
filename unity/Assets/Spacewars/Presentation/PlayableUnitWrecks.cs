@@ -17,12 +17,17 @@ namespace Spacewars.Presentation
         long wreckGeneration=long.MinValue,wreckTick=-1;
         public UnitWreckProfile WreckProfile{get;}=UnitWreckProfile.Load();
         public int UnitWreckCount=>unitWrecks.Values.Count(w=>w.State.HasGround&&w.State.DestroyedTick<0);
-        public int AirDestructionCount=>unitWrecks.Values.Count(w=>w.State.Kind==PlayableEntityKind.Hawk&&!w.State.HasGround&&wreckTick<w.State.RevealTick+(long)Math.Ceiling(profile.HawkDebrisSeconds*30));
+        public int AirDestructionCount=>unitWrecks.Values.Count(w=>w.State.IsAirborneKind&&!w.State.HasGround&&wreckTick<w.State.RevealTick+(long)Math.Ceiling(profile.HawkDebrisSeconds*30));
         // Keep approved prefab/LOD resources resident before combat begins. Previously
         // the first death synchronously loaded a mesh catalogue on the render thread.
         readonly Dictionary<string,UnityEngine.Object> wreckResources=new Dictionary<string,UnityEngine.Object>();
         System.Collections.IEnumerator PrepareWreckResources()
         {
+            foreach(string kind in new[]{"Skat","Igla"})for(int variant=1;variant<=3;variant++)foreach(string tier in new[]{"close","normal","far"}){
+                string key="StyleA/"+kind+"/wreck-"+variant+"-"+tier;
+                var asset=Resources.Load<GameObject>(key);if(!asset)throw new InvalidOperationException("Missing wreck "+key);
+                wreckResources[key]=asset;yield return null;
+            }
             foreach(string kind in new[]{"tank","explorer","shkval","hawk"})foreach(bool upgraded in new[]{false,true})
                 for(int variant=1;variant<=(kind=="hawk"?4:3);variant++){
                     string key=kind+(upgraded?"-upgraded-":"-")+variant;
@@ -41,6 +46,11 @@ namespace Spacewars.Presentation
         public void RenderUnitWrecks(PlayableSnapshot view)
         {
             if(view==null)return;
+            // Device preference affects presentation only; authority and obstacles stay live.
+            if(!NativeGraphicsSettings.UnitWrecksEnabled){
+                foreach(var w in unitWrecks.Values){if(w.Model)w.Model.SetActive(false);if(w.Flash)w.Flash.SetActive(false);if(w.Smoke)w.Smoke.SetActive(false);if(w.Hit)w.Hit.SetActive(false);}
+                if(unitWrecks.Count>0)ClearUnitWrecks();return;
+            }
             if(wreckGeneration!=view.Generation||view.Tick<wreckTick){ClearUnitWrecks();wreckGeneration=view.Generation;}
             wreckTick=view.Tick;var current=new HashSet<int>(view.Wrecks.Select(w=>w.Id));
             foreach(var id in unitWrecks.Keys.Where(id=>!current.Contains(id)).ToArray()){ReleaseWreck(unitWrecks[id]);unitWrecks.Remove(id);}
@@ -49,24 +59,32 @@ namespace Spacewars.Presentation
                 if(!unitWrecks.TryGetValue(state.Id,out var w)){
                     w=new UnitWreck{State=state};unitWrecks.Add(state.Id,w);
                     if(state.HasGround){
+                        bool derived=state.Kind==PlayableEntityKind.Skat||state.Kind==PlayableEntityKind.Igla;
                         string kind=state.Kind==PlayableEntityKind.Hawk?"hawk":state.Kind==PlayableEntityKind.Explorer?"explorer":state.Kind==PlayableEntityKind.Shkval?"shkval":"tank";
-                        var prefab=Resources.Load<GameObject>("Wrecks/"+kind+(state.Upgraded?"-upgraded-":"-")+state.Variant);if(!prefab)throw new InvalidOperationException("Missing approved wreck for "+kind);
-                        w.Model=UnityEngine.Object.Instantiate(prefab,root,false);w.Model.name="Unit wreck "+state.Id;Layer(w.Model);w.Detail=BindWreckDetail(w.Model,kind+(state.Upgraded?"-upgraded-":"-")+state.Variant);
-                        double scale=state.Kind==PlayableEntityKind.Hawk?profile.HawkModelScale:state.Kind==PlayableEntityKind.Shkval?profile.ShkvalModelRadius*profile.ShkvalModelScale/2.05:state.Kind==PlayableEntityKind.Explorer?profile.ExplorerModelRadius*profile.ExplorerModelScale/1.0773:profile.TankModelRadius*profile.TankModelScale/1.585;
+                        if(derived)w.Model=NewVehicleWrecks.Create(root,state.Kind,state.Variant);
+                        else if(state.Kind==PlayableEntityKind.Cerberus)w.Model=CerberusPresentation.Create(root,true);
+                        else{
+                            var prefab=Resources.Load<GameObject>("Wrecks/"+kind+(state.Upgraded?"-upgraded-":"-")+state.Variant);
+                            if(!prefab)throw new InvalidOperationException("Missing approved wreck for "+kind);
+                            w.Model=UnityEngine.Object.Instantiate(prefab,root,false);
+                        }
+                        w.Model.name="Unit wreck "+state.Id;Layer(w.Model);
+                        w.Detail=derived||state.Kind==PlayableEntityKind.Cerberus?w.Model.GetComponent<ModelDetailLod>():BindWreckDetail(w.Model,kind+(state.Upgraded?"-upgraded-":"-")+state.Variant);
+                        double scale=state.Kind==PlayableEntityKind.Skat?PlayableUnitRules.SkatModelScale:state.Kind==PlayableEntityKind.Igla?PlayableUnitRules.IglaModelScale:state.Kind==PlayableEntityKind.Cerberus?PlayableUnitRules.CerberusModelScale(profile):state.Kind==PlayableEntityKind.Hawk?profile.HawkModelScale:state.Kind==PlayableEntityKind.Shkval?profile.ShkvalModelRadius*profile.ShkvalModelScale/2.05:state.Kind==PlayableEntityKind.Explorer?profile.ExplorerModelRadius*profile.ExplorerModelScale/1.0773:profile.TankModelRadius*profile.TankModelScale/1.585;
                         w.Model.transform.localScale=Vector3.one*(float)scale;
                         foreach(var renderer in w.Model.GetComponentsInChildren<MeshRenderer>())MaterialFinish?.ApplyWreck(renderer,WreckKeyColor);
                     }
-                    if(state.Kind==PlayableEntityKind.Hawk&&!state.HasGround){
+                    if(state.IsAirborneKind&&!state.HasGround){
                         w.Model=new GameObject("Air destruction "+state.Id);w.Model.transform.SetParent(root,false);Layer(w.Model);
                         int count=(int)profile.HawkDebrisCount;w.Debris=new Transform[count];w.Velocities=new Vector3[count];var color=OwnerPaint?.Invoke(state.Owner)??(state.Owner==PlayableOwner.Player?Ally:Enemy);
-                        for(int i=0;i<count;i++){double angle=state.Heading+i*2*Math.PI/count;var fragment=Part("Air fragment",w.Model.transform,Vector3.zero,Vector3.one*(float)(profile.HawkRadius/count),i%2==0?color:Dark).transform;var collider=fragment.GetComponent<Collider>();if(collider)collider.enabled=false;w.Debris[i]=fragment;w.Velocities[i]=new Vector3((float)Math.Cos(angle),1,(float)Math.Sin(angle))*(float)profile.HawkDebrisSpeed;}
+                        for(int i=0;i<count;i++){double angle=state.Heading+i*2*Math.PI/count;var fragment=Part("Air fragment",w.Model.transform,Vector3.zero,Vector3.one*(float)(state.Radius/count),i%2==0?color:Dark).transform;var collider=fragment.GetComponent<Collider>();if(collider)collider.enabled=false;w.Debris[i]=fragment;w.Velocities[i]=new Vector3((float)Math.Cos(angle),1,(float)Math.Sin(angle))*(float)profile.HawkDebrisSpeed;}
                     }
                     w.Flash=wreckFlashVisuals.ImpactFlash(root);Layer(w.Flash);
                     w.Smoke=wreckSmokeVisuals.Create(root,state.Id);Layer(w.Smoke);
                 }
                 w.State=state;bool visible=view.Vision==null||view.Vision.IsVisible(state.Position);
                 var ground=Point(state.Position);long effectTick=state.HasGround?state.DeathTick:state.RevealTick;double age=(view.Tick-effectTick)/30d;
-                double fall=state.Kind==PlayableEntityKind.Hawk&&state.HasGround?Math.Max(0,Math.Min(1,(double)(view.Tick-state.DeathTick)/Math.Max(1,state.LandTick-state.DeathTick))):state.Kind==PlayableEntityKind.Hawk?0:1;
+                double fall=state.IsAirborneKind&&state.HasGround?Math.Max(0,Math.Min(1,(double)(view.Tick-state.DeathTick)/Math.Max(1,state.LandTick-state.DeathTick))):state.IsAirborneKind?0:1;
                 var at=ground+Vector3.up*(float)((state.DeathHeight-ground.y)*(1-fall*fall));
                 if(w.Debris!=null){
                     w.Model.SetActive(visible&&age<profile.HawkDebrisSeconds);
@@ -75,17 +93,22 @@ namespace Spacewars.Presentation
                 else if(w.Model){
                     bool landed=view.Tick>=state.RevealTick;
                     double sink=view.Tick<state.SinkTick?0:Math.Min(1,(double)(view.Tick-state.SinkTick)/Math.Max(1,state.ExpireTick-state.SinkTick));
-                    w.Model.transform.position=at-Vector3.up*(float)(state.Burial*fall+profile.WreckSinkDepth*sink);
+                    // The flying wing is thinner than the shared burial range. Keep
+                    // half its authored vertical envelope visible above the support.
+                    double burial=state.Kind==PlayableEntityKind.Skat?Math.Min(state.Burial,w.Detail.ReferenceBounds.extents.y*w.Model.transform.localScale.y):state.Burial;
+                    w.Model.transform.position=at-Vector3.up*(float)(burial*fall+profile.WreckSinkDepth*sink);
                     var slope=landed?profile.AuthoredMap?.SurfaceGradient(state.Position)??default:default;
-                    w.Model.transform.rotation=Quaternion.FromToRotation(Vector3.up,new Vector3(-(float)slope.X,1,-(float)slope.Z).normalized)*Quaternion.Euler(0,90-(float)state.Heading*Mathf.Rad2Deg,0);
-                    bool falling=state.Kind==PlayableEntityKind.Hawk&&view.Tick<state.LandTick;
+                    var heading=Quaternion.Euler(0,90-(float)state.Heading*Mathf.Rad2Deg,0);
+                    w.Model.transform.rotation=Quaternion.FromToRotation(Vector3.up,new Vector3(-(float)slope.X,1,-(float)slope.Z).normalized)*
+                        OrientUnitModel(state.Kind,heading);
+                    bool falling=state.IsAirborneKind&&view.Tick<state.LandTick;
                     w.Model.SetActive(visible&&state.DestroyedTick<0&&view.Tick<state.ExpireTick&&(landed||falling));
                 }
                 double flashAge=age/Math.Max(1d/30,profile.ImpactEffectSec);
                 w.Flash.SetActive(visible&&flashAge<1&&state.DestroyedTick<0);w.Flash.transform.position=at;
                 w.Flash.transform.localScale=Vector3.one*(float)(profile.ImpactEffectRadius*2*Math.Max(double.Epsilon,flashAge));WebProjectileVisuals.Opacity(w.Flash,Mathf.Clamp01(1-(float)flashAge));
-                // Ground death smoke starts at death; a falling Hawk emits on contact.
-                long smokeStart=state.Kind==PlayableEntityKind.Hawk&&state.HasGround?state.LandTick:state.HasGround?state.DeathTick:state.RevealTick;
+                // Ground death smoke starts at death; falling aircraft emit on contact.
+                long smokeStart=state.IsAirborneKind&&state.HasGround?state.LandTick:state.HasGround?state.DeathTick:state.RevealTick;
                 double smokeAge=(view.Tick-smokeStart)/30d;
                 w.Smoke.SetActive(visible&&state.DestroyedTick<0&&smokeAge>=0&&smokeAge<profile.UnitDeathSmokeSeconds);
                 w.Smoke.transform.position=state.HasGround?ground:at;

@@ -50,12 +50,50 @@ namespace Spacewars.Simulation
             while(samples.Count>Capacity)samples.Dequeue();
         }
         public void RemoveMissing(ISet<int> alive){foreach(var id in cursors.Keys.Where(id=>!alive.Contains(id)).ToArray())cursors.Remove(id);}
+#if UNITY_INCLUDE_TESTS
+        [ThreadStatic] internal static bool DisableEndpointReuseForTests;
+        [ThreadStatic] internal static long VisibilityQueriesForTests;
+#endif
+        private static bool VisiblePoint(TeamVisionSnapshot vision,NavPoint point)
+        {
+#if UNITY_INCLUDE_TESTS
+            VisibilityQueriesForTests++;
+#endif
+            return vision.IsVisible(point);
+        }
         public PlayableGroundTrail[] Visible(long tick,TeamVisionSnapshot vision=null,int lifetimeTicks=PlayableGroundTrail.DefaultLifetimeTicks)
         {
             Expire(tick,lifetimeTicks);
+            return vision == null ? samples.ToArray() : FilterVisible(samples, vision);
+        }
+
+        internal static PlayableGroundTrail[] FilterVisible(IEnumerable<PlayableGroundTrail> samples, TeamVisionSnapshot vision)
+        {
+            if (vision == null) throw new ArgumentNullException(nameof(vision));
             // Endpoints + midpoint prevent disclosing an invisible segment. Pixel fog also
             // clips contact-strip edges in the renderer, separately for every local view.
-            return samples.Where(s=>vision==null||vision.IsVisible(s.From)&&vision.IsVisible(s.To)&&vision.IsVisible(new NavPoint((s.From.X+s.To.X)*.5,(s.From.Z+s.To.Z)*.5))).ToArray();
+#if UNITY_INCLUDE_TESTS
+            if(DisableEndpointReuseForTests)return samples.Where(s=>VisiblePoint(vision,s.From)&&VisiblePoint(vision,s.To)&&VisiblePoint(vision,new NavPoint((s.From.X+s.To.X)*.5,(s.From.Z+s.To.Z)*.5))).ToArray();
+#endif
+            // A source's adjacent segments commonly share an exact endpoint.
+            // Cache only within this call and immutable vision; anonymous source
+            // identity alone never authorizes reuse at a different position.
+            int lastSource=-1;
+            bool Visible(NavPoint point){
+#if UNITY_INCLUDE_TESTS
+                VisibilityQueriesForTests++;
+#endif
+                return vision.IsVisible(point,ref lastSource);
+            }
+            var endpoints=new Dictionary<long,(NavPoint Point,bool Visible)>();
+            var result=new List<PlayableGroundTrail>();
+            foreach(var s in samples){
+                bool from=s.Source!=0&&endpoints.TryGetValue(s.Source,out var prior)&&prior.Point.Equals(s.From)?prior.Visible:Visible(s.From);
+                if(!from)continue;
+                bool to=Visible(s.To);if(s.Source!=0)endpoints[s.Source]=(s.To,to);
+                if(to&&Visible(new NavPoint((s.From.X+s.To.X)*.5,(s.From.Z+s.To.Z)*.5)))result.Add(s);
+            }
+            return result.ToArray();
         }
     }
 }

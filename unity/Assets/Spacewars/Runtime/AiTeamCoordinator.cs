@@ -8,19 +8,39 @@ namespace Spacewars.Runtime
     internal sealed class AiTeamAssignment
     {
         internal int TargetId,SecondaryTargetId; internal bool Helping; internal long WaitUntilTick;
+        internal int RelaySite; internal long RelayDeparture;
         internal HashSet<string> GreedyAllies=new HashSet<string>(StringComparer.Ordinal);
+        internal AiVictoryCoordination Victory;
+        internal IReadOnlyDictionary<int,(long Since,long Roll)> VictoryDraws;
         internal string Reason; internal HashSet<int> DeniedSites=new HashSet<int>();
+    }
+    internal sealed class AiVictoryCoordination
+    {
+        internal int Team, Target;
+        internal PlayableRouteTargetKind Kind;
+        internal long Arrival;
+        internal AiVictoryBid[] Partners;
     }
     // A phase-local projection of durable owner commitments. Rebuilt before ANY
     // owner reviews; no hidden world, pooled money, human intentions or commands.
-    // Persisted mission/expansion clocks are its sole TTL source, so restore,
+    // Persisted owner clocks bound team commitments, so restore,
     // pause and restart need no second mutable copy of the same commitments.
+    internal sealed class AiTeamPublicationObservation
+    {
+        // Closed private input for non-selected owner publications only. The
+        // original defense policy still runs on that owner's worker/profile.
+        internal readonly PlayableSnapshot DefenseSnapshot;
+        internal AiTeamPublicationObservation(PlayableSnapshot snapshot){DefenseSnapshot=snapshot;}
+    }
     internal sealed class AiTeamPublication
     {
         internal string Owner; internal PlayableAiOpening Opening; internal int Team; internal long Tick;
         internal AiArmyMissionState Mission; internal AiOpponentAssessment[] Targets;
         internal int ExpansionSite; internal long ExpansionExpires;
+        internal AiVictoryEpisode Victory; internal double MinimumVictoryForce;
         internal int[] RequestedSites; internal int[] ThreatTargets=Array.Empty<int>(); internal bool HomeThreatened;
+        internal AiRelayBid[] RelayBids=Array.Empty<AiRelayBid>();
+        internal double RelaySeconds;
     }
     internal static class AiTeamCoordinator
     {
@@ -33,6 +53,8 @@ namespace Spacewars.Runtime
                 var members=team.ToArray();
                 foreach(var p in members)result[p.Owner].GreedyAllies=new HashSet<string>(members.Where(m=>m.Owner!=p.Owner&&m.Opening==PlayableAiOpening.GreedySafe).Select(m=>m.Owner),StringComparer.Ordinal);
                 if(members.Length<2)continue;
+                ResolveVictory(members,result,profile);
+                ResolveRelays(members,result,profile);
                 var claims=new Dictionary<int,string>();
                 foreach(var p in members.Where(p=>p.ExpansionSite>0&&p.ExpansionExpires>p.Tick).OrderBy(p=>p.Owner,StringComparer.Ordinal))
                     if(!claims.ContainsKey(p.ExpansionSite))claims.Add(p.ExpansionSite,p.Owner);
@@ -67,6 +89,71 @@ namespace Spacewars.Runtime
                 }
             }
             return result;
+        }
+
+        private static void ResolveRelays(AiTeamPublication[] members,Dictionary<string,AiTeamAssignment> result,AiProfile profile)
+        {
+            long ttl=AiProfile.SecondsToTicks(profile.Value("team.claimTtlSeconds"),30);
+            var bids=members.Where(p=>!p.HomeThreatened&&p.RelaySeconds>0).SelectMany(p=>p.RelayBids
+                .Where(b=>p.Tick-b.Tick<=ttl).Select(b=>(Member:p,Bid:b))).ToArray();
+            var choice=bids.GroupBy(x=>x.Bid.Site).Where(g=>g.Select(x=>x.Member.Owner).Distinct().Count()>1)
+                .OrderByDescending(g=>g.Sum(x=>x.Bid.Force)*profile.Value("activeStrategy.maximumEncounterRatio")>=g.Max(x=>x.Bid.Resistance))
+                .ThenByDescending(g=>g.All(x=>x.Bid.Arrival+x.Bid.Clearance+x.Bid.Capture<=x.Member.RelaySeconds))
+                .ThenByDescending(g=>g.Any(x=>x.Bid.Breaks)).ThenByDescending(g=>g.Count())
+                .ThenBy(g=>g.Max(x=>x.Bid.Arrival+x.Bid.Clearance+x.Bid.Capture)).ThenBy(g=>g.Key).FirstOrDefault();
+            if(choice==null)return;
+            long arrival=choice.Max(x=>x.Bid.Tick+AiProfile.SecondsToTicks(x.Bid.Arrival,30));
+            long wait=AiProfile.SecondsToTicks(profile.Value("team.maximumAssemblyWaitSeconds"),30);
+            foreach(var x in choice)
+            {
+                var assignment=result[x.Member.Owner];assignment.RelaySite=choice.Key;
+                long deadline=x.Member.Tick+AiProfile.SecondsToTicks(Math.Max(0,x.Member.RelaySeconds-x.Bid.Arrival-x.Bid.Clearance-x.Bid.Capture),30);
+                assignment.RelayDeparture=Math.Min(x.Bid.Started+wait,Math.Min(deadline,
+                    arrival-AiProfile.SecondsToTicks(x.Bid.Arrival,30)));
+            }
+        }
+
+        private static void ResolveVictory(AiTeamPublication[] members, Dictionary<string,AiTeamAssignment> result,AiProfile profile)
+        {
+            var safe=members.Where(p=>!p.HomeThreatened&&p.Victory!=null).ToArray();
+            var draws=safe.Where(p=>p.Victory.Team>=0).GroupBy(p=>p.Victory.Team).ToDictionary(g=>g.Key,g=>{
+                var episodes=g.Select(p=>p.Victory).OrderBy(e=>e.Since).ToArray();
+                return (episodes[0].Since,Roll:episodes.Where(e=>e.Roll>=0).Select(e=>e.Roll).DefaultIfEmpty(-1).First());
+            });
+            foreach(var member in members)result[member.Owner].VictoryDraws=draws;
+
+            var ttl=AiProfile.SecondsToTicks(profile.Value("team.claimTtlSeconds"),30);
+            var bids=safe.SelectMany(p=>p.Victory.Bids.Where(b=>p.Tick-b.Tick<=ttl&&
+                (p.Victory.Team<0||p.Victory.Team==b.Team)).Select(b=>(Owner:p,Bid:b))).ToArray();
+            var choice=bids.GroupBy(x=>(x.Bid.Team,x.Bid.Kind,x.Bid.Target))
+                .Where(g=>g.Count()>1&&AiVictoryBid.CoalitionSuperior(g.Select(x=>x.Bid),profile,g.Max(x=>x.Owner.MinimumVictoryForce)))
+                .OrderByDescending(g=>g.Count(x=>x.Owner.Victory.Target==g.Key.Target&&x.Owner.Victory.Kind==g.Key.Kind))
+                .ThenByDescending(g=>g.Key.Kind==PlayableRouteTargetKind.VisibleEnemy)
+                .ThenByDescending(g=>g.Count()).ThenBy(g=>g.Max(x=>x.Bid.Eta)).ThenBy(g=>g.Key.Target)
+                .Select(g=>g.ToArray()).FirstOrDefault();
+            bool sharedTarget=choice!=null;
+            if(!sharedTarget)
+            {
+                // Distinct directions count only when each owner can actually
+                // support its own attack. Never credit a distant partner's guns here.
+                choice=bids.Where(x=>x.Bid.Superior(profile,x.Owner.MinimumVictoryForce))
+                    .GroupBy(x=>x.Bid.Team).Select(g=>g.GroupBy(x=>x.Owner.Owner).Select(front=>front
+                        .OrderByDescending(x=>x.Owner.Victory.Target==x.Bid.Target&&x.Owner.Victory.Kind==x.Bid.Kind)
+                        .ThenByDescending(x=>x.Bid.Kind==PlayableRouteTargetKind.VisibleEnemy)
+                        .ThenBy(x=>x.Bid.Eta).ThenBy(x=>x.Bid.Target).First()).ToArray())
+                    .Where(g=>g.Length>1).OrderByDescending(g=>g.Length).ThenBy(g=>g.Max(x=>x.Bid.Eta)).FirstOrDefault();
+            }
+            if(choice==null)return;
+            long arrival=-1;
+            var ready=choice.Where(x=>x.Owner.Victory.Ready>=0&&x.Owner.Victory.Target==x.Bid.Target&&x.Owner.Victory.Kind==x.Bid.Kind).ToArray();
+            if(ready.Length>1)
+            {
+                arrival=ready.Select(x=>x.Owner.Victory.Arrival).Where(t=>t>=0).DefaultIfEmpty(-1).Min();
+                if(arrival<0)arrival=ready.Max(x=>x.Owner.Tick+AiProfile.SecondsToTicks(x.Bid.Eta,30));
+            }
+            foreach(var x in choice)result[x.Owner.Owner].Victory=new AiVictoryCoordination{
+                Team=x.Bid.Team,Target=x.Bid.Target,Kind=x.Bid.Kind,Arrival=arrival,
+                Partners=sharedTarget?choice.Where(other=>other.Owner!=x.Owner).Select(other=>other.Bid).ToArray():Array.Empty<AiVictoryBid>()};
         }
     }
 }

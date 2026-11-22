@@ -11,11 +11,11 @@ public sealed class AiDoctrineTests
 {
     private const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
     private static readonly PlayableProfile P=PlayableProfile.Default;
-    internal static PlayableAiObservation View(IEnumerable<PlayableEntityKind> army=null,bool hangar=true,bool enemyAir=false,PlayableResearchOrderSnapshot[] research=null,PlayableProductionOrderSnapshot[] queue=null)
+    internal static PlayableAiObservation View(IEnumerable<PlayableEntityKind> army=null,bool hangar=true,bool enemyAir=false,PlayableResearchOrderSnapshot[] research=null,PlayableProductionOrderSnapshot[] queue=null,double income=0)
     {
         var bs=new[]{new PlayableBuildingSnapshot(4,PlayableOwner.Player,PlayableBuildingKind.Factory,default,100,1,queue?.Length??0,0,default,orders:queue),new PlayableBuildingSnapshot(5,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,new NavPoint(20,0),100,1,0,0,default)}.Concat(hangar?new[]{new PlayableBuildingSnapshot(6,PlayableOwner.Player,PlayableBuildingKind.Hangar,new NavPoint(40,0),100,1,0,0,default)}:Array.Empty<PlayableBuildingSnapshot>()).ToArray();
         var units=(army??Array.Empty<PlayableEntityKind>()).Select((k,i)=>new PlayableEntitySnapshot(100+i,PlayableOwner.Player,k,default,PlayableUnitRules.Health(P,k),false,0,0,0)).Concat(enemyAir?new[]{new PlayableEntitySnapshot(999,PlayableOwner.Enemy,PlayableEntityKind.Hawk,new NavPoint(80,0),PlayableUnitRules.Health(P,PlayableEntityKind.Hawk),false,0,0,0)}:Array.Empty<PlayableEntitySnapshot>()).ToArray();
-        return PlayableAiObservation.From(new PlayableSnapshot(P.ProfileId,P.Revision,71,41,1,100000,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,100000,null,units,bs,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(units.Length,0,1000),ownerId:"owner",researchAvailability:AiResearchCatalog.All.Select(d=>new PlayableResearchAvailabilitySnapshot(d.Kind,d.Cost(P),true)).ToArray(),ownerResearch:research));
+        return PlayableAiObservation.From(new PlayableSnapshot(P.ProfileId,P.Revision,71,41,1,100000,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,100000,null,units,bs,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(units.Length,0,1000),ownerId:"owner",researchAvailability:AiResearchCatalog.All.Select(d=>new PlayableResearchAvailabilitySnapshot(d.Kind,d.Cost(P),true)).ToArray(),ownerResearch:research,incomePerSecond:income));
     }
     internal static AiDoctrinePolicy Policy(AiDoctrine doctrine)
     {
@@ -34,6 +34,26 @@ public sealed class AiDoctrineTests
         for(int i=0;i<4;i++)Assert.That(counts[i],Is.InRange((int)Math.Floor(56*target[i]/total)-1,(int)Math.Ceiling(56*target[i]/total)+1),"target headcount role "+i);
         if(kind==AiDoctrine.Explorers||kind==AiDoctrine.HawksExplorers)Assert.Greater(counts[1],1,"combat Explorers cannot be capped at one scout");
     }
+    [Test]
+    public void RelaySupportUsesExistingProductionAdmissionAndKeepsTheExplorerDoctrine()
+    {
+        var doctrine=Policy(AiDoctrine.Explorers);
+        var view=View(Enumerable.Repeat(PlayableEntityKind.Explorer,8),income:20);
+        var profile=AiProfile.Initial;
+        var ledger=new AiBudgetLedger(view.OwnerId,view.Generation);
+        ledger.ObserveBank(view.Credits);
+        Assert.AreEqual(PlayableCommandKind.QueueExplorer,doctrine.Assess(view,P,profile,ledger.Capture()).Candidates.Single().Action.Kind);
+        ledger.SetSafetyReserve(view.Credits-PlayableUnitRules.Cost(P,PlayableEntityKind.Tank)+1);
+        var waiting=doctrine.Assess(view,P,profile,ledger.Capture(),relayGroundSupport:true);
+        Assert.That(waiting.Candidates.Single().Reason,Is.EqualTo("saving for doctrine Tank"));
+        ledger.SetSafetyReserve(view.Credits-PlayableUnitRules.Cost(P,PlayableEntityKind.Tank));
+        var supported=doctrine.Assess(view,P,profile,ledger.Capture(),relayGroundSupport:true);
+        var reinforcement=supported.Candidates.Single();
+        Assert.AreEqual(PlayableCommandKind.QueueTank,reinforcement.Action.Kind);
+        Assert.IsNull(AiEconomyAdmission.Reject(view,P,reinforcement.Action,true));
+        Assert.AreEqual(PlayableCommandKind.QueueExplorer,doctrine.Assess(view,P,profile,ledger.Capture()).Candidates.Single().Action.Kind);
+    }
+
     [Test] public void MixedDoctrineUsesAvailableFactoryWithoutWaitingForHangar()
     {
         var d=Policy(AiDoctrine.HawksExplorers);var o=View(hangar:false);var c=d.Assess(o,P,AiProfile.Initial,Budget(o)).Candidates.Single();Assert.AreEqual(PlayableCommandKind.QueueExplorer,c.Action.Kind);
@@ -78,6 +98,32 @@ public sealed class AiDoctrineTests
         var d=Policy(AiDoctrine.HawksExplorers);var o=View(Enumerable.Repeat(PlayableEntityKind.Explorer,4),hangar:false);
         var budget=new AiBudgetLedger(o.OwnerId,o.Generation);budget.ObserveBank(o.Credits);budget.SetSafetyReserve(o.Credits-P.ExplorerCreditCost);
         Assert.AreEqual(PlayableCommandKind.QueueExplorer,d.Assess(o,P,AiProfile.Initial,budget.Capture()).Candidates.Single(c=>c.Legal).Action.Kind);
+    }
+    [TestCase(AiDoctrine.Heavy,PlayableEntityKind.Shkval)]
+    [TestCase(AiDoctrine.HawksExplorers,PlayableEntityKind.Hawk)]
+    [TestCase(AiDoctrine.Tanks,PlayableEntityKind.Tank)]
+    public void OptionalReconCannotPreemptReadyCombatProduction(AiDoctrine kind,PlayableEntityKind expected)
+    {
+        var army=kind==AiDoctrine.Heavy?Enumerable.Repeat(PlayableEntityKind.Tank,4).Concat(new[]{PlayableEntityKind.Explorer}):Enumerable.Repeat(PlayableEntityKind.Explorer,4);
+        var o=View(army,income:8);var d=Policy(kind);d.UtilityAvailable=_=>false;
+        var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);b.SetSafetyReserve(o.Credits-P.ExplorerCreditCost);
+        var plan=d.Assess(o,P,AiProfile.Initial,b.Capture(),scoutBudget:2,usefulScouting:true);
+        Assert.True(plan.Candidates.All(c=>c.Action.UnitKind==expected));Assert.False(plan.Candidates.Any(c=>c.Legal));
+        Assert.AreEqual(expected,d.MissingCoreProduction(o,P,AiProfile.Initial,b.Capture()).Action.UnitKind);
+        b.SetSafetyReserve(o.Credits-PlayableUnitRules.Cost(P,expected));
+        Assert.AreEqual(expected,d.Assess(o,P,AiProfile.Initial,b.Capture(),2,true).Candidates.First(c=>c.Legal).Action.UnitKind);
+    }
+    [Test] public void MissingCoreProtectionEndsForExistingCoreAndDoesNotInventMissingProducer()
+    {
+        var d=Policy(AiDoctrine.HawksExplorers);var o=View(Enumerable.Repeat(PlayableEntityKind.Explorer,4),income:8);
+        var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
+        Assert.NotNull(d.MissingCoreProduction(o,P,AiProfile.Initial,b.Capture()));
+        var alive=View(Enumerable.Repeat(PlayableEntityKind.Explorer,4).Concat(new[]{PlayableEntityKind.Hawk}),income:8);
+        Assert.IsNull(d.MissingCoreProduction(alive,P,AiProfile.Initial,b.Capture()));
+        var absent=View(Enumerable.Repeat(PlayableEntityKind.Explorer,4),hangar:false,income:8);
+        Assert.IsNull(d.MissingCoreProduction(absent,P,AiProfile.Initial,b.Capture()));
+        var noIncome=View(Enumerable.Repeat(PlayableEntityKind.Explorer,4));
+        Assert.IsNull(d.MissingCoreProduction(noIncome,P,AiProfile.Initial,b.Capture()));
     }
     [Test] public void DoctrineCurrentWirePreservesCommittedChoice()
     {

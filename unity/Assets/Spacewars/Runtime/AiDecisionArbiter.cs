@@ -52,12 +52,29 @@ namespace Spacewars.Runtime
         internal string SiteFundingMemory(){if(!history.TryGetValue(AiExpansionFinancial.MemoKey,out var h))return null;if(string.IsNullOrWhiteSpace(h.Conditions))throw new ArgumentException("Present site finance memo requires a payload.");return h.Conditions;}
         internal void SaveSiteFundingMemory(string payload){history[AiExpansionFinancial.MemoKey]=new History{Conditions=payload};}
         internal void ClearSiteFundingMemory()=>history.Remove(AiExpansionFinancial.MemoKey);
+        private const string DominationApproachPrefix="domination-approach:";
+        private static string DominationApproach(int site,NavPoint point)=>
+            DominationApproachPrefix+FormattableString.Invariant($"{site}:{point.X:R}:{point.Z:R}");
+
+        internal void RejectDominationApproach(int site,NavPoint point,long tick,long retryTicks)
+        {
+            history[DominationApproach(site,point)]=new History{FirstTick=tick,NextRetry=checked(tick+retryTicks),Failures=1};
+        }
+
+        internal Func<int,NavPoint,bool> RejectedDominationApproaches(long tick)
+        {
+            if(!history.Any(entry=>entry.Key.StartsWith(DominationApproachPrefix,StringComparison.Ordinal)&&tick<entry.Value.NextRetry))
+                return null;
+            return (site,point)=>history.TryGetValue(DominationApproach(site,point),out var attempt)&&tick<attempt.NextRetry;
+        }
+
         private long aging,retry;
         private int retryLimit;
-        public AiDecisionArbiter(AiProfile profile)
-        {Rebind(profile);}
+        private readonly AiDifficulty difficulty;
+        public AiDecisionArbiter(AiProfile profile,AiDifficulty difficulty=AiDifficulty.Fighter)
+        {this.difficulty=difficulty;Rebind(profile);}
         internal void Rebind(AiProfile profile)
-        {if(profile==null)throw new ArgumentNullException(nameof(profile));ClearPositionSaving();aging=AiProfile.SecondsToTicks(profile.Value("decision.intentAgingSeconds"),30);retry=AiProfile.SecondsToTicks(profile.Value("decision.retrySeconds"),30);retryLimit=(int)profile.Value("decision.retryLimit");}
+        {if(profile==null)throw new ArgumentNullException(nameof(profile));ClearPositionSaving();aging=AiProfile.SecondsToTicks(profile.DifficultyValue(difficulty,"decision.intentAgingSeconds"),30);retry=AiProfile.SecondsToTicks(profile.DifficultyValue(difficulty,"decision.retrySeconds"),30);retryLimit=(int)profile.Value("decision.retryLimit");}
         public IReadOnlyList<AiIntent> Select(IEnumerable<AiIntent> proposals,long tick,int credits,int freePopulation,int actionLimit,AiBudgetLedger budget=null,AiArmyRegistry armies=null,PlayableProfile gameplayProfile=null)
         {
             if(proposals==null||credits<0||freePopulation<0||actionLimit<1)throw new ArgumentException("Invalid ledger.");
@@ -95,7 +112,11 @@ namespace Spacewars.Runtime
                 // tactical orders must not outrank an older useful producer.
                 // Survival and accepted startup retain their existing bands.
                 .ThenBy(p=>Band(p)==1?history[p.Id].FirstTick:0)
-                .ThenByDescending(p=>p.Priority).ThenByDescending(p=>p.Utility).ThenBy(p=>history[p.Id].FirstTick).ThenBy(p=>p.Id,StringComparer.Ordinal);
+                .ThenByDescending(p=>p.Priority)
+                // The prequalified Mine and home Refinery share a single opening-income
+                // claim. Compare them before the generic lexical intent tie-breaker.
+                .ThenByDescending(p=>p.Policy=="expansion"&&p.Claims.Contains(AiOpeningExecutor.IncomeChoiceClaim))
+                .ThenByDescending(p=>p.Utility).ThenBy(p=>history[p.Id].FirstTick).ThenBy(p=>p.Id,StringComparer.Ordinal);
             // Keep the deficit until this intent's own held amount is added back. Clamping
             // before that would let it spend money still promised to other reservations.
             long available=budget==null?credits:(long)budget.Liquid-budget.SafetyReserve-budget.Reserved-budget.Unpaid;
@@ -125,7 +146,7 @@ namespace Spacewars.Runtime
             }
             // Bound stale diagnostic history; pending entries are fed back before next decision.
             var present=new HashSet<string>(all.Select(p=>p.Id),StringComparer.Ordinal);
-            foreach(var key in history.Keys.Where(k=>k!=PositionGoalKey&&k!=FundingMemoKey&&k!=AiExpansionFinancial.MemoKey&&!k.StartsWith(ArmyResearchMemoPrefix,StringComparison.Ordinal)&&!present.Contains(k)).OrderBy(k=>history[k].FirstTick).ThenBy(k=>k,StringComparer.Ordinal).Take(Math.Max(0,history.Count-history.Keys.Count(k=>k.StartsWith(ArmyResearchMemoPrefix,StringComparison.Ordinal))-(history.ContainsKey(PositionGoalKey)?1:0)-(history.ContainsKey(FundingMemoKey)?1:0)-(history.ContainsKey(AiExpansionFinancial.MemoKey)?1:0)-128)).ToArray())history.Remove(key);
+            foreach(var key in history.Keys.Where(k=>k!=AiRelayAssault.MemoKey&&k!=PositionGoalKey&&k!=FundingMemoKey&&k!=AiExpansionFinancial.MemoKey&&!k.StartsWith(ArmyResearchMemoPrefix,StringComparison.Ordinal)&&!present.Contains(k)).OrderBy(k=>history[k].FirstTick).ThenBy(k=>k,StringComparer.Ordinal).Take(Math.Max(0,history.Count-history.Keys.Count(k=>k.StartsWith(ArmyResearchMemoPrefix,StringComparison.Ordinal))-(history.ContainsKey(AiRelayAssault.MemoKey)?1:0)-(history.ContainsKey(PositionGoalKey)?1:0)-(history.ContainsKey(FundingMemoKey)?1:0)-(history.ContainsKey(AiExpansionFinancial.MemoKey)?1:0)-128)).ToArray())history.Remove(key);
 #if UNITY_INCLUDE_TESTS
             if(captureSelection)SelectionReadbackForTests(new AiArbiterSelectionReadback(budget?.OwnerId,actualOrder,actualBands));
 #endif

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Spacewars.Simulation
 {
-    public enum PlayableCommandKind { BuildFactory, BuildRefinery, QueueTank, SetRally, Move, Attack, AttackMove, Stop, Restart, BuildAt, CancelBuilding, CancelProductionOrder, ToggleRepeatProduction, SellBuilding, StartBuildingRepair, CancelBuildingRepair, UpgradeRefinery, CancelRefineryUpgrade, QueueExplorer, QueueShkval, QueueResearch, CancelResearch, Hold, Follow, QueueHawk, SignalAttack, SignalDefend, SignalRecon, UpgradeProducer, ChooseOrbital, UseOrbital }
+    public enum PlayableCommandKind { BuildFactory, BuildRefinery, QueueTank, SetRally, Move, Attack, AttackMove, Stop, Restart, BuildAt, CancelBuilding, CancelProductionOrder, ToggleRepeatProduction, SellBuilding, StartBuildingRepair, CancelBuildingRepair, UpgradeRefinery, CancelRefineryUpgrade, QueueExplorer, QueueShkval, QueueResearch, CancelResearch, Hold, Follow, QueueHawk, SignalAttack, SignalDefend, SignalRecon, UpgradeProducer, ChooseOrbital, UseOrbital, TransferRelay, BeginOrbitalReinforcement, CancelOrbitalReinforcement, QueueSkat, RepairTarget, QueueCerberus, QueueIgla }
     public enum PlayableCommandStatus { Accepted, Applied, Rejected, Overflow, StaleGeneration, InvalidSequence, InvalidOwner, InvalidEntity, InvalidTarget, InsufficientCredits, OccupiedPad, Stopped, Cancelled }
     public enum PlayableOrderMode { Replace, Append }
     public enum PlayableOrderOrigin { Unknown,Human,Ai }
@@ -26,7 +26,15 @@ namespace Spacewars.Simulation
         // Bound by authority after schema9 ingress; never inferred by transport or AI.
         public NavLocation? TargetLocation{get;private set;}
         public PlayableCommand WithResolvedLocation(NavLocation location)
-        {if(!location.Position.Equals(Target))throw new ArgumentException("Command location/XZ mismatch.");var copy=new PlayableCommand(Generation,Sequence,PlayerId,Kind,entityIds,Target,Pad,SiteId,SlotId,BuildingKind,ParentId,TargetId,ProductionOrderId,UnitKind,ResearchKind,Origin,Source,JobId,ActionId,Mode);copy.TargetLocation=location;return copy;}
+        {
+            if(!location.Position.Equals(Target))throw new ArgumentException("Command location/XZ mismatch.");
+            return WithMoveDestination(location);
+        }
+        internal PlayableCommand WithMoveDestination(NavLocation location)
+        {
+            return new PlayableCommand(Generation,Sequence,PlayerId,Kind,entityIds,location.Position,Pad,SiteId,SlotId,
+                BuildingKind,ParentId,TargetId,ProductionOrderId,UnitKind,ResearchKind,Origin,Source,JobId,ActionId,Mode){TargetLocation=location};
+        }
         public PlayableOrderMode Mode{get;}
         public PlayableOrderOrigin Origin{get;} public string Source{get;} public long JobId{get;} public long ActionId{get;}
         public PlayableCommand AsHuman(){var copy=new PlayableCommand(Generation,Sequence,PlayerId,Kind,entityIds,Target,Pad,SiteId,SlotId,BuildingKind,ParentId,TargetId,ProductionOrderId,UnitKind,ResearchKind,PlayableOrderOrigin.Human,mode:Mode);return TargetLocation.HasValue?copy.WithResolvedLocation(TargetLocation.Value):copy;}

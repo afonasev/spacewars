@@ -13,12 +13,13 @@ namespace Spacewars.Runtime
         // Technical in-flight transport window, independent of army/observation size.
         internal const int Capacity=64*8;
         private readonly object gate=new object();
-        private readonly List<Job> jobs=new List<Job>();
+        private readonly LinkedList<Job> jobs=new LinkedList<Job>();
         private readonly Dictionary<(PlayableOwner,int,int,PlayableRouteTargetKind,int),Job> lookup=new Dictionary<(PlayableOwner,int,int,PlayableRouteTargetKind,int),Job>();
         private static (PlayableOwner,int,int,PlayableRouteTargetKind,int) Key(Job j)=>(j.Work.Owner,j.Actor,j.Target,j.Kind,j.Candidate);
         private readonly Queue<Job> queue=new Queue<Job>();
         private readonly Dictionary<PlayableOwner,long> epochs=new Dictionary<PlayableOwner,long>();
-        private int running;
+        private int running, unfinished;
+        private LinkedListNode<Job> nextToEnqueue;
         private readonly Thread thread;
         private bool stopping;private int stopped;private bool started;
         private Exception failure;private long use;
@@ -26,6 +27,7 @@ namespace Spacewars.Runtime
         {
             internal ObservedPathWork Work;internal int Actor,Target,Candidate;internal PlayableRouteTargetKind Kind;
             internal NavPoint[] Path;internal bool Done,Enqueued,Running,Cancelled;internal long Used,Epoch;internal Action Before;
+            internal LinkedListNode<Job> Node;
         }
         internal ObservedPathLane():this(true){}
         internal ObservedPathLane(bool start){thread=new Thread(Run){IsBackground=true,Name="Spacewars.Ai.ObservedPaths"};if(start)Start();}
@@ -33,25 +35,56 @@ namespace Spacewars.Runtime
         internal bool IsStopped=>Volatile.Read(ref stopped)!=0;
         internal int Count {get{lock(gate)return queue.Count+running;}}
         internal int RetainedCount {get{lock(gate)return jobs.Count;}}
-        internal bool HasPending {get{lock(gate)return jobs.Any(j=>!j.Done);}}
+        internal bool HasPending {get{lock(gate)return unfinished!=0;}}
         internal void BeginProjection(PlayableOwner owner)
         {lock(gate){epochs.TryGetValue(owner,out var epoch);epochs[owner]=checked(epoch+1);}}
         internal void EndProjection(PlayableOwner owner)
         {
             lock(gate){
                 epochs.TryGetValue(owner,out var epoch);
-                foreach(var job in jobs.Where(j=>j.Work.Owner==owner&&j.Epoch!=epoch).ToArray()){job.Cancelled=true;jobs.Remove(job);lookup.Remove(Key(job));}
-                var live=queue.Where(j=>!j.Cancelled).ToArray();queue.Clear();foreach(var job in live)queue.Enqueue(job);
+                for(var node=jobs.First;node!=null;){
+                    var job=node.Value;
+                    node=node.Next;
+                    if(job.Work.Owner==owner&&job.Epoch!=epoch)Retire(job);
+                }
+                int queued=queue.Count;
+                for(int i=0;i<queued;i++){
+                    var job=queue.Dequeue();
+                    if(!job.Cancelled)queue.Enqueue(job);
+                }
                 FillQueue();
+            }
+        }
+        private void Retire(Job job)
+        {
+            if(job.Node!=null){
+                if(!job.Done)unfinished--;
+                job.Cancelled=true;
+                if(ReferenceEquals(job.Node,nextToEnqueue))nextToEnqueue=job.Node.Next;
+                jobs.Remove(job.Node);
+                job.Node=null;
+            }
+            var key=Key(job);
+            if(lookup.TryGetValue(key,out var current)&&ReferenceEquals(current,job))lookup.Remove(key);
+        }
+        private void Append(Job job)
+        {
+            job.Node=jobs.AddLast(job);
+            lookup.Add(Key(job),job);
+            if(!job.Done){
+                unfinished++;
+                if(nextToEnqueue==null)nextToEnqueue=job.Node;
             }
         }
         private void FillQueue()
         {
             // Retain one requested observation working set per owner, as the
             // synchronous snapshot already did. Stream it through the bounded
-            // queue; never evict its early answers while later answers compute.
-            foreach(var job in jobs){
-                if(queue.Count+running>=Capacity)break;
+            // queue in insertion order. Each job enters the queue at most once,
+            // so a completed or already visited prefix cannot supply new work.
+            while(nextToEnqueue!=null&&queue.Count+running<Capacity){
+                var job=nextToEnqueue.Value;
+                nextToEnqueue=nextToEnqueue.Next;
                 if(job.Done||job.Enqueued||job.Running||job.Cancelled)continue;
                 job.Enqueued=true;queue.Enqueue(job);
             }
@@ -59,7 +92,14 @@ namespace Spacewars.Runtime
         }
         private static bool Same(Job j,ObservedPathWork w,int actor,int target,PlayableRouteTargetKind kind,int candidate)
             =>j.Actor==actor&&j.Target==target&&j.Kind==kind&&j.Candidate==candidate&&j.Work.Owner==w.Owner&&SameGeometry(j.Work.Geometry,w.Geometry)&&SameProfile(j.Work.Profile,w.Profile)&&j.Work.Radius==w.Radius&&j.Work.Speed==w.Speed&&j.Work.Turn==w.Turn;
-        private static bool SameGeometry(NavGeometry a,NavGeometry b)=>ReferenceEquals(a,b)||a.HalfExtent==b.HalfExtent&&a.Obstacles.Count==b.Obstacles.Count&&a.Obstacles.Select((o,i)=>o.GeometryEquals(b.Obstacles[i])).All(x=>x);
+        private static bool SameGeometry(NavGeometry a,NavGeometry b)
+        {
+            if(ReferenceEquals(a,b))return true;
+            if(a.HalfExtent!=b.HalfExtent||a.Obstacles.Count!=b.Obstacles.Count)return false;
+            for(int i=0;i<a.Obstacles.Count;i++)
+                if(!a.Obstacles[i].GeometryEquals(b.Obstacles[i]))return false;
+            return true;
+        }
         private static bool SameProfile(NavigationProfile a,NavigationProfile b){
             if(ReferenceEquals(a,b))return true;
             if(a.ProfileId!=b.ProfileId||a.Revision!=b.Revision||a.WireValueCount!=b.WireValueCount)return false;
@@ -73,16 +113,16 @@ namespace Spacewars.Runtime
                 if(stopping)throw new OperationCanceledException("AI observed-path worker stopped.");
                 var key=(work.Owner,actor,target,kind,candidate);
                 lookup.TryGetValue(key,out job);
-                if(job!=null&&!Same(job,work,actor,target,kind,candidate)){job.Cancelled=true;jobs.Remove(job);lookup.Remove(key);job=null;}
+                if(job!=null&&!Same(job,work,actor,target,kind,candidate)){Retire(job);job=null;}
                 if(job==null){
                     if(jobs.Count==WorldWire.MaxItems)return false;
-                    Start();epochs.TryGetValue(work.Owner,out var epoch);job=new Job{Work=work,Actor=actor,Target=target,Kind=kind,Candidate=candidate,Used=++use,Epoch=epoch,Before=before};jobs.Add(job);lookup.Add(key,job);FillQueue();return false;
+                    Start();epochs.TryGetValue(work.Owner,out var epoch);job=new Job{Work=work,Actor=actor,Target=target,Kind=kind,Candidate=candidate,Used=++use,Epoch=epoch,Before=before};Append(job);FillQueue();return false;
                 }
                 job.Used=++use;epochs.TryGetValue(work.Owner,out job.Epoch);if(!job.Done)return false;
             }
             if(TryReadPath(job,work,out path))return true;
             // An old empty/unsafe answer cannot prove a changed request unreachable.
-            lock(gate){job.Cancelled=true;jobs.Remove(job);lookup.Remove(Key(job));}
+            lock(gate){Retire(job);}
             return TryGet(work,actor,target,kind,candidate,out path,before);
         }
         // Authority delivery only reads settled work. It cannot enqueue, prune,
@@ -114,25 +154,32 @@ namespace Spacewars.Runtime
             }
             return false;
         }
+        internal bool ReadyForCapture { get { lock(gate)return failure!=null||stopping||unfinished==0; } }
         internal void DrainForCapture(Func<bool> cancelled)
         {
             lock(gate){while(true){
                 if(cancelled?.Invoke()==true||stopping)throw new OperationCanceledException("Observed capture stopped.");
                 if(failure!=null)throw new InvalidOperationException("Observed capture worker failed.",failure);
-                if(jobs.All(j=>j.Done))return;
+                if(unfinished==0)return;
                 Monitor.Wait(gate,25);
             }}
         }
         internal void Stop(){lock(gate){stopping=true;queue.Clear();if(!started)Volatile.Write(ref stopped,1);Monitor.PulseAll(gate);}}
+        #if UNITY_INCLUDE_TESTS
+        internal ObservedPathWorkPool PoolForTests {get;private set;}
+#endif
         private void Run()
         {
-            var pool=new ObservedPathWorkPool();
+            var pool=new ObservedPathWorkPool(true);
+#if UNITY_INCLUDE_TESTS
+            PoolForTests=pool;
+#endif
             try{while(true){
                 Job job;lock(gate){while(!stopping&&queue.Count==0)Monitor.Wait(gate);if(stopping)return;job=queue.Dequeue();job.Enqueued=false;if(job.Cancelled){FillQueue();continue;}job.Running=true;running++;}
                 job.Before?.Invoke();var result=job.Work.Execute(pool);
-                lock(gate){job.Path=result;job.Done=true;job.Before=null;job.Running=false;running--;FillQueue();Monitor.PulseAll(gate);}
+                lock(gate){job.Path=result;job.Done=true;job.Before=null;job.Running=false;running--;if(!job.Cancelled)unfinished--;FillQueue();}
             }}catch(Exception ex){lock(gate){failure=ex;Monitor.PulseAll(gate);}}
-            finally{lock(gate){queue.Clear();jobs.Clear();lookup.Clear();running=0;}Volatile.Write(ref stopped,1);}
+            finally{pool.Dispose();lock(gate){queue.Clear();jobs.Clear();lookup.Clear();running=unfinished=0;nextToEnqueue=null;}Volatile.Write(ref stopped,1);}
         }
     }
 }

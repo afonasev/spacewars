@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Spacewars.Simulation;
 namespace Spacewars.Runtime
@@ -12,28 +13,116 @@ namespace Spacewars.Runtime
         {
             internal Context Next;internal NavigationAdmissionPin Pin;
             internal NavigationRequest[] Members;internal RecastMemberRoute[] Routes;
+            internal bool[] IndependentRoutes;
             internal RecastMapCache.Pin Map;internal RecastNavigationQuery Query;
             internal RecastPayload ResultPayload;internal ILayeredNavigationProvider Provider;
             internal RecastSpineProposal Spine;internal RecastAttachmentPreparation Attachment;internal bool AttachmentRequired;
             internal RecastPayload RawCorridor,CompletedCorridor;internal RecastSpinePreparation SpinePreparation;internal bool SpineRequired;
             internal NavSolveStatus Result=NavSolveStatus.Pending;
             private Context(long bytes):base(bytes){}
-            internal static Context Create(NavigationAdmissionPin pin,NavigationRequest request,INavStorageReservation r){
-                int count=0;foreach(var member in pin.Value.Requests)if(Compatible(request,member))count++;
+            internal static Context Create(NavigationAdmissionPin pin,NavigationRequest request,INavStorageReservation r,bool independent, NavigationRequest[] restored = null){
+                int count=restored?.Length ?? (independent?1:pin.Value.Requests.Count(member=>Compatible(request,member)));
                 if(count==0)throw new InvalidOperationException("Unpublished Recast subgroup.");
-                long bytes=checked(NavStorageLayout.ObjectBytesBound(typeof(Context))+32+8L*count);
+                long bytes=checked(NavStorageLayout.ObjectBytesBound(typeof(Context))+64+8L*count+((count+7L)&~7L));
                 if(!r.TryReserve(NavStorageLayout.Charge(bytes)))throw new RecastNative.CapacityRefused();
                 var result=new Context(bytes);
                 try{
                     if(!(r is INavStorageLocalBirthAllocator allocator)||!allocator.TryRegisterLocalBirth(result))throw new InvalidOperationException("Recast context requires physical ownership.");
-                    if(pin.StorageOwner!=null)result.RequireEdge(pin.StorageOwner);result.Pin=new NavigationAdmissionPin(pin.StorageOwner,pin.Value);result.Members=new NavigationRequest[count];int n=0;
-                    foreach(var member in pin.Value.Requests)if(Compatible(request,member))result.Members[n++]=member;
+                    if(pin.StorageOwner!=null)result.RequireEdge(pin.StorageOwner);result.Pin=new NavigationAdmissionPin(pin.StorageOwner,pin.Value);result.Members=new NavigationRequest[count];result.IndependentRoutes=new bool[count];
+                    if (restored != null)
+                    {
+                        if (!restored.All(member => Compatible(request, member))) throw new ArgumentException("Incompatible Recast checkpoint members.");
+                        Array.Copy(restored, result.Members, count);
+                    }
+                    else if(independent)result.Members[0]=request;
+                    else{
+                        int n=0;
+                        foreach(var member in pin.Value.Requests)if(Compatible(request,member))result.Members[n++]=member;
+                    }
                     Array.Sort(result.Members,(a,b)=>a.Request.CompareTo(b.Request));return result;
                 }catch{result.Release();throw;}
             }
             internal int Index(NavigationRequest request){for(int i=0;i<Members.Length;i++)if(ReferenceEquals(Members[i],request))return i;return -1;}
             protected override void ReleaseEdges(){Query?.Dispose();Query=null;SpinePreparation?.Dispose();SpinePreparation=null;CompletedCorridor?.Dispose();CompletedCorridor=null;RawCorridor?.Dispose();RawCorridor=null;Attachment?.Dispose();Attachment=null;Map.Dispose();(Provider as INavStorageFacade)?.StorageRoot.Release();Provider=null;ResultPayload?.Dispose();ResultPayload=null;Routes=null;Members=null;Pin.Dispose();Pin=default;Next=null;}
         }
+        internal bool HasActiveQuery(NavigationAdmission live = null)
+        {
+            for (var c = first; c != null; c = c.Next)
+                if (c.Query != null && (live == null || c.Members.All(live.Contains))) return true;
+            return false;
+        }
+
+        // Capture runs with the route port excluding all host operations.
+        internal void WriteActiveQueries(BinaryWriter writer, NavigationAdmission live)
+        {
+            var queries = new List<Context>();
+            for (var c = first; c != null; c = c.Next)
+                if (c.Query != null && c.Members.All(live.Contains)) queries.Add(c);
+            writer.Write(QueryStepWork);
+            writer.Write(queries.Count);
+            foreach (var c in queries)
+            {
+                var leader = c.Members[0];
+                writer.Write(c.Members.Length);
+                foreach (var member in c.Members) writer.Write(member.Request);
+                writer.Write(leader.Session);
+                writer.Write(leader.Order);
+                writer.Write(leader.Entity);
+                WorldWire.String(writer, c.Map.Map.Geometry.Binding);
+                writer.Write(c.Query.Iterations);
+                var words = c.Query.CaptureFrontier();
+                writer.Write(words.Length);
+                foreach (uint word in words) writer.Write(word);
+            }
+        }
+
+        internal void ReadActiveQueries(BinaryReader reader, NavigationAdmissionPin pin, INavStorageReservation reservation)
+        {
+            if (first != null) throw new InvalidOperationException("Cannot replace live Recast work.");
+            int work = reader.ReadInt32(), count = reader.ReadInt32();
+            if (work < 1 || work > 4096 || count < 0 || count > pin.Value.Requests.Count)
+                throw new ArgumentException("Invalid active Recast query count or quantum.");
+            var requests = pin.Value.Requests.ToDictionary(q => q.Request);
+            QueryStepWork = work;
+            Context tail = null;
+            for (int i = 0; i < count; i++)
+            {
+                int n = reader.ReadInt32();
+                if (n < 1 || n > requests.Count) throw new ArgumentException("Invalid Recast query membership.");
+                var members = new NavigationRequest[n];
+                for (int j = 0; j < n; j++)
+                    if (!requests.TryGetValue(reader.ReadInt64(), out members[j]) ||
+                        (j > 0 && members[j-1].Request >= members[j].Request))
+                        throw new ArgumentException("Unknown Recast query member.");
+                var leader = members[0];
+                if (reader.ReadInt64() != leader.Session || reader.ReadInt64() != leader.Order ||
+                    reader.ReadInt32() != leader.Entity) throw new ArgumentException("Recast request identity changed.");
+                string binding = WorldWire.String(reader);
+                long iterations = reader.ReadInt64();
+                int size = reader.ReadInt32();
+                if (iterations < 0 || size < 1 || size > RecastNavigationQuery.MaxCheckpointWords ||
+                    4L * size > reader.BaseStream.Length - reader.BaseStream.Position)
+                    throw new ArgumentException("Invalid Recast frontier size.");
+                var c = Context.Create(pin, leader, reservation, n == 1, members);
+                try
+                {
+                    c.Map = cache.Acquire(pin.Value.AuthoredTerrain, leader.Geometry, leader.Profile, leader.HeldIdentity, reservation, null);
+                    if (c.Map.Map.Geometry.Binding != binding) throw new ArgumentException("Recast checkpoint map changed.");
+                    using (NavStorageScratch.Reserve(reservation, checked(32L + size * 4L)))
+                    using (RecastNative.Memory(reservation))
+                    {
+                        var words = new uint[size];
+                        for (int j = 0; j < size; j++) words[j] = reader.ReadUInt32();
+                        c.Query = c.Map.Map.Query(leader.StartLocation.Value, leader.GoalLocation.Value);
+                        c.Query.RestoreFrontier(words, iterations);
+                    }
+                    if (tail == null) first = c; else tail.Next = c;
+                    tail = c;
+                }
+                catch { c.Release(); throw; }
+            }
+        }
+
         internal int QueryStepWork=256;
         private Context first;
         private readonly RecastMapCache cache=new RecastMapCache();
@@ -70,19 +159,22 @@ namespace Spacewars.Runtime
             return ReferenceEquals(a,b)||(id!=null&&id.GroupId!=0&&other!=null&&b.Entity>=0&&other.GroupId==id.GroupId&&a.Session==b.Session&&
                 a.Profile.Radius==b.Profile.Radius&&a.Profile.LocalGridCell==b.Profile.LocalGridCell&&a.Profile.ProfileId==b.Profile.ProfileId&&a.Profile.Revision==b.Profile.Revision&&a.HeldIdentity==b.HeldIdentity&&ReferenceEquals(a.Geometry,b.Geometry)&&a.StartLocation?.SurfaceId==b.StartLocation?.SurfaceId&&a.GoalLocation?.SurfaceId==b.GoalLocation?.SurfaceId);
         }
-        internal bool TryGet(NavigationAdmissionPin observed,NavigationRequest request,ILayeredNavigationProvider provider,INavStorageReservation r,Func<bool> cancelled,out RecastMemberRoute route,out NavSolveStatus status)
+        internal bool TryGet(NavigationAdmissionPin observed,NavigationRequest request,ILayeredNavigationProvider provider,INavStorageReservation r,Func<bool> cancelled,out RecastMemberRoute route,out NavSolveStatus status,bool reuseCompatibleRoutes=true)
         {
             if(disposed)throw new ObjectDisposedException(nameof(RecastGroupPreparation));
             if(cancelled?.Invoke()==true)throw new OperationCanceledException();
             AdmitOwner(r);route=null;status=NavSolveStatus.Pending;
-            Context context=null;int index=-1;for(var at=first;at!=null;at=at.Next)if((index=at.Index(request))>=0){context=at;break;}
+            var context=Find(request,out int index,out bool independent);
             if(context==null){
-                context=Context.Create(observed,request,r);
+                context=Context.Create(observed,request,r,independent || !reuseCompatibleRoutes);
                 try{
-                    if(observed.Value.AuthoredTerrain==null&&(observed.Value.SurfaceProviderId!=NavLocation.FlatSurface||observed.Value.SurfaceSemanticsVersion!=1)||!request.StartLocation.HasValue||!request.GoalLocation.HasValue)context.Result=NavSolveStatus.InvalidEndpoint;
+                    // BuildSpine uses the first member in issuance order. Ingress
+                    // may start with a different member after deferral or restore.
+                    var leader=context.Members[0];
+                    if(observed.Value.AuthoredTerrain==null&&(observed.Value.SurfaceProviderId!=NavLocation.FlatSurface||observed.Value.SurfaceSemanticsVersion!=1)||!leader.StartLocation.HasValue||!leader.GoalLocation.HasValue)context.Result=NavSolveStatus.InvalidEndpoint;
                     else{
-                        context.Map=cache.Acquire(observed.Value.AuthoredTerrain,request.Geometry,request.Profile,request.HeldIdentity,r,cancelled);
-                        using(var memory=RecastNative.Memory(r))context.Query=context.Map.Map.Query(request.StartLocation.Value,request.GoalLocation.Value);
+                        context.Map=cache.Acquire(observed.Value.AuthoredTerrain,leader.Geometry,leader.Profile,leader.HeldIdentity,r,cancelled);
+                        using(var memory=RecastNative.Memory(r))context.Query=context.Map.Map.Query(leader.StartLocation.Value,leader.GoalLocation.Value);
                         LongQueries++;
                     }
                     context.Next=first;first=context;index=context.Index(request);
@@ -101,8 +193,7 @@ namespace Spacewars.Runtime
                 context.Result=result;context.Query.Dispose();context.Query=null;
             }
             // Local work begins on the next invocation after the native quantum.
-            if(context.SpineRequired||context.AttachmentRequired)return false;
-            return Finish(context,index,out route,out status);
+            return Advance(context,index,r,cancelled,out route,out status);
         }
         // Projection keeps the original bounded admission route. Restartable Solve
         // work only supplies a complete paid corridor; fan/route construction and
@@ -124,24 +215,64 @@ namespace Spacewars.Runtime
                                 context.Provider=owned;owned=null;context.RawCorridor=rawPayload;rawPayload=null;context.SpineRequired=true;return;
                             }
                             var routes=new RecastMemberRoute[context.Members.Length];int points=0,legs=0;
+                            bool sharedRepair=false;
+                            var independent=new bool[routes.Length];
                             for(int i=0;i<context.Members.Length;i++){
                                 if(cancelled?.Invoke()==true)throw new OperationCanceledException();
                                 var path=spine==null?null:Attach(traceProvider,context.Members[i],spine,context.Map.Map.Geometry);
-                                if(path!=null){points+=path.Waypoints.Length;legs+=path.Legs.Length;if(points>65536||legs>65536)throw new InvalidOperationException("Recast group result capacity exceeded.");routes[i]=path;}
+                                if(path!=null){
+                                    points+=path.Waypoints.Length;legs+=path.Legs.Length;
+                                    if(points>65536||legs>65536)throw new InvalidOperationException("Recast group result capacity exceeded.");
+                                    routes[i]=path;
+                                }else if(spine!=null){
+                                    // A local attachment must be local to the shared corridor.
+                                    // Dispersed origins get the same certified native query
+                                    // from their own start, under their original request.
+                                    independent[i]=routes.Length>1&&!HasLocalJoin(context.Members[i],spine);
+                                    sharedRepair|=!independent[i];
+                                }
                             }
                             long bytes=32+8L*routes.Length;
                             if(spine!=null)bytes=checked(bytes+NavStorageLayout.ObjectBytesBound(typeof(RecastSpineProposal))+88+(NavTypedLeg.StorageCharge+NavStorageLayout.ValueBytes(typeof(NavTypedLeg)))*(long)spine.Legs.Length+4L*spine.Stops.Length+24+2L*spine.Binding.Length);
                             foreach(var path in routes)if(path!=null)bytes=checked(bytes+NavStorageLayout.ObjectBytesBound(typeof(RecastMemberRoute))+64+(NavTypedLeg.StorageCharge+NavStorageLayout.ValueBytes(typeof(NavTypedLeg)))*(long)path.Legs.Length+NavStorageLayout.ValueBytes(typeof(RecastRoutePoint))*(long)path.Waypoints.Length);
                             payload=RecastPayload.Allocate(r,bytes);payload.Value=routes;
-                            if(spine!=null&&routes.Any(path=>path==null)){attachment=RecastAttachmentPreparation.Create(context.Members.Length,r);context.RequireEdge(attachment);}
+                            if(sharedRepair){attachment=RecastAttachmentPreparation.Create(context.Members.Length,r);context.RequireEdge(attachment);}
+                            Array.Copy(independent,context.IndependentRoutes,independent.Length);
                             // Publish only after every potentially refusing birth/guard.
                             if(owned!=null){context.Provider=owned;owned=null;}context.ResultPayload=payload;payload=null;context.Routes=routes;context.Spine=spine;context.Attachment=attachment;context.AttachmentRequired=attachment!=null;attachment=null;Attachments+=context.Members.Length;
                         }finally{attachment?.Dispose();(owned as INavStorageFacade)?.StorageRoot.Release();payload?.Dispose();rawPayload?.Dispose();}
                     }
         }
         internal long LocalAttachmentWork{get;private set;}
-        private Context Find(NavigationRequest request){for(var c=first;c!=null;c=c.Next)if(c.Index(request)>=0)return c;return null;}
-        internal bool HasPendingAttachment(NavigationRequest request)=>Find(request) is Context c&&(c.SpineRequired||c.AttachmentRequired);
+        private static bool HasLocalJoin(NavigationRequest request,RecastSpineProposal spine)
+        {
+            var start=request.StartLocation.Value;
+            foreach(int stop in spine.Stops){
+                if(stop>spine.Fan)break;
+                var join=spine.Node(stop);
+                if(join.SurfaceId==start.SurfaceId&&Distance(join.Position,start.Position)<=request.Profile.LocalDetourDistance)return true;
+            }
+            return false;
+        }
+        private Context Find(NavigationRequest request,out int index,out bool independent)
+        {
+            independent=false;
+            for(var c=first;c!=null;c=c.Next){
+                index=c.Index(request);
+                if(index<0)continue;
+                if(!c.IndependentRoutes[index])return c;
+                independent=true;
+            }
+            index=-1;
+            return null;
+        }
+        private Context Find(NavigationRequest request)=>Find(request,out _,out _);
+        private static bool NeedsAttachment(Context context,int index)
+            =>context.SpineRequired||context.AttachmentRequired&&context.Routes[index]==null;
+        internal bool HasPendingAttachment(NavigationRequest request)
+            =>Find(request,out int index,out _) is Context context&&NeedsAttachment(context,index);
+        internal bool NeedsMoreWork(NavigationRequest request)
+            =>Find(request,out int index,out _) is Context context&&(context.Query!=null||NeedsAttachment(context,index));
         internal int AdvanceAttachment(NavigationRequest request,INavStorageReservation r,int maximumWork,Func<bool> cancelled)
         {
             var c=Find(request);if(c==null||!c.SpineRequired&&!c.AttachmentRequired)return 0;
@@ -155,7 +286,7 @@ namespace Spacewars.Runtime
             }
             if(c.Attachment==null){c.Attachment=RecastAttachmentPreparation.Create(c.Members.Length,r);c.RequireEdge(c.Attachment);}
             long attachmentBefore=c.Attachment.Work;
-            try{c.Attachment.Step(c.Members,c.Routes,c.Spine,c.Provider,c.Map.Map.Geometry,r,Math.Min(QueryStepWork,maximumWork),cancelled);}
+            try{c.Attachment.Step(c.Members,c.Routes,c.Spine,c.Provider,c.Map.Map.Geometry,r,Math.Min(QueryStepWork,maximumWork),cancelled,c.IndependentRoutes);}
             finally{long used=c.Attachment.Work-attachmentBefore;if(used>Math.Min(QueryStepWork,maximumWork))throw new InvalidOperationException("Recast attachment quantum exceeded.");LocalAttachmentWork+=used;}
             return checked((int)(c.Attachment.Work-attachmentBefore));
         }
@@ -177,7 +308,11 @@ namespace Spacewars.Runtime
             // prevents a refused derivative becoming a BlockedConnector result.
         }
         private bool Advance(Context c,int index,INavStorageReservation r,Func<bool> cancelled,out RecastMemberRoute route,out NavSolveStatus status)
-        {route=null;status=NavSolveStatus.Pending;if(c.SpineRequired||c.AttachmentRequired)return false;return Finish(c,index,out route,out status);}
+        {
+            route=null;status=NavSolveStatus.Pending;
+            if(c.IndependentRoutes[index]||NeedsAttachment(c,index))return false;
+            return Finish(c,index,out route,out status);
+        }
         private static bool Finish(Context context,int index,out RecastMemberRoute route,out NavSolveStatus status)
         {status=context.Result;route=null;if(status==NavSolveStatus.Ready){route=context.Routes[index];if(route==null)status=NavSolveStatus.BlockedConnector;}return true;}
         private static bool Trace(ILayeredNavigationProvider provider,NavigationRequest request,NavLocation from,NavLocation target,out IReadOnlyList<NavTypedLeg> legs)

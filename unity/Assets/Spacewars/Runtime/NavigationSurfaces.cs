@@ -39,6 +39,13 @@ namespace Spacewars.Runtime
             using(scope){var r=scope.OwnedReservation();foreach(var actor in Crowd.Units){
                 if(!actor.Moving||actor.InstalledRequest==0)continue;
                 if(!installedExecutions.TryGetValue(actor.Id,out var installed)||installed.StorageOwner?.Corridor?.TypedRoute?.RecastPlan==null||!actor.GoalLocation.HasValue)throw new ArgumentException("Moving authored Recast actor lost its accepted typed route.");
+                if(installedExecutions.IsDetached(actor.Id)){
+                    // A replacement command can own membership before its route is Ready.
+                    // The old motor then follows its saved waypoints without group pacing or cursor.
+                    ValidateAuthoredMotorSuffix(actor.Location,actor.GoalLocation,actor.Radius,
+                        actor.localRoute.Skip(actor.localIndex).Concat(actor.route.Skip(actor.routeIndex)));
+                    continue;
+                }
                 var route=installed.StorageOwner.Corridor.TypedRoute;var state=NavRecastIntervals.Initial(route);
                 if(memberGroups.TryGetValue(actor.Id,out var groupId)){
                     var member=groups[groupId].Members.Single(m=>m.Entity==actor.Id);
@@ -49,6 +56,12 @@ namespace Spacewars.Runtime
                     !NavRecastIntervals.TryContinuationRejoin(route,state,actor.Location,actor.localRoute,actor.localIndex,actor.route,actor.routeIndex,actor.GoalLocation.Value,r,out _,Crowd,actor.Id))
                     throw new ArgumentException($"Invalid current authored Recast continuation actor={actor.Id} cursor={state.Cursor} routeIndex={actor.routeIndex}.");
             }}
+        }
+        private void ValidateAuthoredMotorSuffix(NavLocation location,NavLocation? goal,double radius,System.Collections.Generic.IEnumerable<NavPoint> remaining)
+        {
+            foreach(var point in remaining)
+                if(!Crowd.Traverse(location,point,radius,out location))throw new ArgumentException("Invalid saved surface route.");
+            if(!goal.HasValue||!Crowd.CompatibleArrival(location,goal.Value,radius))throw new ArgumentException("Saved surface route endpoint mismatch.");
         }
         private void ValidateSurfaceState(NavigationSessionState state)
         {
@@ -78,13 +91,16 @@ namespace Spacewars.Runtime
                 // current installed bodies to the mandatory post-BODY owned
                 // continuation guard; retain all pose/goal checks above.
                 bool deferOwnedRecast=UsesRecastGroundRoutes&&state.RecastCoordinationVersion==2&&unit.InstalledRequest>0&&state.InstalledExecutions!=null&&state.InstalledExecutions.Any(row=>row.Entity==unit.Id);
-                if(terrain!=null&&!(terrain is IRecastPhysicalTerrain)&&unit.Moving&&!deferOwnedRecast){var location=unit.Location.Value;
-                    foreach(var point in unit.LocalRoute.Skip(unit.LocalIndex).Concat(unit.Route.Skip(unit.RouteIndex)))if(!Crowd.Traverse(location,point,unit.Radius,out location))throw new ArgumentException("Invalid saved surface route.");
-                    if(!unit.GoalLocation.HasValue||!Crowd.CompatibleArrival(location,unit.GoalLocation.Value,unit.Radius))throw new ArgumentException("Saved surface route endpoint mismatch.");
-                }
+                if(terrain!=null&&!(terrain is IRecastPhysicalTerrain)&&unit.Moving&&!deferOwnedRecast)
+                    ValidateAuthoredMotorSuffix(unit.Location.Value,unit.GoalLocation,unit.Radius,
+                        unit.LocalRoute.Skip(unit.LocalIndex).Concat(unit.Route.Skip(unit.RouteIndex)));
             }
             foreach(var request in state.Requests){
-                if(request.Entity<0){if(request.StartLocation.HasValue||request.GoalLocation.HasValue)throw new ArgumentException("Unexpected producer surface binding.");continue;}
+                if(request.Entity<0){
+                    // A producer probe can be submitted even when an endpoint cannot be located.
+                    Check(request.StartLocation,request.Start,0,false);Check(request.GoalLocation,request.Goal,0,false);
+                    continue;
+                }
                 if(legacy){request.StartLocation=Bind(request.Start,0);request.GoalLocation=Bind(request.Goal,0);}
                 Check(request.StartLocation,request.Start,0,true);Check(request.GoalLocation,request.Goal,0,true);
             }

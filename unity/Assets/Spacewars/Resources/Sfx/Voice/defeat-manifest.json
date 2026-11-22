@@ -1,0 +1,93 @@
+{
+  "generator": "edge-tts 7.3.1; offline game assets, no runtime service",
+  "voice": "ru-RU-DmitryNeural +0% -6Hz",
+  "filter": "silenceremove=start_periods=1:start_duration=0.01:start_threshold=-48dB,areverse,silenceremove=start_periods=1:start_duration=0.01:start_threshold=-48dB,areverse,highpass=f=350,lowpass=f=3100,acompressor=threshold=0.08:ratio=4:attack=3:release=90:makeup=2.2,asoftclip=type=tanh:threshold=0.75:output=0.9,loudnorm=I=-18:TP=-3:LRA=7,aresample=48000,apad=pad_dur=0.08",
+  "long_pause_filter": "silenceremove=stop_periods=-1:stop_duration=0.42:stop_threshold=-43dB:stop_silence=0.26",
+  "samples": [
+    {
+      "key": "defeat-worthy",
+      "text": "Это была достойная битва.",
+      "sha256": "00c295da2ee8538dc700062251a0a3f83fdc8561d2a445aee29ff1ed748f2d81"
+    },
+    {
+      "key": "defeat-deserved",
+      "text": "Хороший бой. Победа заслуженная.",
+      "sha256": "7cbbd1e056be1ffc94890a8eaf02679ceef5358263e09b75d2a1b94593d9b04b"
+    },
+    {
+      "key": "defeat-last-base",
+      "text": "Последняя база потеряна. Связь прекращаю.",
+      "sha256": "65ab2a32dbe612206bb2b4cb249602c79ccc13e588c80bb7a9b6b0255d260876"
+    },
+    {
+      "key": "defeat-plan",
+      "text": "У меня был план, и я его придерживался.",
+      "sha256": "cd4805f505354152ae33483555c92e50d6539c66548f525eecaad7db2a91efad"
+    },
+    {
+      "key": "defeat-close",
+      "text": "Эх, а ведь почти получилось.",
+      "sha256": "3a86869d39661da4ca155826084df300602c7030a0b46b3de58a8d55dc0554e3"
+    },
+    {
+      "key": "defeat-next-time",
+      "text": "В следующий раз всё будет иначе.",
+      "sha256": "6f7fcc7a831d0abb17d0438be82bd252089951ca060be29f56dfaa03cea00545"
+    },
+    {
+      "key": "defeat-lucky-one",
+      "text": "Тебе просто повезло.",
+      "sha256": "d033ef2650821e207df81dd1cd5278f1ddf39473f7353fc7ff2ca42335bd6609"
+    },
+    {
+      "key": "defeat-lucky-many",
+      "text": "Вам просто повезло.",
+      "sha256": "d243de2aef64928829b7f60b2fe5f629aa417cbca3d3bc40cc355ce596d2951c"
+    },
+    {
+      "key": "defeat-enjoy",
+      "text": "Ну что ж. Наслаждайтесь, пока можете.",
+      "sha256": "71b78e25fb4381505a77551415466a63d51deef11ec17cf9f013ac098e22bebd"
+    },
+    {
+      "key": "defeat-radio",
+      "text": "Штаб, ответьте. Штаб?.. Ах да.",
+      "sha256": "653bfa171b7b591077e346957e9d43b5c7de0b205b543bc9410626f93b623e0b"
+    },
+    {
+      "key": "defeat-report",
+      "text": "Запишите в отчёте: противник отказался проигрывать.",
+      "sha256": "18ec26c27ddf63c9dc58d2033759fe1b57b65e2b665ec0835f3b5d819df00382"
+    },
+    {
+      "key": "defeat-army",
+      "text": "Войска остались, но командовать некому.",
+      "sha256": "e3c697dd537b30df1caf30d85f73e82a7998d979aaccfea3debd4f719e8b1b2d"
+    },
+    {
+      "key": "defeat-backup-plan",
+      "text": "У меня был запасной план. Он сгорел вместе со штабом.",
+      "sha256": "538b80aaa65b8bfc7bca23af667de8bc6b2c387c92e2ea359aad0c4eba078669"
+    },
+    {
+      "key": "defeat-formation",
+      "text": "Зато строй держали красиво.",
+      "sha256": "5861584fa5a577cec638a6bd91f446685dc22d4e1cdd5514c19109bf2a67b2e2"
+    },
+    {
+      "key": "defeat-recon",
+      "text": "Считайте это разведкой боем. Очень подробной разведкой.",
+      "sha256": "8bd825c3fc58c79703b41e695867d4ac66f7c261dbcdc662f19c29dfc249f42d"
+    },
+    {
+      "key": "defeat-rematch",
+      "text": "Я требую матча-реванша.",
+      "sha256": "4f77f44affb6b2aee702028898fbc324ad5bef4a3116490ecf8616d2a5089ade"
+    },
+    {
+      "key": "defeat-save",
+      "text": "Ничего. У меня ещё есть сохранение.",
+      "sha256": "5d6d5fcbd42fc335521820023f1845166b262e7b79369022e759521923d87ea8"
+    }
+  ]
+}

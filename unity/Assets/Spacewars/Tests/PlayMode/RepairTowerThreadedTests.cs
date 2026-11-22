@@ -11,6 +11,79 @@ namespace Spacewars.Tests.PlayMode
     public sealed class RepairTowerThreadedTests
     {
         const BindingFlags Flags=BindingFlags.Instance|BindingFlags.NonPublic;
+        [Test, Timeout(60000)]
+        public void SkatLaunchesAndRepairsThroughOrdinaryThreadedHost()
+        {
+            var profile = PlayableProfile.Default;
+            var domain = new PlayableDomain(profile, 813, false);
+            CertifiedRouteWorker worker = null;
+            object Call(string name, params object[] args) => typeof(PlayableDomain).GetMethod(name, Flags).Invoke(domain, args);
+            var authority = new PlayableAuthorityTick(domain, new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()), 7);
+            long sequence = 0;
+            PlayableCommandStatus Send(PlayableCommandKind kind, int[] ids = null, int slot = 0,
+                PlayableBuildingKind building = default, int target = 0, NavPoint point = default) =>
+                authority.Apply(new PlayableCommand(813, ++sequence, "player-1", kind, ids, point,
+                    targetId: target, siteId: 1, slotId: slot, parentId: 1, buildingKind: building)).Status;
+            try
+            {
+                Call("AddCredits", PlayableOwner.Player, 2000d);
+                worker = new CertifiedRouteWorker(authority.NavigationBinding, profile.NavigationRequestsPerFrame);
+                Assert.AreEqual(PlayableCommandStatus.Applied, Send(PlayableCommandKind.BuildAt, slot: 1, building: PlayableBuildingKind.Hangar));
+                var clock = Stopwatch.StartNew();
+                bool scienceOrdered = false, queued = false, platform = false, repairOrdered = false, repaired = false;
+                int damaged = 0, ground = 0;
+                while (domain.Tick < 2400 && clock.Elapsed.TotalSeconds < 50)
+                {
+                    authority.TryAdvance();
+                    Assert.IsNull(worker.Publication.Failure);
+                    var view = authority.Latest;
+                    if (view == null) { Thread.Sleep(1); continue; }
+                    Assert.IsNull(view.Failure);
+                    var hangar = view.Buildings.FirstOrDefault(b => b.Owner == PlayableOwner.Player && b.Kind == PlayableBuildingKind.Hangar);
+                    if (!scienceOrdered && hangar?.Phase == ConstructionPhase.Ready)
+                    {
+                        Assert.AreEqual(PlayableCommandStatus.Applied, Send(PlayableCommandKind.BuildAt, slot: 2,
+                            building: PlayableBuildingKind.ScientificCenter));
+                        scienceOrdered = true;
+                        ground = view.Entities.First(unit => unit.Owner == PlayableOwner.Player && unit.Kind == PlayableEntityKind.Explorer).Id;
+                        var groundCommand = Send(PlayableCommandKind.Move, new[] { ground }, point: new NavPoint(-11, -8));
+                        Assert.That(groundCommand, Is.EqualTo(PlayableCommandStatus.Applied).Or.EqualTo(PlayableCommandStatus.Accepted));
+                    }
+                    if (!queued && hangar != null && view.Buildings.Any(b => b.Owner == PlayableOwner.Player &&
+                        b.Kind == PlayableBuildingKind.ScientificCenter && b.Phase == ConstructionPhase.Ready))
+                    {
+                        Assert.AreEqual(PlayableCommandStatus.Applied, Send(PlayableCommandKind.QueueSkat, new[] { hangar.Id }));
+                        queued = true;
+                    }
+                    platform |= hangar?.LaunchKind == PlayableEntityKind.Skat && hangar.LaunchPhase == 3;
+                    var drone = view.Entities.FirstOrDefault(unit => unit.Owner == PlayableOwner.Player && unit.Kind == PlayableEntityKind.Skat);
+                    if (!repairOrdered && drone != null && !drone.Departing)
+                    {
+                        damaged = view.Buildings.Single(b => b.Id == 1).Health - 40;
+                        Call("Damage", 1, 40);
+                        Assert.AreEqual(PlayableCommandStatus.Applied, Send(PlayableCommandKind.RepairTarget, new[] { drone.Id }, target: 1));
+                        repairOrdered = true;
+                    }
+                    repaired = repairOrdered && view.Buildings.Single(b => b.Id == 1).Health > damaged &&
+                        view.Orbital.RepairedUnits.Contains(1);
+                    if (repaired && worker.Publication.Pumps > 0) break;
+                    Thread.Sleep(1);
+                }
+                Assert.True(queued && platform && repairOrdered && repaired,
+                    $"tick={domain.Tick} science={scienceOrdered} queued={queued} platform={platform} order={repairOrdered} healed={repaired}");
+                Assert.True(domain.Navigation.HasCertifiedHost);
+                Assert.Greater(worker.Publication.Pumps, 0);
+            }
+            finally
+            {
+                worker?.Dispose();
+                if (worker != null) Assert.True(SpinWait.SpinUntil(() => worker.IsStopped, 5000));
+                domain.Navigation.ReleaseCommittedHostRoot();
+                domain.DestroyOwnedNavigation();
+                Assert.Zero(domain.Navigation.PhysicalHostBudget.PhysicalBytes);
+            }
+        }
+
         // One bounded ordinary-host integration witness. Fixed profile/seed/horizon; no unchanged reruns to fish for PASS.
         [Test,Timeout(60000)] public void CommandBuildsRepairTowerAndHealsThroughOrdinaryThreadedHost()
         {

@@ -127,9 +127,13 @@ namespace Spacewars.Tests.EditMode
         [Test] public void RepairSaleAndUpgradeKeepTermsThroughTwoRevisionsAndRestore()
         {
             var p=PlayableProfile.ThreeCrossingsDefault;var d=New(p);Call(d,"AddCredits",PlayableOwner.Player,100000d);
-            int repair=Build(d,PlayableBuildingKind.Factory,1),sale=Build(d,PlayableBuildingKind.Factory,2),refinery=Build(d,PlayableBuildingKind.Refinery,3);Build(d,PlayableBuildingKind.ScientificCenter,4);
+            int repair=Build(d,PlayableBuildingKind.Factory,1),sale=Build(d,PlayableBuildingKind.Factory,2),refinery=Build(d,PlayableBuildingKind.Refinery,3),center=Build(d,PlayableBuildingKind.ScientificCenter,4);
+            // The current refinery contract requires the completed local center upgrade.
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call(d,"Apply",new PlayableCommand(1,1,"player-1",PlayableCommandKind.QueueResearch,new[]{center},researchKind:PlayableResearchKind.ScientificCenterUpgrade),null));
+            Call(d,"AdvanceResearch",PlayableResearchRules.Duration(p,PlayableResearchKind.ScientificCenterUpgrade));
+            Assert.True(View(d).Buildings.Single(b=>b.Id==center).ScientificCenterUpgraded);
             Call(d,"Damage",repair,17);for(int i=0;i<(p.BuildingRepairCombatLockoutSec+1)*30;i++){Deliver(d);Call(d,"Step",1d/30);}
-            Send(d,1,PlayableCommandKind.StartBuildingRepair,repair);Send(d,2,PlayableCommandKind.SellBuilding,sale);Send(d,3,PlayableCommandKind.UpgradeRefinery,refinery);
+            Send(d,2,PlayableCommandKind.StartBuildingRepair,repair);Send(d,3,PlayableCommandKind.SellBuilding,sale);Send(d,4,PlayableCommandKind.UpgradeRefinery,refinery);
             double oldDuration=View(d).Buildings.Single(b=>b.Id==repair).PrivateState.Lifecycle.RepairDuration;
             var data=p.CopyData();data.revision=2;data.factoryHealth+=100;data.buildingRepairDurationSec+=10;data.buildingSaleDemolitionSec+=1;data.refineryUpgradeSeconds+=10;
             var q=PlayableProfile.Create(data,p.AuthoredMap);Assert.IsNull(Call(d,"ValidateBalance",q));Call(d,"ApplyBalance",q);d=Restore(d,q);
@@ -167,6 +171,59 @@ namespace Spacewars.Tests.EditMode
             Call(restored,"Apply",new PlayableCommand(1,2,"player-1",PlayableCommandKind.QueueTank,new[]{factory}),null);
             Assert.AreEqual(next.TankCreditCost,View(restored).Buildings.Single(b=>b.Id==factory).PrivateState.Orders[1].PaidCost);
         }
+        [Test] public void IndependentNewUnitTermsSurviveLiveApplyAndExactWorldRestore()
+        {
+            var original=PlayableProfile.Default;
+            var changed=original.CopyData();
+            changed.revision++;
+            changed.tankVisionRange+=3;
+            changed.hawkAcceleration+=2;
+            changed.hawkBraking+=2;
+            changed.hawkYawSpeed+=2;
+            changed.hawkYawAcceleration+=2;
+            var independent=PlayableProfile.Create(changed);
+
+            Assert.AreEqual(original.TankVisionRange,PlayableUnitRules.Vision(independent,PlayableEntityKind.Cerberus));
+            Assert.AreEqual(original.HawkYawSpeed,PlayableUnitRules.Turn(independent,PlayableEntityKind.Skat));
+            Assert.AreEqual(original.HawkVision,PlayableUnitRules.Vision(independent,PlayableEntityKind.Skat));
+            Assert.AreEqual(original.HawkAcceleration,independent.SkatAcceleration);
+            Assert.AreEqual(original.HawkBraking,independent.SkatBraking);
+            Assert.AreEqual(original.HawkYawAcceleration,independent.SkatYawAcceleration);
+
+            changed.cerberusVision+=1;
+            changed.skatVision+=1;
+            changed.skatYawSpeed+=1;
+            changed.skatYawAcceleration+=1;
+            changed.skatAcceleration+=1;
+            changed.skatBraking+=1;
+            var candidate=PlayableProfile.Create(changed);
+            var domain=New(original);
+            object restored=null;
+            try
+            {
+                Assert.IsNull(Call(domain,"ValidateBalance",candidate));
+                Call(domain,"ApplyBalance",candidate);
+                // Publish before the first capture so both snapshots own their team vision rows.
+                Assert.AreSame(candidate,View(domain).ActiveProfile);
+                byte[] bytes=(byte[])Call(domain,"CaptureWorldBytes",7,"new-unit-lab");
+                restored=Domain.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic)
+                    .Invoke(null,new object[]{bytes,candidate,7,"new-unit-lab"});
+                var historical=((PlayableProfile)Call(restored,"Terms",original.Revision)).CopyData();
+                var active=View(restored).ActiveProfile.CopyData();
+                foreach(var field in PlayableProfileMetadata.NewUnitTermFields)
+                {
+                    Assert.AreEqual(field.Read(original.CopyData()),field.Read(historical),field.Path);
+                    Assert.AreEqual(field.Read(changed),field.Read(active),field.Path);
+                }
+                CollectionAssert.AreEqual(bytes,(byte[])Call(restored,"CaptureWorldBytes",7,"new-unit-lab"));
+            }
+            finally
+            {
+                ((PlayableDomain)domain).DestroyOwnedNavigation();
+                if(restored!=null)((PlayableDomain)restored).DestroyOwnedNavigation();
+            }
+        }
+
         [Test] public void ReusedRevisionCannotOverwriteFirstTransactionBinding()
         {
             var p=PlayableProfile.Default;var d=New(p);var data=p.CopyData();data.tankCreditCost+=10;

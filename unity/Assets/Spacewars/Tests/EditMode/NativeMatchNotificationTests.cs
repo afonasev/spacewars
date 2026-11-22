@@ -39,6 +39,21 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual("Исследование готово",n.Visible(4.99,p).Text);Assert.Null(n.Visible(5,p));
             Assert.AreEqual(20,n.Focus(true,5,p).Value.X);Assert.Null(n.Focus(false,7,p));
         }
+        [Test] public void GamepadHistorySurvivesBannerExpiryAndRestartsOnNewEvent()
+        {
+            Feed(0,Enumerable.Range(1,6).Select(i=>E(i,i,i,MatchEventKind.UnitReady)).ToArray());
+            Assert.Null(n.Visible(10,p));
+            Assert.Null(n.Focus(false,10,p));
+            foreach (int point in new[]{6,5,4,3,2,6})
+                Assert.AreEqual(point,n.FocusNextGamepadEvent().Value.X);
+
+            Feed(11,E(7,7,7,MatchEventKind.UnitReady,PlayableOwner.Enemy));
+            Assert.AreEqual(5,n.FocusNextGamepadEvent().Value.X,"foreign events do not reset the position");
+            Feed(12,E(8,8,8,MatchEventKind.UnitReady));
+            Assert.AreEqual(8,n.FocusNextGamepadEvent().Value.X);
+            n.Reset();
+            Assert.Null(n.FocusNextGamepadEvent());
+        }
         [Test] public void OwnSignalsAreMarksOnlyAndAllyRefreshWithSameIdentityIsNewNotification()
         {
             var own=new PlayableTeamSignal(1,PlayableOwner.Player,TeamSignalKind.Attack,new NavPoint(1,0),0,150);

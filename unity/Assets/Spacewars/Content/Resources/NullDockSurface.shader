@@ -8,6 +8,10 @@ Shader "Spacewars/NullDockSurface"
         _CoreEmission("Recessed core intensity",Float)=1.1
         _BattleColor("Battle paint sRGB",Vector)=(.68,.43,.39,1) _ContestedColor("Contested paint sRGB",Vector)=(.7,.63,.4,1) _RearColor("Rear paint sRGB",Vector)=(.45,.6,.5,1)
         _ThreatBounds("Central half extents and rear thresholds",Vector)=(48,28,60,20)
+        _RelayCenters("Relay centers XZ",Vector)=(0,0,0,0) _RelayCaptureRadius("Relay capture radius",Float)=0
+        _RelayPavingShape("Relay deck scale, diagonal, stripe width",Vector)=(1.09,1.72,.2,0)
+        _RelayPavingColor("Relay deck paint sRGB",Vector)=(.24,.28,.31,1)
+        _RelayStripeColor("Relay stripe paint sRGB",Vector)=(.95,.56,.13,1)
         _BaseSitesA("HQ centers XZ",Vector)=(-66,0,66,0) _BaseSitesB("Outpost centers XZ",Vector)=(28,50,-28,-50) _SiteDisk("Inner radius and lift",Vector)=(11.3,.13,0,0)
     }
     SubShader {
@@ -23,7 +27,7 @@ Shader "Spacewars/NullDockSurface"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             TEXTURE2D(_FogMask);SAMPLER(sampler_FogMask);TEXTURE2D(_Steel);SAMPLER(sampler_Steel);TEXTURE2D(_SteelB);TEXTURE2D(_SteelC);TEXTURE2D(_Panel);TEXTURE2D(_PanelB);TEXTURE2D(_PanelC);
             CBUFFER_START(UnityPerMaterial)
-            float4 _FogBounds,_FogColor,_Finish,_BattleColor,_ContestedColor,_RearColor,_ThreatBounds,_BaseSitesA,_BaseSitesB,_SiteDisk;float _PatchSize,_Emission,_RouteWidth,_CoreEmission;
+            float4 _FogBounds,_FogColor,_Finish,_BattleColor,_ContestedColor,_RearColor,_ThreatBounds,_BaseSitesA,_BaseSitesB,_SiteDisk,_RelayCenters,_RelayPavingShape,_RelayPavingColor,_RelayStripeColor;float _PatchSize,_Emission,_RouteWidth,_CoreEmission,_RelayCaptureRadius;
             CBUFFER_END
             struct A {float4 positionOS:POSITION;float3 normalOS:NORMAL;float4 color:COLOR;float2 role:TEXCOORD1;};
             struct V {float4 positionCS:SV_POSITION;float3 p:TEXCOORD0;float3 n:TEXCOORD1;float4 color:COLOR;float2 role:TEXCOORD2;};
@@ -44,11 +48,23 @@ Shader "Spacewars/NullDockSurface"
                     tex=lerp(lerp(pa,pb,smoothstep(.36,.40,patch)),pc,smoothstep(.62,.66,patch));
                 }
                 float3 painted=i.color.rgb;
+                float relayStripe=0;
                 // Only horizontal ground-floor role 0 is zoned. Ramps and models retain their materials.
                 if(i.role.x<.5&&n.y>.999){
                     float central=step(abs(i.p.x),_ThreatBounds.x)*step(abs(i.p.z),_ThreatBounds.y);
                     float rear=max(step(_ThreatBounds.z,i.p.x)*step(_ThreatBounds.w,i.p.z),step(i.p.x,-_ThreatBounds.z)*step(i.p.z,-_ThreatBounds.w));
                     painted=lerp(lerp(_ContestedColor.rgb,_RearColor.rgb,rear),_BattleColor.rgb,central);
+                    if(_RelayCaptureRadius>0){
+                        float2 a=i.p.xz-_RelayCenters.xy,b=i.p.xz-_RelayCenters.zw;
+                        float2 q=abs(dot(a,a)<dot(b,b)?a:b);
+                        float d=length(q);
+                        float pixel=max(fwidth(d),.001);
+                        float shoulder=max(max(q.x,q.y), (q.x+q.y)/_RelayPavingShape.y);
+                        float deck=saturate((_RelayCaptureRadius*_RelayPavingShape.x-shoulder)/pixel+.5);
+                        painted=lerp(painted,_RelayPavingColor.rgb,deck);
+                        // The station's existing 20 cm stripe lies just inside the capture boundary.
+                        relayStripe=saturate((min(d+pixel*.5,_RelayCaptureRadius)-max(d-pixel*.5,_RelayCaptureRadius-_RelayPavingShape.z))/pixel);
+                    }
                 }
                 if(i.role.x>.5&&i.role.x<1.5&&n.y>.999&&i.p.y>0){
                     float d=min(min(length(i.p.xz-_BaseSitesA.xy),length(i.p.xz-_BaseSitesA.zw)),min(length(i.p.xz-_BaseSitesB.xy),length(i.p.xz-_BaseSitesB.zw)));
@@ -95,6 +111,7 @@ Shader "Spacewars/NullDockSurface"
                     col=lerp(col,col*.94,road);
                     float laneEdge=1-smoothstep(.04,.04+aa,abs(transit-_RouteWidth*.5));float breaks=step(.22,frac((i.p.x+i.p.z)/5));
                     col=lerp(col,SRGBToLinear(float3(.55,.38,.12)),laneEdge*breaks*.62);
+                    col=lerp(col,SRGBToLinear(_RelayStripeColor.rgb),relayStripe);
 
                 }
                 if(i.role.x>1.5&&i.role.x<2.5&&an.y<.7){float rib=1-smoothstep(.06,.06+aa,min(frac(uv.x*1.5),1-frac(uv.x*1.5)));col*=1-.3*rib;}

@@ -112,7 +112,7 @@ def write_publication(out,release,head,public_commit,expected,channel,version):
 
 def main():
  p=argparse.ArgumentParser()
- p.add_argument('--notes',help='committed bilingual notes JSON')
+ p.add_argument('--notes',required=True,help='committed schema 2 bilingual notes JSON')
  p.add_argument('--version',required=True);p.add_argument('--sequence',type=int,required=True)
  p.add_argument('--channel',choices=['test','production'],required=True)
  p.add_argument('--production-approved',action='store_true');p.add_argument('--reuse-builds',action='store_true')
@@ -158,8 +158,9 @@ def main():
      validate_order(a.version,a.sequence,previous,document)
      baseline=document.get('commit')
      if not baseline:raise ValueError('previous release has no source baseline')
-    body,provenance=release_notes.generate(ROOT,head,baseline)
-    if a.notes:body,authored=release_notes.authored(ROOT,head,a.notes,a.version,assets);provenance['authored']=authored
+    provenance=release_notes.source_range(ROOT,head,baseline)
+    body,authored=release_notes.authored(ROOT,head,a.notes,a.version,assets,previous)
+    provenance['authored']=authored
     body=body.replace('\n\n## English','\n\nУстановщики без подписи издателя ОС.\n\n## English')+'\nInstallers do not have an OS publisher signature.\n'
     body=release_notes.with_installer_downloads(body,a.version,REPO,f'Spacewars-{a.version}-Windows-x64.exe',f'Spacewars-{a.version}-macOS-Universal.dmg')
     (out/'release-notes.md').write_text(body+'\n<!-- spacewars-publisher:'+state.data['owner_token']+' -->\n')
@@ -266,6 +267,9 @@ def main():
   run(['gh','release','edit',tag,'--repo',REPO,'--notes-file',public_notes])
   release=owned_release(state,a.channel,tag)
   if not release['draft']:raise ValueError('release changed during finalization; refusing mutation')
+  comparison=json.loads((out/'release-notes-source.json').read_text())['authored']['baseline_release']
+  latest=release_notes.previous_release(api('releases?per_page=100'),a.channel)
+  if comparison!=latest:raise ValueError('published comparison release changed; prepare notes for the current baseline')
   run(['gh','api','--method','PATCH',f'repos/{REPO}/releases/{release["id"]}','-F','draft=false','-f','make_latest='+('false' if a.channel=='test' else 'true')])
   published=api('releases/tags/'+tag)
   write_publication(out,published,head,public_commit,expected,a.channel,a.version)

@@ -16,7 +16,9 @@ Shader "Spacewars/MossHighlandSurface"
   _RoadFinish("Flush edging dust feather grain",Vector)=(.25,.35,.4,.18)
   _Geology("Strata spacing contrast",Vector)=(.4,.2,0,0)
   [PerRendererData] _BorderSurface("Natural boundary role",Float)=0
+  [PerRendererData] _PlateauSurface("Central plateau",Float)=0
   [PerRendererData] _RoadSurface("Road-bearing terrain only",Float)=1
+  [HideInInspector] _MatchAnimationTime("Match animation time",Float)=-1
   _NormalSlope("Finite normal slope",Float)=.075
   _ReceiverBias("Shadow receiver offset",Float)=.025
  }
@@ -39,8 +41,9 @@ Shader "Spacewars/MossHighlandSurface"
  TEXTURE2D(_SandTex);TEXTURE2D(_SandTexB);TEXTURE2D(_SandTexC);SAMPLER(sampler_SandTex);
  TEXTURE2D(_ConcreteTex);TEXTURE2D(_ConcreteTexB);TEXTURE2D(_ConcreteTexC);SAMPLER(sampler_ConcreteTex);
  CBUFFER_START(UnityPerMaterial)
+ float _MatchAnimationTime;
  float4 _FogBounds,_FogColor,_DetailSettings,_DarkVariantGain,_StoneVariantGain,_SandVariantGain;
- float4 _RoleTints[7];float _NormalSlope,_ReceiverBias,_RoadSurface,_BorderSurface;
+ float4 _RoleTints[7];float _NormalSlope,_ReceiverBias,_RoadSurface,_BorderSurface,_PlateauSurface;
  float4 _BorderSettings;
  float4 _Scree,_EdgeTransition,_CliffVariation,_RouteReadability;
  float4 _NaturalPattern,_Geology,_HighlandPattern,_ApronSlabs,_ApronFinish,_ApronCovers,_RoleDetail,_ApronWeather,_ConcreteVariantGain;
@@ -75,6 +78,7 @@ Shader "Spacewars/MossHighlandSurface"
  }
  half4 frag(V v):SV_Target {
  float2 mapUV=v.p.xz/(2*_FogBounds.xy)+.5;float4 a=SAMPLE_TEXTURE2D(_PaintA,sampler_PaintA,mapUV),b=SAMPLE_TEXTURE2D(_PaintB,sampler_PaintB,mapUV);
+ float plateauRim=b.a;
  float total=max(dot(a,1)+b.x+b.y+b.z,.001);a/=total;b/=total;
  float2 texelPosition=detailPosition(v.p,normalize(v.n));float3 weights=variants(v.p.xz);
  // Mostly one sibling pattern is visible; blending occurs only at region edges.
@@ -194,12 +198,23 @@ Shader "Spacewars/MossHighlandSurface"
  }
  if(_BorderSurface>1.5){
   float water=smoothstep(.45,1.25,v.shore);
-  float ripple=sin((v.p.z+v.p.x*.3)*13+noise(v.p.xz*1.8+_Time.y*.06)*7-_Time.y*.9)*.5+.5;
-  ripple=pow(ripple,16)*smoothstep(.55,.8,noise(v.p.xz*3+_Time.y*.03))*_BorderSettings.z;
+  float matchTime=_MatchAnimationTime>=0?_MatchAnimationTime:_Time.y;
+  float ripple=sin((v.p.z+v.p.x*.3)*13+noise(v.p.xz*1.8+matchTime*.06)*7-matchTime*.9)*.5+.5;
+  ripple=pow(ripple,16)*smoothstep(.55,.8,noise(v.p.xz*3+matchTime*.03))*_BorderSettings.z;
   float3 deep=pow(float3(.36,.85,1)*_BorderSettings.y,2.2);
   float3 current=deep*(.8+.3*noise(v.p.xz*.9))+ripple*.11;
   albedo=lerp(dark*_RoleTints[1].rgb*.85,current,water);
  }
+ // Use the same rock family as the ridges on the plateau's exposed sides
+ // and just inside its top lip. The mask follows the real gaps at the ramps.
+ float steepFace=1-smoothstep(.25,.75,abs(n.y));
+ float plateauFace=_PlateauSurface*steepFace;
+ float rockLip=_PlateauSurface*saturate(n.y)*plateauRim*(1-construction);
+ float3 plateauRock=dark*_RoleTints[1].rgb;
+ albedo=lerp(albedo,plateauRock,plateauFace);
+ // Freshly exposed mineral on the lip is brighter than the weathered wall.
+ float3 exposedRock=lerp(plateauRock,sqrt(saturate(plateauRock)),_CliffVariation.w);
+ albedo=lerp(albedo,exposedRock,rockLip);
  // Layered rock with nonuniform weathering; continuous across mesh boundaries.
  float2 geology=v.p.xz/_CliffVariation.y;
  float tilt=(noise(geology+117)-.5)*2*_CliffVariation.x;
@@ -209,8 +224,8 @@ Shader "Spacewars/MossHighlandSurface"
  albedo*=1-(band*_Geology.y+crevice*_Geology.z)*(1-saturate(n.y));
  // Material separation keeps lit cliff steps readable even without cast shadows.
  // Classify using the geometric normal, before micro-relief; leave ground/ramps alone.
- float cliffFace=(1-smoothstep(.25,.75,abs(n.y)))*max(saturate(a.x+a.y),step(.5,_BorderSurface)*(1-step(1.5,_BorderSurface)));
- albedo*=1-cliffFace*_CliffVariation.z;
+ float cliffFace=steepFace*max(saturate(a.x+a.y),step(.5,_BorderSurface)*(1-step(1.5,_BorderSurface)));
+ albedo*=1-max(cliffFace*_CliffVariation.z,plateauFace*_CliffVariation.w);
  float grain=dot(albedo,float3(.2126,.7152,.0722));
  float3 dx=ddx(v.p),dy=ddy(v.p),r1=cross(dy,n),r2=cross(n,dx);float det=dot(dx,r1);
  float3 slope=(r1*ddx(grain)+r2*ddy(grain))*sign(det)/max(abs(det),.00001);

@@ -23,7 +23,7 @@ namespace Spacewars.Tests.PlayMode
             Assert.AreNotEqual(GraphicsDeviceType.Null,SystemInfo.graphicsDeviceType);
             string output=Environment.GetEnvironmentVariable("SPACEWARS_MATERIAL_BATCH_OUTPUT");Assert.IsNotEmpty(output);Directory.CreateDirectory(output);
             var baseline=PlayableProfile.Create(Newtonsoft.Json.JsonConvert.DeserializeObject<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text),new AiTestMap());
-            var store=new NativeBalanceStore(baseline,Path.Combine(output,"isolated-native-balance.json"),false);store.Select(NativeBalanceStore.NewMatchProfileId,NativeBalanceStore.NewMatchProfileVersion);var profile=store.Active;
+            var store=new NativeBalanceStore(baseline,Path.Combine(output,"isolated-native-balance.json"),false);store.Select(NativeBalanceStore.CorridorExperimentId,NativeBalanceStore.CorridorExperimentVersion);var profile=store.Active;
             Assert.AreEqual(2,profile.Revision);
             var priorDetail=ModelDetailProfile.Current;ModelDetailProfile.UseSession(store.ActiveModelDetail);
             bool priorSrp=GraphicsSettings.useScriptableRenderPipelineBatching;

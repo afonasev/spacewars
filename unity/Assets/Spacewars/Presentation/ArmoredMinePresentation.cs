@@ -68,17 +68,23 @@ namespace Spacewars.Presentation
                 .Where(v=>v.Material.name.EndsWith("well-hot-emissive",StringComparison.Ordinal)).Select(v=>new HeatSurface{Renderer=v.Renderer,Slot=v.Slot}).ToArray();
             initialized=true;Sample(0,0,false,0);
         }
-        public void Drive(PlayableBuildingSnapshot building,long tick,int id,ActorMaterialProfile finish=null)
+        public void Drive(PlayableBuildingSnapshot building,long tick,int id,ActorMaterialProfile finish=null,bool depleted=false,double? animationSeconds=null)
         {
             Initialize();
             if(finish!=null&&emissionGain!=finish.emissionGain){emissionGain=finish.emissionGain;lastGlow=-1;}
             if(previousTick>tick){dust.Clear();ClearImpact();}
             float delta=previousTick<0?0:Mathf.Max(0,(tick-previousTick)/30f);previousTick=tick;
             bool working=building.Progress>=1&&building.Phase==ConstructionPhase.Ready&&building.PrivateState?.Lifecycle?.Selling!=true;
+            if(depleted)
+            {
+                dust.Clear();
+                Sample(tick/30f,id,false,0,depleted:true);
+                return;
+            }
             if(!working){dust.Clear();ClearImpact();return;}
-            Sample(tick/30f,id,true,delta);
+            Sample(animationSeconds.HasValue?(float)animationSeconds.Value:tick/30f,id,true,delta);
         }
-        public void Sample(float seconds,int id,bool working,float delta)
+        public void Sample(float seconds,int id,bool working,float delta,bool depleted=false)
         {
             Initialize();
             // Stable per-entity decorrelation; no random or simulation state is modified.
@@ -91,17 +97,17 @@ namespace Spacewars.Presentation
                 var a=bases[i].position;var b=tips[i].position;
                 Segment(barrels[i],a,Vector3.Lerp(a,b,.6f));Segment(rods[i],Vector3.Lerp(a,b,.45f),b);
             }
-            UpdateImpact(id,working);
+            UpdateImpact(id,working,depleted);
             var emission=dust.emission;emission.rateOverTime=working&&Phase>.20f&&Phase<.30f?Profile.dustRate:0;
             if(delta>0){if(dust.isStopped)dust.Play();dust.Simulate(delta,true,false,true);}
         }
-        void UpdateImpact(int id,bool working)
+        void UpdateImpact(int id,bool working,bool depleted)
         {
             // Positive quarter-cycle is the exact lowest point of the authored extraction stroke.
             float age=Mathf.Repeat(Phase-.25f,1)*Profile.cycleSeconds;
             float decay=working?1-Mathf.Clamp01(age/Profile.impactGlowDuration):0;
             float heat=Profile.impactGlowBoost>0?decay*decay:0;
-            SetGlow(1+Profile.impactGlowBoost*heat,heat);
+            SetGlow(depleted?Profile.depletedGlowRatio:1+Profile.impactGlowBoost*heat,heat);
             bool active=working&&Profile.sparkCount>0&&age<Profile.sparkLifetime;
             sparkRenderer.enabled=active;
             if(!active){if(lastSparkAge>=0)sparks.Clear();lastSparkAge=-1;return;}

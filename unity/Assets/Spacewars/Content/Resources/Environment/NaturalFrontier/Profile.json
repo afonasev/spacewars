@@ -55,6 +55,7 @@
   "orderMarkerRadius": 8,
   "orderMarkerWidth": 1.25,
   "orderMarkerFontSize": 11,
+  "orderInputPulseDuration": 0.18,
   "orderConfirmationDuration": 0.65,
   "orderConfirmationRadius": 16,
   "orderConfirmationTravel": 0.65,

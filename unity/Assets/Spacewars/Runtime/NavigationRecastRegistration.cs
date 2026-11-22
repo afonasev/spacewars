@@ -1,10 +1,118 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Spacewars.Simulation;
 namespace Spacewars.Runtime
 {
     internal sealed partial class NavigationHostRoot
     {
+        internal NavNameKey RegisterRecordedGroundRoute(NavigationRequest request, NavScheduledRequest prepared,
+            RecordedGroundRoute recording, string surfaceProviderId, IPlayableTerrain terrain,
+            INavStorageReservation reservation)
+        {
+            if (sealedRoot || faulted) throw new InvalidOperationException("Ground replay requires a writable host root.");
+            var expected = recording.Corridor;
+            NavigationHostRequest input = null;
+            NavigationHostProvider provider = null;
+            NavigationHostRow row = null, solvedRow = null, completed = null;
+            NavPagedList<NavTypedLeg> legs = null, spineLegs = null;
+            NavRecastSpine spine = null;
+            NavRecastMemberPlan plan = null;
+            NavTypedRoute route = null;
+            NavScheduledCompletion solved = null;
+            NavigationHostCorridor corridor = null;
+            NavigationHostAnswer answer = null;
+            try
+            {
+                input = NavigationHostRequest.CopyOwned(request, prepared.Provider.Binding, reservation);
+                provider = NavigationHostProvider.CopyOwned(prepared.Provider, input.Request.Geometry, surfaceProviderId,
+                    1, reservation, SharedPartition(prepared.Provider));
+                row = NavigationHostRow.CreateRegistered(input, provider, NextProviderIdentity, prepared,
+                    reservation, ReplayOnlyProjection);
+                var key = NavNameKey.Subscription(row.Scheduled.Subscription);
+                if (Requests.ContainsKey(key) || Rows.ContainsKey(key))
+                    throw new ArgumentException("Duplicate recorded ground route.");
+
+                legs = RestoreRecordedLegs(expected.Legs, provider.Provider, reservation);
+                if (recording.Recast is RecordedRecastPlan recast)
+                {
+                    var id = row.Scheduled.Subscription;
+                    spineLegs = RestoreRecordedLegs(recast.SpineLegs, provider.Provider, reservation);
+                    spine = NavRecastSpine.Create(id.WorldGeneration, id.GroupId, id.RootOrderRevision,
+                        id.CommandSequence, request.Profile.Radius, recast.Binding, recast.MapBinding,
+                        row.Scheduled.GraphKey, provider.Provider.Binding, row.Scheduled.Profile.ExactProfileBinding,
+                        request.HeldIdentity, request.Geometry.Revision, recast.FanCenter, recast.FanRadius,
+                        recast.FanNode, spineLegs, reservation);
+                    plan = NavRecastMemberPlan.Create(spine, recast.Join, recast.Exit, recast.OriginLegs,
+                        recast.TerminalLeg, row.Scheduled.GraphKey, row.Scheduled.Profile.ExactProfileBinding, reservation);
+                }
+                route = NavTypedRoute.CopySubscriptionAndCreateOwned(row.Scheduled.Subscription, legs,
+                    legs.Sum(leg => leg.Cost), reservation, plan);
+                corridor = NavigationHostCorridor.CreateOwned(input, provider, row.Scheduled, route, reservation);
+                if (corridor.Corridor.StableKey != expected.StableKey)
+                    throw new InvalidOperationException("Ground replay route diverged from its admitted request.");
+
+                using (NavStorageScratch.Reserve(reservation, checked(256L + 16L * recording.Points.Count)))
+                    answer = NavigationHostAnswer.CreateReady(input, corridor, recording.Points.ToArray(), reservation);
+                answer.QualifyBeforePublication(reservation, terrain);
+                if (answer.QualificationFailure != null && !recording.Failure.HasValue)
+                    throw new InvalidOperationException("Recorded route failed qualification: " + answer.QualificationFailure);
+                solved = new NavScheduledCompletion(row.Scheduled, NavSolveStatus.Ready, route, 0, 0, reservation.TryReserve);
+                solvedRow = row.WithSolved(solved, reservation);
+                completed = solvedRow.WithAnswer(answer, reservation);
+                AddProvider(provider, reservation);
+                Requests.Add(key, input);
+                Rows.Add(key, completed);
+                Scan.AddLast(key);
+                Completion.AddLast(key);
+                return key;
+            }
+            catch
+            {
+                faulted = true;
+                throw;
+            }
+            finally
+            {
+                completed?.ReleaseStorage();
+                solvedRow?.ReleaseStorage();
+                solved?.Release();
+                answer?.ReleaseStorage();
+                corridor?.ReleaseStorage();
+                route?.ReleaseStorage();
+                plan?.Release();
+                spine?.Release();
+                spineLegs?.Release();
+                legs?.Release();
+                row?.ReleaseStorage();
+                provider?.ReleaseStorage();
+                input?.ReleaseStorage();
+            }
+        }
+
+        private static NavPagedList<NavTypedLeg> RestoreRecordedLegs(IReadOnlyList<NavCorridorLeg> source,
+            ILayeredNavigationProvider provider, INavStorageReservation reservation)
+        {
+            var result = NavPagedList<NavTypedLeg>.Create(reservation.TryReserve);
+            try
+            {
+                foreach (var leg in source)
+                {
+                    var physical = NavTypedLeg.CreateOwned(leg.From, leg.To, leg.Cost, leg.Kind, leg.PortalId,
+                        reservation, provider);
+                    try { result.Add(physical); }
+                    finally { physical.ReleaseStorage(); }
+                }
+                result.Seal();
+                return result;
+            }
+            catch
+            {
+                result.Release();
+                throw;
+            }
+        }
+
         private static bool TraceRecastOwned(ILayeredNavigationProvider provider,NavLocation from,NavLocation target,NavClearanceProfile clearance,INavStorageReservation r,out NavLocation reached,out System.Collections.Generic.IReadOnlyList<NavTypedLeg> trace){
             reached=default;trace=null;if(provider is PartitionNavigationProvider partition)return partition.TryTraceOwned(from,target.Position,clearance,out reached,out trace,r)&&reached.Equals(target);
             if(!RecastLayerTrace.Try(provider,from,target,clearance,out trace,r))return false;reached=target;return true;

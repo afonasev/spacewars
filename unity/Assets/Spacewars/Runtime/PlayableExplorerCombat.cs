@@ -8,7 +8,6 @@ namespace Spacewars.Runtime
         {
             if(AirTarget(u.Target)){FireAirTracer(u,from,target);return;}
             var velocity=units.TryGetValue(u.Target,out var victim)?victim.Velocity:default(NavPoint);
-            RememberDefaultShot(u);Sound(PlayableSoundKind.Shot,from,u.Kind,u.Owner,unitId:u.Id);
             double dx=target.X-from.X,dz=target.Z-from.Z,speed=profile.ExplorerProjectileSpeed;
             double a=velocity.X*velocity.X+velocity.Z*velocity.Z-speed*speed,b=2*(dx*velocity.X+dz*velocity.Z),c=dx*dx+dz*dz,t=0;
             if(Math.Abs(a)<1e-9){if(Math.Abs(b)>1e-9)t=-c/b;}
@@ -22,10 +21,22 @@ namespace Spacewars.Runtime
             double angle=Math.Atan2(dz+velocity.Z*t,dx+velocity.X*t)+spread;
             double x=Math.Cos(angle),z=Math.Sin(angle),offset=profile.ExplorerMuzzleOffset;
             var predicted=new NavPoint(target.X+velocity.X*t,target.Z+velocity.Z*t);double slope=(GroundHeight(predicted)-GroundHeight(from))/Math.Max(1e-9,Distance(from,predicted));
+            double length=Distance(from,predicted);
+            double startHeight=GroundHeight(from)+DirectFireHeight;
+            double travel=profile.ExplorerRange*(1+profile.ProjectileExtraRangePercent/100);
+            double end=Math.Min(length,travel);
+            var muzzle=new NavPoint(from.X+x*offset,from.Z+z*offset);
+            var aimEnd=new NavPoint(from.X+x*end,from.Z+z*end);
+            double muzzleHeight=startHeight+slope*offset,aimHeight=startHeight+slope*end;
+            if(end>offset&&(!ProjectileClear(muzzle,aimEnd,muzzleHeight,aimHeight,0)||
+                !GroundShotBodyClear(u,muzzle,aimEnd,muzzleHeight,aimHeight,0,u.Target)))return;
+
+            RememberDefaultShot(u);Sound(PlayableSoundKind.Shot,from,u.Kind,u.Owner,unitId:u.Id);
             // Web burst projectiles are physical points (radius 0), not tracer-thickness collision capsules.
             projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Faction=u.Owner,Target=u.Target,Kind=u.Kind,
-                Position=new NavPoint(from.X+x*offset,from.Z+z*offset),Height=GroundHeight(from)+DirectFireHeight+slope*offset,VerticalSlope=slope,DirectionX=x,DirectionZ=z,Radius=0,Speed=speed,Damage=WeaponDamage(u.Owner,profile.ExplorerDamage),
-                Remaining=Math.Max(0,profile.ExplorerRange*(1+profile.ProjectileExtraRangePercent/100)-offset)});
+                DirectLaunchTick=Tick,DirectBarrel=(burst-u.BurstRemaining)%2,
+                Position=muzzle,Height=muzzleHeight,VerticalSlope=slope,DirectionX=x,DirectionZ=z,Radius=0,Speed=speed,Damage=WeaponDamage(u.Owner,profile.ExplorerDamage),
+                Remaining=Math.Max(0,travel-offset)});
         }
     }
 }

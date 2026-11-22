@@ -6,6 +6,8 @@ using Spacewars.Runtime;
 class Program{
 static int Main(string[] args){try{return Run(args);}catch(Exception error){Console.Error.WriteLine(error);return 1;}}
 static int Run(string[] args){
+if(args.Contains("--recast-binding-moved-origin")){FourSeatBindingReplay.RunMovedOrigin();return 0;}
+if(args.Contains("--four-seat-binding-replay")){FourSeatBindingReplay.Run();return 0;}
 if(args.Contains("--formation-actual-pocket-current")){TerminalDonorComponentChecks.RunActualPocketCurrent();return 0;}
 if(args.Contains("--formation-ingress-aim")){TerminalDonorComponentChecks.RunIngressAim();return 0;}
 if(args.Contains("--native-idle-current")){NativeIdleCurrentChecks.Run();return 0;}

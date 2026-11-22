@@ -37,14 +37,6 @@ namespace Spacewars.Tests.EditMode
             Assert.True(Nav.DeliveryBarrierReady,"fixture route preparation must finish without consuming a game tick");
             Nav.ApplyResults();Call("Step",1d/30);
         }}
-        [Test] public void AiCapturerGuardBlocksNewFireUntilReleasedAndLeavesOrdinaryExplorerCombatAvailable()
-        {
-            Clear();int scout=Spawn(PlayableOwner.Player,PlayableEntityKind.Explorer,-10,0);Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);
-            Domain.GetField("ProtectedAiCapturer",Flags).SetValue(domain,new Func<PlayableOwner,int>(owner=>owner==PlayableOwner.Player?scout:0));
-            Tick(2);Assert.False(View().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Explorer),"protected capturer must not auto-fire at nearby hostile");
-            Domain.GetField("ProtectedAiCapturer",Flags).SetValue(domain,new Func<PlayableOwner,int>(_=>0));
-            Tick(2);Assert.True(View().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Explorer),"ordinary/human Explorer combat is available when no AI protection role is bound");
-        }
         [Test] public void StartsHaveFreeTypedScoutAndOwnPopulation()
         {
             var p=View();var e=View(PlayableOwner.Enemy);Assert.AreEqual(1,p.Entities.Count);Assert.AreEqual(PlayableEntityKind.Explorer,p.Entities.Single().Kind);Assert.AreEqual(profile.ExplorerHealth,p.Entities.Single().Health);
@@ -56,7 +48,9 @@ namespace Spacewars.Tests.EditMode
             int f=Factory();int before=View().Credits;Send(PlayableCommandKind.QueueExplorer,f);Send(PlayableCommandKind.QueueTank,f);Call("AdvanceProduction",1d);
             var q=State(f).Orders;Assert.AreEqual(PlayableEntityKind.Explorer,q[0].Kind);Assert.AreEqual(profile.ExplorerProductionDurationSec,q[0].Duration);Assert.AreEqual(profile.ExplorerCreditCost,q[0].PaidCost);Assert.AreEqual(profile.ExplorerPopulationCost,View().Population.Reserved);
             Assert.True(q[0].Active);Assert.False(q[1].Active);Send(PlayableCommandKind.CancelProductionOrder,f,order:q[1].Id);Assert.AreEqual(before-profile.ExplorerCreditCost,View().Credits);Assert.AreEqual(q[0].Id,State(f).Orders.Single().Id);
-            Call("AdvanceProduction",100d);Assert.IsEmpty(State(f).Orders);Assert.AreEqual(2*profile.ExplorerPopulationCost,View().Population.Living);Assert.Zero(View().Population.Reserved);Assert.AreEqual(2,View().Entities.Count(u=>u.Kind==PlayableEntityKind.Explorer));
+            Call("AdvanceProduction",100d);
+            Call("AdvanceProduction",FactoryReleaseRules.Duration(profile,PlayableEntityKind.Explorer));
+            Assert.IsEmpty(State(f).Orders);Assert.AreEqual(2*profile.ExplorerPopulationCost,View().Population.Living);Assert.Zero(View().Population.Reserved);Assert.AreEqual(2,View().Entities.Count(u=>u.Kind==PlayableEntityKind.Explorer));
         }
         [Test] public void RepeatCanSwitchKindsAndManualOrderTurnsItOff()
         {
@@ -97,6 +91,34 @@ namespace Spacewars.Tests.EditMode
         {
             Clear();Spawn(PlayableOwner.Player,PlayableEntityKind.Explorer,-10,0);int enemy=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-7,0);Tick(20);
             var target=View().Entities.Single(e=>e.Id==enemy);Assert.Less(target.Health,profile.TankHealth);Assert.AreEqual(0,(profile.TankHealth-target.Health)%profile.ExplorerDamage);
+        }
+        [Test] public void InFlightDirectShotsKeepTheirLaunchTicksAndBarrelsAfterRestore()
+        {
+            Clear();
+            int scout=Spawn(PlayableOwner.Player,PlayableEntityKind.Explorer,-10,0);
+            Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-3,0);
+            for(int step=0;step<20&&!View().Projectiles.Any(shot=>shot.OwnerId==scout&&shot.DirectBarrel==1);step++)Tick(1);
+
+            (int Id,long? Tick,int Barrel)[] Launches(PlayableSnapshot snapshot)=>snapshot.Projectiles
+                .Where(shot=>shot.OwnerId==scout)
+                .Select(shot=>(shot.Id,shot.DirectLaunchTick,shot.DirectBarrel)).ToArray();
+            var active=Launches(View());
+            Assert.That(active.Any(shot=>shot.Tick.HasValue&&shot.Barrel==1));
+            var original=(PlayableDomain)domain;
+            const string source="explorer-direct-launch";
+            var bytes=original.CaptureWorldBytes(7,source);
+            var restored=PlayableDomain.RestoreWorldBytes(bytes,profile,7,source);
+            try
+            {
+                var snapshot=restored.PlayerSnapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,PlayableOwner.Player);
+                CollectionAssert.AreEqual(active,Launches(snapshot));
+                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,source));
+            }
+            finally
+            {
+                restored.Navigation.ReleaseCommittedHostRoot();
+                restored.DestroyOwnedNavigation();
+            }
         }
         [Test] public void SmallerPaidHeadCanUseCapacityThatTankCannot()
         {

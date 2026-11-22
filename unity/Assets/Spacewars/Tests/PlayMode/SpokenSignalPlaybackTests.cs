@@ -22,15 +22,65 @@ namespace Spacewars.Tests.PlayMode
                 var pcm=new float[clip.samples];Assert.True(clip.GetData(pcm,0),key);
                 Assert.Greater(pcm.Count(v=>Math.Abs(v)>.005),100,key);Assert.Less(pcm.Max(v=>Math.Abs(v)),.75,key);
             }
-            Assert.AreEqual(22,SpokenSignalCatalog.Phrases.Count);
+            Assert.AreEqual(29,SpokenSignalCatalog.Phrases.Count);
+            CollectionAssert.IsSubsetOf(new[]{"system-relay-captured","system-domination","system-domination-lost",
+                "system-domination-ninety","system-domination-ten"},SpokenSignalCatalog.Phrases.Keys);
+            var timer=Resources.Load<AudioClip>("Sfx/Hybrid/domination-tick");
+            Assert.NotNull(timer);
+            Assert.That(timer.length,Is.InRange(0.08f,0.25f));
         }
+        [Test] public void AiFarewellClipsLoadAndKeepTheArmyThreshold()
+        {
+            Assert.AreEqual(17,AiDefeatLines.All.Count);
+            string[] Eligible(int population,int opponents=1,bool headquarters=true)=>
+                AiDefeatLines.Eligible(new Spacewars.Runtime.AiDefeat(1,1,population,opponents,headquarters))
+                    .Select(line=>line.Key).ToArray();
+            CollectionAssert.DoesNotContain(Eligible(10),"defeat-army");
+            CollectionAssert.Contains(Eligible(11),"defeat-army");
+            CollectionAssert.Contains(Eligible(11),"defeat-lucky-one");
+            CollectionAssert.DoesNotContain(Eligible(11),"defeat-lucky-many");
+            CollectionAssert.Contains(Eligible(11,2),"defeat-lucky-many");
+            CollectionAssert.DoesNotContain(Eligible(11,2,false),"defeat-backup-plan");
+            foreach(var line in AiDefeatLines.All)
+            {
+                var clip=Resources.Load<AudioClip>("Sfx/Voice/"+line.Key);
+                Assert.NotNull(clip,line.Key);
+                Assert.AreEqual(1,clip.channels,line.Key);
+                Assert.AreEqual(48000,clip.frequency,line.Key);
+                Assert.That(clip.length,Is.InRange(.2f,4f),line.Key);
+                Assert.True(clip.LoadAudioData(),line.Key);
+                var pcm=new float[clip.samples];
+                Assert.True(clip.GetData(pcm,0),line.Key);
+                Assert.Greater(pcm.Count(v=>Math.Abs(v)>.005),100,line.Key);
+                Assert.Less(pcm.Max(v=>Math.Abs(v)),.75,line.Key);
+            }
+        }
+
+        [Test] public void AllTenAiGreetingClipsLoadAndDecode()
+        {
+            Assert.AreEqual(10,AiGreetingLines.All.Count);
+            foreach(var line in AiGreetingLines.All)
+            {
+                var clip=Resources.Load<AudioClip>("Sfx/Voice/"+line.Key);
+                Assert.NotNull(clip,line.Key);
+                Assert.AreEqual(1,clip.channels,line.Key);
+                Assert.AreEqual(48000,clip.frequency,line.Key);
+                Assert.That(clip.length,Is.InRange(.2f,5f),line.Key);
+                Assert.True(clip.LoadAudioData(),line.Key);
+                var pcm=new float[clip.samples];
+                Assert.True(clip.GetData(pcm,0),line.Key);
+                Assert.Greater(pcm.Count(v=>Math.Abs(v)>.005),100,line.Key);
+                Assert.Less(pcm.Max(v=>Math.Abs(v)),.75,line.Key);
+            }
+        }
+
         [Test] public void SilentStartupNeverCreatesVoiceOutputOrReplaysDiscardedFacts()
         {
             var host=new GameObject("Silent speech verification");
             try
             {
                 var player=host.AddComponent<SpokenSignalPlayer>();player.Initialize(new GameplayAudioProfile());
-                if(NativeSilentStartup.IsSilent)Assert.IsEmpty(host.GetComponents<AudioSource>());
+                if(NativeSilentStartup.IsSilent)Assert.IsEmpty(host.GetComponentsInChildren<AudioSource>(true));
                 player.Tick(Array.Empty<GameplayAudioScreen>(),false,0);Assert.AreEqual(0,player.Played);Assert.Zero(player.OutputGain);
             }finally{UnityEngine.Object.DestroyImmediate(host);}
         }
@@ -48,7 +98,7 @@ namespace Spacewars.Tests.PlayMode
                 var speech=host.AddComponent<SpokenSignalPlayer>();speech.InitializeMutedForTests(new GameplayAudioProfile());
                 speech.Tick(Screens(0),true,0);
                 speech.Tick(Screens(1,new PlayableMatchEvent(1,1,PlayableOwner.Player,MatchEventKind.UnitCaptured,default)),true,1);
-                var source=host.GetComponent<AudioSource>();Assert.NotNull(source,"diagnostic source");Assert.NotNull(source.clip,"selected="+speech.LastKey+" played="+speech.Played+" pending="+speech.Plan.Pending+" enabled="+NativeAudioSettings.VoiceEnabled+" gain="+NativeAudioSettings.Voice);Assert.True(source.mute);Assert.Zero(source.volume);Assert.AreEqual("system-unit-captured",source.clip.name);Assert.AreEqual(1,speech.Played);
+                var source=host.GetComponentInChildren<AudioSource>(true);Assert.NotNull(source,"diagnostic source");Assert.NotNull(source.clip,"selected="+speech.LastKey+" played="+speech.Played+" pending="+speech.Plan.Pending+" enabled="+NativeAudioSettings.VoiceEnabled+" gain="+NativeAudioSettings.Voice);Assert.True(source.mute);Assert.Zero(source.volume);Assert.AreEqual("system-unit-captured",source.clip.name);Assert.AreEqual(1,speech.Played);
                 double afterFirst=1+source.clip.length+.01;source.Stop();
                 speech.Tick(Screens(2,new PlayableMatchEvent(2,2,PlayableOwner.Player,MatchEventKind.MineHit,default,99),new PlayableMatchEvent(3,2,PlayableOwner.Enemy,MatchEventKind.MineTriggered,default,99)),true,afterFirst);
                 Assert.AreEqual("system-mine-hit",speech.LastKey);Assert.AreEqual(2,speech.Played);Assert.Zero(speech.Plan.Pending);
@@ -62,6 +112,28 @@ namespace Spacewars.Tests.PlayMode
                 speech.Tick(new[]{overview},true,11.1);Assert.False(speech.Busy);Assert.Null(source.clip,"Overview immediately stops the previous perspective's clip");Assert.Zero(speech.Plan.Pending);
                 speech.Tick(new[]{new GameplayAudioScreen(View(12,PlayableOwner.Enemy,new PlayableMatchEvent(6,12,PlayableOwner.Enemy,MatchEventKind.UnitCaptured,default)),default,new NavPoint(1,0))},true,12);
                 Assert.False(speech.Busy);Assert.Zero(speech.Plan.Pending,"Retained events of a newly selected perspective are baselined, not replayed");
+                speech.PlayFarewell("defeat-worthy",13);
+                Assert.AreEqual("defeat-worthy",source.clip.name);
+                speech.Tick(Array.Empty<GameplayAudioScreen>(),false,13.1);
+                Assert.True(speech.FarewellPlaying(13.1),"The inactive match must not stop its farewell");
+                Assert.True(source.mute);
+                double done=13+source.clip.length+.01;
+                speech.Tick(Array.Empty<GameplayAudioScreen>(),false,done);
+                Assert.False(speech.FarewellPlaying(done));
+                Assert.IsNull(source.clip);
+                double greetingAt=done+1;
+                speech.PlayGreeting("greeting-good-luck",greetingAt);
+                Assert.AreEqual("greeting-good-luck",source.clip.name);
+                int played=speech.Played;
+                speech.PlayGreeting("greeting-heated",greetingAt+.1);
+                Assert.AreEqual(played,speech.Played,"A greeting cannot interrupt another clip");
+                speech.Tick(Screens(13),true,greetingAt+.2);
+                Assert.AreEqual("greeting-good-luck",source.clip.name);
+                Assert.True(source.mute);
+                double secondAt=greetingAt+source.clip.length+AiGreetingLines.GapSeconds;
+                speech.PlayGreeting("greeting-heated",secondAt);
+                Assert.AreEqual("greeting-heated",source.clip.name);
+                Assert.AreEqual(played+1,speech.Played);
                 yield return null;
             }
             finally

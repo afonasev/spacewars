@@ -99,6 +99,197 @@ public sealed class NativeDesignLabTests
             var cancel=root.Q<Button>("lab-confirm-cancel");Assert.LessOrEqual(cancel.worldBound.yMax,size.y);nav.ActivateElement(cancel);Assert.AreEqual(1,store.SelectedVersion);Assert.True(view.Page.Q<Button>("lab-save").enabledSelf);nav.ActivateElement(view.Page.Q<Button>("lab-reset"));nav.ActivateElement(root.Q<Button>("lab-confirm-accept"));Assert.AreNotEqual(NativeBalanceStore.DefaultId,store.SelectedId);Assert.AreEqual(baseline.TankHealth,store.Active.TankHealth);Assert.AreEqual(2,store.Profiles.Count,"Discard preserves the experiment");nav.Back();Assert.IsNull(root.Q("laboratory-screen"));
         }}finally{nav.Dispose();panel.targetTexture=null;target.Release();UnityEngine.Object.DestroyImmediate(target);UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);}
     }
+    [UnityTest] public IEnumerator LabTreeShowsSkatAndRocketLauncherArtwork()
+    {
+        var host=new GameObject("lab artwork");
+        var panel=ScriptableObject.CreateInstance<PanelSettings>();
+        panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");
+        var target=new RenderTexture(1280,800,0);
+        target.Create();
+        panel.targetTexture=target;
+        var document=host.AddComponent<UIDocument>();
+        document.panelSettings=panel;
+        var root=document.rootVisualElement;
+        var nav=new NativeMenuNavigation(root);
+        try
+        {
+            OrbitalTheme.ConfigurePanel(panel,root);
+            var view=new NativeBalanceView(root,nav,Dev(),()=>{});
+            Assert.AreEqual("lab-object-Цербер",view.Page.Q("lab-children-Юниты").Children().Last().name);
+            var row=view.Page.Q<Button>("lab-object-Скат");
+            Assert.NotNull(row);
+            nav.ActivateElement(row);
+            row=view.Page.Q<Button>("lab-object-Скат");
+            row.GetFirstAncestorOfType<ScrollView>().ScrollTo(row);
+            for(int frame=0;frame<5;frame++)yield return null;
+            var icon=row.Q<OrbitalGlyph>();
+            var expected=Resources.Load<Texture2D>("DockPortraits/skat");
+            Assert.NotNull(expected);
+            Assert.NotNull(icon);
+            Assert.AreEqual("skat",icon.Kind);
+            Assert.AreSame(expected,icon.Q<Image>("glyph-portrait").image);
+            Assert.NotNull(icon.Q<Image>("portrait-outline").image);
+            Capture(target,"skat-lab-icon");
+
+            nav.ActivateElement(view.Page.Q<Button>("lab-object-Исследователь"));
+            var link=view.Page.Q<Button>("lab-research-link-Ракетная-установка");
+            Assert.AreEqual(3,link.Q<PortraitUpgradeMark>().ChevronCount);
+            nav.ActivateElement(link);
+            var rocket=view.Page.Q<Button>("lab-object-Ракетная-установка");
+            var assault=view.Page.Q<Button>("lab-object-Штурмовые-орудия");
+            foreach(var name in new[]{"Улучшенное-шасси","Штурмовые-орудия","Улучшенное-наведение","Залповый-огонь"})
+            {
+                var upgrade=view.Page.Q<Button>("lab-object-"+name);
+                var mark=upgrade.Q<PortraitUpgradeMark>();
+                Assert.NotNull(upgrade.Q<RadialArtwork>(),name);
+                Assert.NotNull(mark,name);
+                Assert.AreEqual(2,mark.ChevronCount,name);
+                Assert.AreEqual(DisplayStyle.Flex,mark.style.display.value,name);
+            }
+            Assert.NotNull(rocket);
+            Assert.AreEqual(assault.parent.IndexOf(assault)+1,rocket.parent.IndexOf(rocket),"Rocket launcher follows assault guns directly");
+            Assert.AreEqual(3,rocket.Q<PortraitUpgradeMark>().ChevronCount);
+            Assert.AreNotSame(assault.Q<ModelPortrait>().Texture,rocket.Q<ModelPortrait>().Texture);
+            for(int frame=0;frame<5;frame++)yield return null;
+            var tree=view.Page.Q<ScrollView>("lab-tree");
+            tree.ScrollTo(rocket);
+            yield return null;
+            Assert.That(rocket.worldBound.yMax,Is.LessThanOrEqualTo(tree.worldBound.yMax+.5f));
+            var rocketMark=rocket.Q<PortraitUpgradeMark>();
+            var weaponRank=view.Page.Q<Button>("lab-object-Оружейные-системы").Q<Label>("research-level");
+            var armorRank=view.Page.Q<Button>("lab-object-Защитные-системы").Q<Label>("research-level");
+            Assert.That(rocketMark.resolvedStyle.width,Is.GreaterThan(0));
+            foreach(var rank in new[]{weaponRank,armorRank})
+            {
+                Assert.AreEqual(rank.style.width.value,rocketMark.style.width.value);
+                Assert.AreEqual(rank.style.height.value,rocketMark.style.height.value);
+                // UI Toolkit rounds the two rows at their own pixel positions.
+                Assert.That(rocketMark.resolvedStyle.width,Is.EqualTo(rank.resolvedStyle.width).Within(1f));
+                Assert.That(rocketMark.resolvedStyle.height,Is.EqualTo(rank.resolvedStyle.height).Within(1f));
+            }
+            Capture(target,"rocket-launcher-lab");
+            tree.ScrollTo(assault);
+            for(int frame=0;frame<5;frame++)yield return null;
+            Capture(target,"unit-upgrade-chevrons-lab");
+            nav.ActivateElement(view.Page.Q<Button>("lab-section-Юниты"));
+            nav.ActivateElement(view.Page.Q<Button>("lab-object-Исследователь"));
+            var assaultLink=view.Page.Q<Button>("lab-research-link-Штурмовые-орудия");
+            Assert.AreEqual(DisplayStyle.Flex,assaultLink.Q<PortraitUpgradeMark>().style.display.value);
+            Assert.AreEqual(2,assaultLink.Q<PortraitUpgradeMark>().ChevronCount);
+        }
+        finally
+        {
+            nav.Dispose();
+            panel.targetTexture=null;
+            target.Release();
+            UnityEngine.Object.DestroyImmediate(target);
+            UnityEngine.Object.DestroyImmediate(host);
+            UnityEngine.Object.DestroyImmediate(panel);
+        }
+    }
+    [Test] public void NewUnitLabRevisionPreservesTheEffectiveBalanceAndLegacyInheritance()
+    {
+        var store=Dev();
+        store.Select(NativeBalanceStore.DefaultId,19);
+        var previous=store.Active.CopyData();
+        var ai=store.ActiveAiProfile;
+        store.ResetRelease();
+        Assert.AreEqual(20,store.Active.Revision);
+        Assert.AreEqual(20,store.ActiveAiProfile.Revision);
+        var current=store.Active.CopyData();
+        current.revision=previous.revision;
+        Assert.True(JToken.DeepEquals(JObject.Parse(JsonUtility.ToJson(previous)),JObject.Parse(JsonUtility.ToJson(current))));
+        foreach(var field in ai.CopyData().fields)
+            Assert.AreEqual(field.value,store.ActiveAiProfile.Value(field.path),field.path);
+
+        var units=PlayableProfileMetadata.Fields.Where(field=>field.Path.StartsWith("igla.")||
+            field.Path.StartsWith("cerberus.")||field.Path.StartsWith("skat.")).ToArray();
+        Assert.AreEqual(37,units.Length);
+        Assert.True(units.All(NativeBalanceFields.LabEditable));
+        foreach(var field in units)Assert.NotNull(store.SelectedRow["data"][field.FieldName],field.Path);
+
+        store.Select(19);
+        var legacy=store.SelectedRow.DeepClone();
+        legacy["data"]["tankVisionRange"]=17;
+        legacy["data"]["hawkVision"]=21;
+        legacy["data"]["hawkYawSpeed"]=6;
+        legacy["data"]["hawkYawAcceleration"]=13;
+        legacy["data"]["hawkAcceleration"]=9;
+        legacy["data"]["hawkBraking"]=14;
+        var inherited=store.Compile(legacy).CopyData();
+        Assert.AreEqual(17,inherited.cerberusVision);
+        Assert.AreEqual(21,inherited.skatVision);
+        Assert.AreEqual(6,inherited.skatYawSpeed);
+        Assert.AreEqual(13,inherited.skatYawAcceleration);
+        Assert.AreEqual(9,inherited.skatAcceleration);
+        Assert.AreEqual(14,inherited.skatBraking);
+        Assert.IsNull(legacy["data"]["skatVision"]);
+    }
+
+    [UnityTest] public IEnumerator NewUnitLabFieldsUseCommonOrderAndSaveAnIndependentEdit()
+    {
+        var host=new GameObject("New unit Lab");
+        var panel=ScriptableObject.CreateInstance<PanelSettings>();
+        panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");
+        panel.clearColor=true;
+        panel.colorClearValue=OrbitalTheme.Background;
+        var target=new RenderTexture(1280,900,24);
+        var document=host.AddComponent<UIDocument>();
+        panel.targetTexture=target;
+        document.panelSettings=panel;
+        var root=document.rootVisualElement;
+        var nav=new NativeMenuNavigation(root);
+        try
+        {
+            OrbitalTheme.ConfigurePanel(panel,root);
+            var store=Dev();
+            store.ResetRelease();
+            var view=new NativeBalanceView(root,nav,store,()=>{});
+            var units=new[]{("Игла","igla","Duration","Population","HullTurn"),("Скат","skat","ProductionSeconds","PopulationCost","YawSpeed"),("Цербер","cerberus","Duration","Population","Turn")};
+            var labels=new[]{"Здоровье","Радиус обзора","Цена производства","Время производства",
+                "Место в армии","Максимальная скорость","Скорость поворота корпуса"};
+            foreach(var (name,prefix,duration,population,turn) in units)
+            {
+                nav.ActivateElement(view.Page.Q<Button>("lab-object-"+name));
+                var controls=view.Page.Query<TextField>().ToList().Where(field=>field.name.StartsWith("lab-field-"+prefix)).ToArray();
+                CollectionAssert.AreEqual(labels,controls.Take(7).Select(field=>field.label));
+                Assert.AreEqual("lab-field-"+prefix+duration,controls[3].name);
+                Assert.AreEqual("мест",controls[4].parent.Q<Label>(className:"lab-unit").text);
+                Assert.AreEqual("lab-field-"+prefix+population,controls[4].name);
+                Assert.AreEqual("°/с",controls[6].parent.Q<Label>(className:"lab-unit").text);
+                Assert.AreEqual("lab-field-"+prefix+turn,controls[6].name);
+                StringAssert.Contains("°/с",controls[6].tooltip);
+                var search=view.Page.Q<TextField>("lab-search");
+                search.value=PlayableProfileMetadata.Fields.Single(f=>"lab-field-"+f.FieldName==controls[6].name).Path;
+                Assert.NotNull(view.Page.Q<TextField>(controls[6].name));
+                search.value="";
+                for(int i=0;i<3;i++)yield return null;
+                Capture(target,"lab-"+prefix);
+            }
+            nav.ActivateElement(view.Page.Q<Button>("lab-object-Скат"));
+            double old=store.Active.SkatYawSpeed;
+            double hawk=store.Active.HawkYawSpeed;
+            var yaw=view.Page.Q<TextField>("lab-field-skatYawSpeed");
+            ((Action<int>)yaw.userData)(1);
+            nav.ActivateElement(view.Page.Q<Button>("lab-section-Изменения"));
+            Assert.NotNull(view.Page.Q<Label>("lab-before-skatYawSpeed"));
+            nav.ActivateElement(view.Page.Q<Button>("lab-save"));
+            var reloaded=Dev();
+            Assert.AreEqual(old+.1,reloaded.Active.SkatYawSpeed,.000001);
+            Assert.AreEqual(hawk,reloaded.Active.HawkYawSpeed);
+            Assert.AreEqual(reloaded.Active.Revision,reloaded.ActiveAiProfile.Revision);
+        }
+        finally
+        {
+            nav.Dispose();
+            panel.targetTexture=null;
+            target.Release();
+            UnityEngine.Object.DestroyImmediate(target);
+            UnityEngine.Object.DestroyImmediate(host);
+            UnityEngine.Object.DestroyImmediate(panel);
+        }
+    }
+
     private static void Capture(RenderTexture target,string name)
     {
         string directory=Environment.GetEnvironmentVariable("SPACEWARS_LAB_EVIDENCE");if(string.IsNullOrEmpty(directory))return;Directory.CreateDirectory(directory);

@@ -32,11 +32,11 @@ namespace Spacewars.Runtime
         }
         private sealed class TacticalBehavior
         {
-            internal DefaultCombatState Default;internal DefaultCombatPhase DefaultPhase;internal NavPoint DefaultAnchor;internal double DefaultDeadline;internal int DefaultEngaged;internal bool DefaultReturnRequested;
+            internal DefaultCombatState Default;internal DefaultCombatPhase DefaultPhase;internal NavPoint DefaultAnchor,DefaultWithdrawalGoal;internal double DefaultDeadline;internal int DefaultEngaged;internal bool DefaultMovementRequested;
             internal PlayableTacticalOrderSnapshot Order; internal int Target; internal bool Explicit,AttackMove,WreckWaiting;
             internal NavPoint Anchor; internal double Repath,Stopped,Reload;internal int BurstRemaining,BurstTarget,BurstSequence,BurstSize;internal double BurstSpread,BurstDelay;
-            internal static TacticalBehavior Capture(Unit u)=>new TacticalBehavior{Default=u.DefaultCombat,DefaultPhase=u.DefaultCombat?.Phase??DefaultCombatPhase.Idle,DefaultAnchor=u.DefaultCombat?.Anchor??default,DefaultDeadline=u.DefaultCombat?.Deadline??0,DefaultEngaged=u.DefaultCombat?.Engaged??0,DefaultReturnRequested=u.DefaultCombat?.ReturnRequested??false,WreckWaiting=u.WreckWaiting,Order=u.CurrentOrder,Target=u.Target,Explicit=u.ExplicitTarget,AttackMove=u.HasAttackMove,Anchor=u.AttackMove,Repath=u.Repath,Stopped=u.StoppedSeconds,Reload=u.Reload,BurstRemaining=u.BurstRemaining,BurstTarget=u.BurstTarget,BurstSequence=u.BurstSequence,BurstSize=u.BurstSize,BurstSpread=u.BurstSpread,BurstDelay=u.BurstDelay};
-            internal void Install(Unit u){u.DefaultCombat=Default;if(Default!=null){Default.Phase=DefaultPhase;Default.Anchor=DefaultAnchor;Default.Deadline=DefaultDeadline;Default.Engaged=DefaultEngaged;Default.ReturnRequested=DefaultReturnRequested;}u.WreckWaiting=WreckWaiting;u.CurrentOrder=Order;u.Target=Target;u.ExplicitTarget=Explicit;u.HasAttackMove=AttackMove;u.AttackMove=Anchor;u.Repath=Repath;u.StoppedSeconds=Stopped;u.Reload=Reload;u.BurstRemaining=BurstRemaining;u.BurstTarget=BurstTarget;u.BurstSequence=BurstSequence;u.BurstSize=BurstSize;u.BurstSpread=BurstSpread;u.BurstDelay=BurstDelay;}
+            internal static TacticalBehavior Capture(Unit u)=>new TacticalBehavior{Default=u.DefaultCombat,DefaultPhase=u.DefaultCombat?.Phase??DefaultCombatPhase.Idle,DefaultAnchor=u.DefaultCombat?.Anchor??default,DefaultWithdrawalGoal=u.DefaultCombat?.WithdrawalGoal??default,DefaultDeadline=u.DefaultCombat?.Deadline??0,DefaultEngaged=u.DefaultCombat?.Engaged??0,DefaultMovementRequested=u.DefaultCombat?.MovementRequested??false,WreckWaiting=u.WreckWaiting,Order=u.CurrentOrder,Target=u.Target,Explicit=u.ExplicitTarget,AttackMove=u.HasAttackMove,Anchor=u.AttackMove,Repath=u.Repath,Stopped=u.StoppedSeconds,Reload=u.Reload,BurstRemaining=u.BurstRemaining,BurstTarget=u.BurstTarget,BurstSequence=u.BurstSequence,BurstSize=u.BurstSize,BurstSpread=u.BurstSpread,BurstDelay=u.BurstDelay};
+            internal void Install(Unit u){u.DefaultCombat=Default;if(Default!=null){Default.Phase=DefaultPhase;Default.Anchor=DefaultAnchor;Default.WithdrawalGoal=DefaultWithdrawalGoal;Default.Deadline=DefaultDeadline;Default.Engaged=DefaultEngaged;Default.MovementRequested=DefaultMovementRequested;}u.WreckWaiting=WreckWaiting;u.CurrentOrder=Order;u.Target=Target;u.ExplicitTarget=Explicit;u.HasAttackMove=AttackMove;u.AttackMove=Anchor;u.Repath=Repath;u.StoppedSeconds=Stopped;u.Reload=Reload;u.BurstRemaining=BurstRemaining;u.BurstTarget=BurstTarget;u.BurstSequence=BurstSequence;u.BurstSize=BurstSize;u.BurstSpread=BurstSpread;u.BurstDelay=BurstDelay;}
         }
         // Persistent domain metadata carries values, never borrowed physical name edges.
         // Call only after the owning navigation/source path has accepted the location.
@@ -115,7 +115,7 @@ namespace Spacewars.Runtime
         {
             // Each loop consumes at least one dead-target element. No routing/reservation work for a deferred tail.
             while(true){
-                var eligible=tacticalQueues.Where(x=>units.ContainsKey(x.Key)&&x.Value.Active==null&&x.Value.Pending==null&&x.Value.Deferred.Count>0&&
+                var eligible=tacticalQueues.Where(x=>units.TryGetValue(x.Key,out var unit)&&!Frozen(unit)&&x.Value.Active==null&&x.Value.Pending==null&&x.Value.Deferred.Count>0&&
                     !navigation.IsPending(x.Key)&&(!TryActor(x.Key,out var n)||!n.Moving)&&units[x.Key].CurrentOrder==null).OrderBy(x=>x.Key).ToArray();
                 if(eligible.Length==0)return;bool skipped=false;
                 foreach(var cohort in eligible.GroupBy(x=>x.Value.Deferred[0].Id)){
@@ -130,7 +130,7 @@ namespace Spacewars.Runtime
             }
         }
         private static PlayableCommand RecipientCommand(PlayableCommand c,int[] ids)
-        {var copy=new PlayableCommand(c.Generation,c.Sequence,c.PlayerId,c.Kind,ids,c.Target,targetId:c.TargetId,origin:c.Origin,source:c.Source,jobId:c.JobId,actionId:c.ActionId);return c.TargetLocation.HasValue?copy.WithResolvedLocation(c.TargetLocation.Value):copy;}
+        {var copy=new PlayableCommand(c.Generation,c.Sequence,c.PlayerId,c.Kind,ids,c.Target,siteId:c.SiteId,targetId:c.TargetId,origin:c.Origin,source:c.Source,jobId:c.JobId,actionId:c.ActionId);return c.TargetLocation.HasValue?copy.WithResolvedLocation(c.TargetLocation.Value):copy;}
         private void InstallActivatedExecution(Unit u,QueueExecution e)
         {
             InstallExecution(u,e);
@@ -141,17 +141,47 @@ namespace Spacewars.Runtime
         private void ActivateTacticalRoute(NavigationRequest r)
         {
             if(!tacticalQueues.TryGetValue(r.Entity,out var q))return;var e=Matches(q.Active,r)?q.Active:Matches(q.Pending,r)?q.Pending:null;if(e==null)return;
-            if(e.Interrupted){e.OverrideLocation=DomainLocation(r.GoalLocation);e.AttemptLocation=DomainLocation(r.GoalLocation);e.AttemptRequest=r.Request;e.AttemptOrder=r.Order;if(ReferenceEquals(e,q.Pending)){q.Pending.Failed=true;q.Active=null;units[r.Entity].CurrentOrder=null;units[r.Entity].HasAttackMove=false;units[r.Entity].Target=0;}return;}
+            if(e.Interrupted)
+            {
+                e.OverrideLocation=DomainLocation(r.GoalLocation);e.AttemptLocation=e.OverrideLocation;
+                e.AttemptRequest=r.Request;e.AttemptOrder=r.Order;
+                if(ReferenceEquals(e,q.Pending)){q.Pending.Failed=true;q.Active=null;units[r.Entity].CurrentOrder=null;units[r.Entity].HasAttackMove=false;units[r.Entity].Target=0;}
+                // A replacement route can finish while combat has paused the active head.
+                else if(e.Suspended)navigation.Crowd.Suspend(r.Entity);
+                return;
+            }
             if(e.Issuance.Command.Kind==PlayableCommandKind.Attack&&ReferenceEquals(e,q.Active)){e.AttemptLocation=DomainLocation(r.GoalLocation);e.RouteRequest=r.Request;e.RouteOrder=r.Order;InstallActivatedExecution(units[r.Entity],e);return;}
+            if(ReferenceEquals(e,q.Active)&&e.Issuance.Command.Kind==PlayableCommandKind.AttackMove&&
+                e.AttemptRequest==r.Request&&e.AttemptOrder==r.Order&&e.AttemptLocation.Equals(r.GoalLocation))
+            {
+                e.RouteRequest=r.Request;e.RouteOrder=r.Order;
+                if(e.Suspended)navigation.Crowd.Suspend(r.Entity);
+                return;
+            }
             if(!e.Assigned.Equals(r.GoalLocation))return;
             e.Failed=false;if(e.ActivationTick<0)e.ActivationTick=Tick;e.AttemptLocation=DomainLocation(r.GoalLocation);e.RouteRequest=r.Request;e.RouteOrder=r.Order;q.Active=e;q.Pending=null;q.OldMotionSuspended=false;InstallActivatedExecution(units[r.Entity],e);
         }
         private void ObserveTacticalRequest(NavigationRequest r,bool combat=false)
         {
             if(!tacticalQueues.TryGetValue(r.Entity,out var q))return;var e=Matches(q.Active,r)?q.Active:Matches(q.Pending,r)?q.Pending:null;if(e==null)return;
-            bool sameAttackChase=e.Issuance.Command.Kind==PlayableCommandKind.Attack&&e.AttemptLocation.HasValue&&e.AttemptLocation.Value.Equals(r.GoalLocation);
+            bool sameEndpoint=e.AttemptLocation.HasValue&&e.AttemptLocation.Value.Equals(r.GoalLocation);
+            bool sameAttackChase=e.Issuance.Command.Kind==PlayableCommandKind.Attack&&sameEndpoint;
+            bool sameAttackMoveLeg=ReferenceEquals(e,q.Active)&&e.Issuance.Command.Kind==PlayableCommandKind.AttackMove&&
+                !e.Interrupted&&sameEndpoint;
             e.TerminalFailure=null;e.AttemptRequest=r.Request;e.AttemptOrder=r.Order;e.AttemptLocation=DomainLocation(r.GoalLocation);e.Failed=false;
             if(e.Issuance.Command.Kind==PlayableCommandKind.Attack&&(combat||combatRequestScope||sameAttackChase))return;
+            if(e.Issuance.Command.Kind==PlayableCommandKind.AttackMove&&e.Assigned.Equals(r.GoalLocation))
+            {
+                // Rebinding the original endpoint ends a temporary override.
+                e.Interrupted=false;e.OverrideLocation=null;
+            }
+            if(ReferenceEquals(e,q.Active)&&e.Issuance.Command.Kind==PlayableCommandKind.AttackMove&&(combat||combatRequestScope))
+            {
+                e.Interrupted=false;e.OverrideLocation=null;e.Arrived=false;e.Suspended=false;return;
+            }
+            // A geometry reissue of a live combat leg still belongs to the
+            // AttackMove. Its installed route must update that active execution.
+            if(sameAttackMoveLeg)return;
             if(!e.Assigned.Equals(r.GoalLocation)){e.Interrupted=true;e.Arrived=false;e.Suspended=false;e.OverrideLocation=DomainLocation(r.GoalLocation);}
         }
         private static bool Matches(QueueExecution e,NavigationRequest r)=>e!=null&&r.MemberIdentity!=null&&r.MemberIdentity.GroupId==e.Issuance.GroupId&&r.MemberIdentity.OrderRevision==e.Stamp.Revision&&r.MemberIdentity.Incarnation==e.Incarnation;
@@ -164,7 +194,7 @@ namespace Spacewars.Runtime
         {
             if(!tacticalQueues.TryGetValue(r.Entity,out var q))return;var e=Matches(q.Pending,r)?q.Pending:Matches(q.Active,r)?q.Active:null;if(e==null)return;
             e.AttemptRequest=r.Request;e.AttemptOrder=r.Order;e.AttemptLocation=DomainLocation(r.GoalLocation);e.TerminalFailure=new TerminalRouteFailure{Request=r.Request,Order=r.Order,GroupId=r.MemberIdentity.GroupId,Revision=r.MemberIdentity.OrderRevision,Incarnation=r.MemberIdentity.Incarnation,Location=DomainLocation(r.GoalLocation),Outcome=outcome,Tick=Tick};
-            RevisitWreckFailure(r.Entity);
+            RevisitWreckFailure(r,q.Active==e?e:null);
             if(ReferenceEquals(e,q.Pending))e.Failed=true;TraceOriginalQueue(r,OriginalGroupEvent.Terminal,(int)outcome);
         }
         private bool RetainsInstalledExecution(int id)=>tacticalQueues.TryGetValue(id,out var q)&&(q.Active!=null||units.TryGetValue(id,out var u)&&u.CurrentOrder!=null);
@@ -193,14 +223,144 @@ namespace Spacewars.Runtime
             foreach(var row in tacticalQueues)
                 if(row.Value.Active is QueueExecution e&&e.Arrived&&TryActor(row.Key,out var actor)&&actor.Outcome!=NavigationOutcome.Arrived)e.Arrived=false;
         }
+        private bool AtAssignedTacticalEndpoint(QueueExecution execution,NavUnit actor)
+            =>execution.ActivationTick>=0&&actor.Outcome==NavigationOutcome.Arrived&&execution.Assigned.HasValue&&
+                actor.GoalLocation.Equals(execution.Assigned)&&navigation.Crowd.CompatibleArrival(actor.Location,execution.Assigned.Value,actor.Radius);
+        private void ClearActiveTacticalOrder(Unit unit,TacticalQueue queue)
+        {
+            queue.Active=null;unit.CurrentOrder=null;unit.HasAttackMove=false;unit.Target=0;unit.ExplicitTarget=false;InterruptBurst(unit);
+        }
+        internal void RetireTacticalMoveForClosedFoundation(NavigationRequest route)
+        {
+            if(!tacticalQueues.TryGetValue(route.Entity,out var queue)||queue.Active is not QueueExecution active||
+                !Matches(active,route)||active.Interrupted||
+                (active.Issuance.Command.Kind!=PlayableCommandKind.Move&&active.Issuance.Command.Kind!=PlayableCommandKind.AttackMove)||
+                active.RouteRequest!=route.Request||active.RouteOrder!=route.Order||
+                !units.TryGetValue(route.Entity,out var unit)||WaitingForWreck(unit.Id)||navigation.IsPending(unit.Id))return;
+            ClearActiveTacticalOrder(unit,queue);
+        }
+        private void RetireExhaustedTacticalMove(Unit unit,NavUnit actor)
+        {
+            // Consume the terminal result at the motion boundary. Combat or
+            // geometry maintenance later in the tick can replace that outcome.
+            if(actor.Outcome!=NavigationOutcome.Blocked||actor.Moving||actor.Held||
+                !tacticalQueues.TryGetValue(unit.Id,out var queue)||queue.Active is not QueueExecution active||
+                active.Issuance.Command.Kind==PlayableCommandKind.Attack||active.Interrupted||
+                active.RouteRequest==0||active.Incarnation!=actor.Incarnation||
+                actor.InstalledGroupId!=active.Issuance.GroupId||actor.InstalledRevision!=active.Stamp.Revision||
+                actor.InstalledRequest!=active.RouteRequest||actor.InstalledOrder!=active.RouteOrder||
+                WaitingForWreck(unit.Id)||navigation.IsPending(unit.Id))return;
+
+            if (active.Issuance.Command.EntityIds.Count > 1 && active.Assigned.HasValue &&
+                navigation.TryFindBlockedFormationSlot(actor, active.Assigned.Value, out var replacement,
+                    RelayArrivalArea(active.Issuance.Command)))
+            {
+                var location = GroundReplay == null ? replacement : GroundReplay.NextSlot(FinancialOwnerId(unit.Owner), unit.Id);
+                if (location.HasValue)
+                    CommitInternalTactical(active.Issuance, new[] { unit.Id }, InternalTacticalKind.RelocateArrival,
+                        location.Value.Position, active.Stamp.Revision);
+                return;
+            }
+
+            // Release the queue head without issuing a completion receipt.
+            ClearActiveTacticalOrder(unit,queue);
+        }
+        private bool RetireLostTargetOrder(Unit unit)
+        {
+            var order = unit.CurrentOrder;
+            if (order == null) return false;
+
+            tacticalQueues.TryGetValue(unit.Id, out var queue);
+            bool activeQueueOrder = queue?.Active?.Issuance.Command.Sequence == order.CommandSequence;
+            bool waitingForTarget = false;
+            switch (order.Kind)
+            {
+                case PlayableTacticalOrderKind.Attack:
+                    if (VisibleTarget(unit.Owner, order.TargetId)) return false;
+                    if (activeQueueOrder && queue.Active.Stamp.Origin == PlayableOrderOrigin.Human)
+                    {
+                        // Player queues own completion and the failed replacement's
+                        // navigation binding. AI continues to replan unseen targets.
+                        if (!TargetAlive(order.TargetId)) return true;
+                        waitingForTarget = true;
+                    }
+                    break;
+                case PlayableTacticalOrderKind.Follow:
+                    if (units.TryGetValue(order.TargetId, out var leader) && leader.Health > 0 &&
+                        !Hostile(unit.Owner, leader.Owner)) return false;
+                    break;
+                case PlayableTacticalOrderKind.Repair:
+                    if (RepairTarget(unit.Owner, unit.Id, order.TargetId, out var point, out _) &&
+                        Vision(unit.Owner).IsVisible(point)) return false;
+                    break;
+                default:
+                    return false;
+            }
+
+            if (waitingForTarget)
+                InterruptBurst(unit);
+            else if (activeQueueOrder)
+                ClearActiveTacticalOrder(unit, queue);
+            else
+            {
+                unit.CurrentOrder = null;
+                unit.Target = 0;
+                unit.ExplicitTarget = false;
+                InterruptBurst(unit);
+            }
+
+            if (unit.Air is { } air)
+            {
+                air.Actor.Goal = air.Actor.Position;
+                air.Actor.Moving = false;
+                air.Actor.Outcome = NavigationOutcome.Stopped;
+                air.Velocity = default;
+                air.Yielding = false;
+                air.Short = false;
+                air.Escape = false;
+                unit.DroneRepair = default;
+            }
+            else if (waitingForTarget)
+                CombatStop(unit.Id);
+            else if (queue?.Pending != null)
+            {
+                // The unavailable target belongs to the old execution.
+                // Preserve the independent request for the replacement.
+                queue.OldMotionSuspended = false;
+                navigation.Crowd.Suspend(unit.Id);
+            }
+            else navigation.Stop(unit.Id, false);
+            return true;
+        }
+
         private void RefreshTacticalQueues()
         {
             foreach(var row in tacticalQueues.ToArray()){
                 if(!units.TryGetValue(row.Key,out var u)||eliminated.Contains(u.Owner)){tacticalQueues.Remove(row.Key);continue;}
+                if(Frozen(u))continue;
                 var q=row.Value;var e=q.Active;if(e==null||!TryActor(u.Id,out var actor))continue;
-                if(e.Interrupted&&e.Issuance.Command.Kind!=PlayableCommandKind.Attack)continue;var kind=e.Issuance.Command.Kind;
-                if(kind!=PlayableCommandKind.Attack&&e.ActivationTick>=0&&actor.Outcome==NavigationOutcome.Arrived&&e.Assigned.HasValue&&actor.GoalLocation.Equals(e.Assigned)&&
-                    navigation.Crowd.CompatibleArrival(actor.Location,e.Assigned.Value,actor.Radius))e.Arrived=true;
+                var kind=e.Issuance.Command.Kind;
+                if ((kind == PlayableCommandKind.Move || kind == PlayableCommandKind.AttackMove) &&
+                    u.Air == null && u.Target == 0 && !actor.Held && !actor.Moving &&
+                    actor.routeIndex >= actor.Route.Count && !WaitingForWreck(u.Id) && !navigation.IsPending(u.Id))
+                {
+                    // A failed replacement can outlive the route it was replacing.
+                    // Keep the terminal proof, but release the old order once it
+                    // has no route to resume. This must never count as arrival.
+                    if (q.Pending?.Failed == true && TerminalProofMatches(q.Pending, actor))
+                    {
+                        ParkFailedReplacement(u, q);
+                        continue;
+                    }
+                    if (q.Pending == null && !AtAssignedTacticalEndpoint(e, actor) &&
+                        e.Assigned.Equals(e.TerminalFailure?.Location) && TerminalProofMatches(e, actor))
+                    {
+                        ClearActiveTacticalOrder(u, q);
+                        continue;
+                    }
+                }
+                if(e.Interrupted&&kind!=PlayableCommandKind.Attack)continue;
+                if(kind!=PlayableCommandKind.Attack&&AtAssignedTacticalEndpoint(e,actor))e.Arrived=true;
                 // Ground combat already drops attacks on air targets. Retire the
                 // same queue execution even while its unsupported target is alive.
                 bool complete=kind==PlayableCommandKind.Attack?(!TargetAlive(e.Issuance.Command.TargetId)||u.Kind!=PlayableEntityKind.Explorer&&u.Kind!=PlayableEntityKind.Hawk&&AirTarget(e.Issuance.Command.TargetId)):e.Arrived&&(kind==PlayableCommandKind.Move||!AnchorOccupied(u,e));
@@ -212,7 +372,7 @@ namespace Spacewars.Runtime
                     TacticalCompletionForQa?.Invoke(u.Id,q.Completion);
 #endif
                 }
-                q.Active=null;u.CurrentOrder=null;u.HasAttackMove=false;u.Target=0;u.ExplicitTarget=false;InterruptBurst(u);
+                ClearActiveTacticalOrder(u,q);
                 if(q.Pending==null&&kind==PlayableCommandKind.Attack)navigation.Stop(u.Id,false);
             }
             ActivateDeferredOrders();
@@ -235,12 +395,25 @@ namespace Spacewars.Runtime
                 }
             }
         }
+        private bool ResumeSuspendedAttackMove(Unit unit,NavUnit actor)
+        {
+            if(!tacticalQueues.TryGetValue(unit.Id,out var queue)||queue.Active is not {Suspended:true} active||
+                !actor.Goal.Equals(unit.AttackMove)&&!active.AttemptLocation.Equals(active.Assigned))return false;
+            return CombatMove(unit.Id,unit.AttackMove);
+        }
+
+        private bool CanAdmitAttackMoveApproach(int id,NavPoint goal)
+        {
+            return (!tacticalQueues.TryGetValue(id,out var queue)||
+                    queue.Active?.TerminalFailure?.Location?.Position.Equals(goal)!=true)&&navigation.CanAdmitFollowWaypoint(id,goal);
+        }
         private bool CombatMove(int id,NavPoint goal)
         {
             if(!CampaignMoveAllowed(id,goal))return false;
             if(tacticalQueues.TryGetValue(id,out var q)){
-                if(q.Active!=null&&q.Active.Suspended&&(q.Active.Assigned.HasValue&&q.Active.Assigned.Value.Position.Equals(goal)||q.Active.Issuance.Command.Kind==PlayableCommandKind.Attack)){
-                    q.Active.Suspended=false;return navigation.Crowd.Resume(id);
+                if(q.Active!=null&&q.Active.Suspended&&(q.Active.Assigned.HasValue&&q.Active.Assigned.Value.Position.Equals(goal)&&TryActor(id,out var suspended)&&(suspended.Goal.Equals(goal)||q.Active.AttemptLocation.Equals(q.Active.Assigned))||q.Active.Issuance.Command.Kind==PlayableCommandKind.Attack)){
+                    q.Active.Suspended=false;if(navigation.Crowd.Resume(id))return true;
+                    if(q.Active.Issuance.Command.Kind==PlayableCommandKind.Attack)return false;
                 }
                 if(q.OldMotionSuspended){q.OldMotionSuspended=false;return navigation.Crowd.Resume(id);}
                     if(q.Pending!=null){
@@ -256,7 +429,7 @@ namespace Spacewars.Runtime
         {
             if(WaitingForWreck(id))return true;
             var command=pending?.Issuance.Command;
-            bool attackMove=command?.Kind==PlayableCommandKind.AttackMove&&command.SiteId>0;
+            bool attackMove=command?.Kind==PlayableCommandKind.AttackMove;
             bool move=command?.Kind==PlayableCommandKind.Move&&(command.SiteId==0||command.SiteId>0&&sites.ContainsKey(command.SiteId));
             if(pending==null||pending.Failed||pending.Interrupted||pending.TerminalFailure!=null||pending.ActivationTick>=0||
                 (!attackMove&&!move)||command.Origin!=PlayableOrderOrigin.Ai||
@@ -265,14 +438,91 @@ namespace Spacewars.Runtime
             return request!=null&&Matches(pending,request)&&request.Request==pending.AttemptRequest&&request.Order==pending.AttemptOrder&&
                 pending.AttemptLocation.HasValue&&pending.AttemptLocation.Value.Equals(request.GoalLocation)&&pending.Assigned.Value.Equals(request.GoalLocation);
         }
-        internal PlayableUnitQueueSnapshot TacticalQueueProjection(int id,PlayableOwner observer)
+        private bool ActiveAiOrderViable(Unit unit,QueueExecution execution)
         {
-            if(!units.TryGetValue(id,out var u)||u.Owner!=observer||!tacticalQueues.TryGetValue(id,out var q))return null;
-            PlayableQueuedOrderSnapshot Project(QueueIssuance i,long revision)=>new PlayableQueuedOrderSnapshot(i.Id,i.GroupId,i.Command.Sequence,revision,i.Command.Kind,i.Command.TargetLocation,
-                i.Command.Kind==PlayableCommandKind.Attack&&VisibleTarget(observer,i.Command.TargetId)?i.Command.TargetId:0,
-                i.Command.Kind==PlayableCommandKind.AttackMove||i.Command.Kind==PlayableCommandKind.Move&&i.Command.SiteId>0&&sites.ContainsKey(i.Command.SiteId)?i.Command.SiteId:0,
-                i.Command.Origin==PlayableOrderOrigin.Ai&&i.Command.Source==PlayableAiOpeningComposition.SourceIdentity?i.Command.ActionId:0);
-            return new PlayableUnitQueueSnapshot(q.Active==null?null:Project(q.Active.Issuance,q.Active.Stamp.Revision),q.Pending==null?null:Project(q.Pending.Issuance,q.Pending.Stamp.Revision),q.Deferred.Select(i=>Project(i,0)).ToArray(),q.Completion,PendingAiRouteViable(id,q.Pending));
+            if(execution==null||execution.Failed||execution.Interrupted||
+                execution.TerminalFailure!=null||unit.CurrentOrder==null)return false;
+            var command=execution.Issuance.Command;
+            if(command.Origin!=PlayableOrderOrigin.Ai||command.Source!=PlayableAiOpeningComposition.SourceIdentity||
+                unit.CurrentOrder.CommandSequence!=command.Sequence)return false;
+            if(command.Kind==PlayableCommandKind.Attack)return TargetAlive(command.TargetId);
+            return !execution.Arrived&&(execution.Suspended||WaitingForWreck(unit.Id)||
+                TryActor(unit.Id,out var actor)&&(actor.Moving||actor.Outcome is NavigationOutcome.Moving or NavigationOutcome.Waiting));
+        }
+        private readonly struct QueuedOrderFrame
+        {
+            private readonly long issuance, group, sequence, revision, action;
+            private readonly PlayableCommandKind kind;
+            private readonly NavLocation? anchor;
+            private readonly int target, objective, site;
+
+            internal QueuedOrderFrame(QueueIssuance order, long revision, int visibleTarget, int publicObjective)
+            {
+                var command = order.Command;
+                issuance = order.Id;
+                group = order.GroupId;
+                sequence = command.Sequence;
+                this.revision = revision;
+                kind = command.Kind;
+                anchor = command.TargetLocation?.Detached();
+                target = visibleTarget;
+                objective = publicObjective;
+                site = command.SiteId;
+                action = command.Origin == PlayableOrderOrigin.Ai && command.Source == PlayableAiOpeningComposition.SourceIdentity
+                    ? command.ActionId : 0;
+            }
+
+            internal PlayableQueuedOrderSnapshot Build() => new PlayableQueuedOrderSnapshot(
+                issuance, group, sequence, revision, kind, anchor, target, objective, action, site);
+        }
+
+        private readonly struct UnitQueueFrame
+        {
+            private readonly QueuedOrderFrame? active, pending;
+            private readonly QueuedOrderFrame[] deferred;
+            private readonly PlayableTacticalCompletion completion;
+            private readonly bool pendingViable, activeViable;
+
+            internal UnitQueueFrame(QueuedOrderFrame? active, QueuedOrderFrame? pending, QueuedOrderFrame[] deferred,
+                PlayableTacticalCompletion completion, bool pendingViable, bool activeViable)
+            {
+                this.active = active;
+                this.pending = pending;
+                this.deferred = deferred;
+                this.completion = completion;
+                this.pendingViable = pendingViable;
+                this.activeViable = activeViable;
+            }
+
+            internal PlayableUnitQueueSnapshot Build() => deferred == null ? null : new PlayableUnitQueueSnapshot(
+                active?.Build(), pending?.Build(), System.Array.ConvertAll(deferred, row => row.Build()),
+                completion, pendingViable, activeViable);
+        }
+
+        internal PlayableUnitQueueSnapshot TacticalQueueProjection(int id, PlayableOwner observer)
+            => CaptureUnitQueue(id, observer).Build();
+
+        private UnitQueueFrame CaptureUnitQueue(int id, PlayableOwner observer)
+        {
+            if (!units.TryGetValue(id, out var unit) || unit.Owner != observer || !tacticalQueues.TryGetValue(id, out var queue))
+                return default;
+
+            QueuedOrderFrame Capture(QueueIssuance order, long revision)
+            {
+                var command = order.Command;
+                int target = command.Kind == PlayableCommandKind.Attack && VisibleTarget(observer, command.TargetId)
+                    ? command.TargetId : 0;
+                int objective = command.Kind == PlayableCommandKind.AttackMove ||
+                    command.Kind == PlayableCommandKind.Move && command.SiteId > 0 && sites.ContainsKey(command.SiteId)
+                    ? command.SiteId : 0;
+                return new QueuedOrderFrame(order, revision, target, objective);
+            }
+
+            return new UnitQueueFrame(
+                queue.Active == null ? (QueuedOrderFrame?)null : Capture(queue.Active.Issuance, queue.Active.Stamp.Revision),
+                queue.Pending == null ? (QueuedOrderFrame?)null : Capture(queue.Pending.Issuance, queue.Pending.Stamp.Revision),
+                queue.Deferred.Select(order => Capture(order, 0)).ToArray(), queue.Completion,
+                PendingAiRouteViable(id, queue.Pending), ActiveAiOrderViable(unit, queue.Active));
         }
     }
 }

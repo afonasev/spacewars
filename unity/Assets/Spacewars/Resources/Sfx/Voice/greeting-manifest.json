@@ -1,0 +1,58 @@
+{
+  "generator": "edge-tts 7.3.1; offline game assets, no runtime service",
+  "voice": "ru-RU-DmitryNeural +0% -6Hz",
+  "filter": "silenceremove=start_periods=1:start_duration=0.01:start_threshold=-48dB,areverse,silenceremove=start_periods=1:start_duration=0.01:start_threshold=-48dB,areverse,highpass=f=350,lowpass=f=3100,acompressor=threshold=0.08:ratio=4:attack=3:release=90:makeup=2.2,asoftclip=type=tanh:threshold=0.75:output=0.9,loudnorm=I=-18:TP=-3:LRA=7,aresample=48000,apad=pad_dur=0.08",
+  "long_pause_filter": "silenceremove=stop_periods=-1:stop_duration=0.42:stop_threshold=-43dB:stop_silence=0.26",
+  "samples": [
+    {
+      "key": "greeting-good-luck",
+      "text": "Всем удачи. Хорошего боя!",
+      "sha256": "2ddb3c0ccf5124244eff988ae5b052e02465426f3d5712af03e5164fa566467b"
+    },
+    {
+      "key": "greeting-heated",
+      "text": "Удачи. Надеюсь, будет жарко.",
+      "sha256": "316cd83bfb11b2a8b3c010389032e13150406ae78d0e3efa3979948e3a715375"
+    },
+    {
+      "key": "greeting-meeting",
+      "text": "Рад встретиться с вами на поле боя.",
+      "sha256": "bb2a14d59daf4c7f3c30d1a9f2e5ac8d2a3e2e65ef12c1f490edd5cba18f48b8"
+    },
+    {
+      "key": "greeting-opponents",
+      "text": "Хороших соперников всегда приятно встретить.",
+      "sha256": "4648acc3816ad1f58a3274e5caab11e31691497de74648f3a931bddf1b7774eb"
+    },
+    {
+      "key": "greeting-trick",
+      "text": "Если есть хитрый план, самое время его достать.",
+      "sha256": "c9b29a55470db19428477716a1d2b3d7f7abd0c3ef88b52859c13c909ea0a68b"
+    },
+    {
+      "key": "greeting-head-start",
+      "text": "Даю вам фору. Пока я здороваюсь.",
+      "sha256": "13b5aeeea2d5cdf621c7a012627a2f35e5ac3efda226353b9cf7e377739d762c"
+    },
+    {
+      "key": "greeting-ready",
+      "text": "Связь проверил. К бою готов.",
+      "sha256": "0e98bd28bfcda1885a5d109c3379629904e3e7703c73e72a460037c15add40cf"
+    },
+    {
+      "key": "greeting-commanders",
+      "text": "Командиры, приветствую. Начинаем.",
+      "sha256": "d334b9c8c952f22c39b11ebabb40246692495bc7f769b45e97c35adb64b8b18e"
+    },
+    {
+      "key": "greeting-base",
+      "text": "Всем привет. Штаб пока на месте.",
+      "sha256": "15bbeb4c751fc0111bebcccf2578396885b636e4573ba70886eacbe122ae1f43"
+    },
+    {
+      "key": "greeting-plan",
+      "text": "Связь есть. План тоже есть. Пока всё идёт по плану.",
+      "sha256": "44ab765be2ea923ed427e8d3eecfc703dc8fadb5d8d0d6fe5b4e220c23bf27f7"
+    }
+  ]
+}

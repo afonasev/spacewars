@@ -12,12 +12,18 @@ namespace Spacewars.Presentation
         private PlayableProfileData spectatorEscalationData;
         private void UpdateSpectatorTableViewport()
         {
-            if(spectatorTableScroll==null||root.resolvedStyle.width<=0)return;
+            if(spectatorTableScroll==null||!(root.resolvedStyle.width>0))return;
             float available=root.resolvedStyle.width-16;
             if(spectatorPerspective.HasValue)available-=Mathf.Max(0,top.resolvedStyle.width)+8;
-            spectatorPanel.style.maxWidth=Mathf.Max(220,available);
-            float viewport=Mathf.Min(spectatorTable.style.width.value.value,Mathf.Max(220,available)-2);
-            spectatorTableScroll.style.height=26+spectatorRows.childCount*32+(spectatorTable.style.width.value.value>viewport?18:0);
+            float maxWidth=Mathf.Max(220,available);
+            spectatorPanel.style.maxWidth=maxWidth;
+            bool overflow=spectatorTable.style.width.value.value>maxWidth;
+            spectatorTableScroll.horizontalScrollerVisibility=overflow?ScrollerVisibility.AlwaysVisible:ScrollerVisibility.Hidden;
+            float visibleRowsHeight=spectatorRows.Children()
+                .Where(row=>row.style.display.value!=DisplayStyle.None)
+                .Sum(row=>row.style.height.value.value);
+            spectatorTableScroll.style.height=spectatorHead.style.height.value.value+visibleRowsHeight+
+                (overflow?spectatorTableScroll.horizontalScroller.style.height.value.value:0);
         }
         private void RegisterSpectatorTooltip(VisualElement element)
         {
@@ -38,7 +44,7 @@ namespace Spacewars.Presentation
         private void UpdateSpectatorEscalation(VisualElement cell,OrbitalEscalationSnapshot state)
         {
             state=state??OrbitalEscalationSnapshot.Empty;
-            bool max=state.Level==OrbitalEscalationState.MaxLevel;
+            bool max=state.IsMax;
             var level=cell[0];var ring=level.Q<OrbitalProgressRing>();ring.Fraction=max?1:(float)(state.Progress/Math.Max(1,state.Threshold));ring.Pending=state.PendingLevel>0;ring.Color=ring.Pending?Amber:Cyan;
             var number=level.Q<Label>();number.text=max?"MAX":state.Level.ToString();number.style.fontSize=max?8:12;number.style.color=ring.Pending?Amber:Ink;
             level.tooltip=(max?"MAX · максимальный уровень":"Эскалация · уровень "+state.Level+"\n"+state.Progress.ToString("0.##")+" / "+state.Threshold.ToString("0.##")+" до следующего уровня")+(state.PendingLevel>0?"\nОжидается выбор умения уровня "+state.PendingLevel:"");
@@ -61,7 +67,9 @@ namespace Spacewars.Presentation
             {
                 var ability=state.Abilities[i];var tile=slots[i];double wait=Math.Max(ability.Remaining,state.CommonRemaining);bool cooling=wait>1e-9;
                 var sweep=tile.Q<OrbitalCooldownSweep>();sweep.Fraction=(float)(ability.Remaining>=state.CommonRemaining?1-ability.Recovery/Math.Max(.001,ability.Duration):1-state.CommonRemaining/Math.Max(.001,data.orbitalCommonSeconds));sweep.style.display=cooling?DisplayStyle.Flex:DisplayStyle.None;
-                tile.Q("ability-artwork").style.opacity=cooling?(float)data.orbitalUiCoolingArtworkOpacity:1;
+                var art=tile.Q<OrbitalPlaceholderImage>("ability-artwork");
+                art.SetId(ability.Id,state.ReinforcementQuote.Kind);
+                art.style.opacity=cooling?(float)data.orbitalUiCoolingArtworkOpacity:1;
                 var seconds=tile.Q<Label>("seconds");seconds.text=cooling?Math.Ceiling(wait).ToString():"✓";seconds.style.unityTextAlign=cooling?TextAnchor.MiddleCenter:TextAnchor.LowerRight;seconds.style.fontSize=cooling?11:8;seconds.style.color=cooling?Ink:Cyan;
                 var edge=cooling?OrbitalTheme.Line:Cyan;tile.style.borderLeftColor=tile.style.borderRightColor=tile.style.borderTopColor=tile.style.borderBottomColor=edge;
                 tile.tooltip=OrbitalAbilities.Name(ability.Id)+(cooling?" · перезарядка · "+Math.Ceiling(wait)+" с":" · готово");

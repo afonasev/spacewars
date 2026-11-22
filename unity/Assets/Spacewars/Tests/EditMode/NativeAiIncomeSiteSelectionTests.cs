@@ -16,12 +16,14 @@ namespace Spacewars.Tests.EditMode
         {var data=AiProfile.Initial.CopyData();data.fields.Single(f=>f.path=="economy.remoteExpansionShare").value=share;data.fields.Single(f=>f.path=="economy.enemyMainProtectedIncomeSites").value=protectedCount;return new AiProfile(data);}
         private static TerritorySiteSnapshot Site(int id,double x,double z=0,int center=0)=>new TerritorySiteSnapshot(
             new TerritorySite(id,PlayableBuildingKind.Mine,new NavPoint(x,z),Array.Empty<TerritorySlot>()),null,center==0?(PlayableOwner?)null:PlayableOwner.Enemy,0,false,center,false);
-        private static PlayableAiObservation Observation(TerritorySiteSnapshot[] sites,int seed=41,NavPoint? scout=null,long tick=0,PlayableBuildingSnapshot[] enemies=null)
+        private static PlayableAiObservation Observation(TerritorySiteSnapshot[] sites,int seed=41,NavPoint? scout=null,long tick=0,PlayableBuildingSnapshot[] enemies=null,bool readyOpeningIncome=false)
         {
             var u=new PlayableEntitySnapshot(13,PlayableOwner.Player,PlayableEntityKind.Explorer,scout??new NavPoint(35,0),100,false,0,0,0);
             var home=new[]{new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Headquarters,new NavPoint(0,0),100,1,0,0,default,siteId:1),
                 new PlayableBuildingSnapshot(2,PlayableOwner.Player,PlayableBuildingKind.Factory,new NavPoint(0,5),100,1,0,0,default,siteId:1,slotId:1),
                 new PlayableBuildingSnapshot(3,PlayableOwner.Player,PlayableBuildingKind.Refinery,new NavPoint(0,-5),100,1,0,0,default,siteId:1,slotId:2)};
+            if(readyOpeningIncome)home=home.Concat(new[]{new PlayableBuildingSnapshot(6,PlayableOwner.Player,
+                PlayableBuildingKind.Refinery,new NavPoint(5,-5),100,1,0,0,default,siteId:1,slotId:3)}).ToArray();
             var objectives=sites.Select(s=>new PlayablePublicScoutObjective(s.Site.Id,s.Site.Position,PlayablePublicScoutObjectiveRole.ExpansionIncome,true)).ToArray();
             var proofs=sites.Select(s=>new PlayableRouteProof(13,PlayableOwner.Player,71,tick,1,u.Position,P.ExplorerCollisionRadius,PlayableRouteTargetKind.PublicObjective,s.Site.Id,s.Site.Position,s.Site.Position,new[]{s.Site.Position})).ToArray();
             return PlayableAiObservation.From(new PlayableSnapshot(P.ProfileId,P.Revision,71,seed,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,
@@ -109,14 +111,15 @@ namespace Spacewars.Tests.EditMode
             // Bind deterministic local preference via the public profile, preserving all gameplay prices/guards.
             owner.GetType().GetField("nativeProfile",flags).SetValue(owner,Profile(0));
             PlayableAiAction Build(int id)=>new PlayableAiAction(1,o.OwnerId,P.ProfileId,P.Revision,71,0,PlayableCommandKind.BuildAt,siteId:id,buildingKind:PlayableBuildingKind.Mine);
-            Assert.Null(proposal.Invoke(owner,new object[]{"economy",Build(5),o,0}));
-            Assert.NotNull(proposal.Invoke(owner,new object[]{"economy",Build(4),o,0}),"ordinary captured local mine still has a real admitted intent");
+            Assert.Null(proposal.Invoke(owner,new object[]{"economy",Build(5),o,0,false,false}));
+            Assert.NotNull(proposal.Invoke(owner,new object[]{"economy",Build(4),o,0,false,false}),"ordinary captured local mine still has a real admitted intent");
         }
         [Test] public void FinanceOpportunityKeepsChoiceAndOrdinalAcrossFundingAndMemoRestore()
         {
-            var ai=Profile(1);var o=Observation(new[]{Site(4,10),Site(5,35)});var planner=new AiExpansionPlanner(o.OwnerId);
+            var ai=Profile(1);var o=Observation(new[]{Site(4,10),Site(5,35)},readyOpeningIncome:true);var planner=new AiExpansionPlanner(o.OwnerId);
             var finance=new AiExpansionFinancial(o.OwnerId,o.Generation);var arbiter=new AiDecisionArbiter(ai);var ledger=new AiBudgetLedger(o.OwnerId,o.Generation,1350);
             var opening=new AiOpeningExecutor(PlayableAiOpeningComposition.Initialize(o.Seed,o.OwnerId,forcedOpening:PlayableAiOpening.Safe),o.Generation);
+            opening.Observe(o,null,null,ai);
             finance.InitializeNewMatch(P,ai,arbiter);ledger.ObserveBank(o.Credits);
             finance.Observe(o,P,ai,opening,ledger,arbiter,planner,null,0,true);
             Assert.AreEqual(5,finance.ActiveSite(arbiter));Assert.True(finance.RemotePreference(o,ai,arbiter));
@@ -125,7 +128,7 @@ namespace Spacewars.Tests.EditMode
             {stream.Position=stream.Length-9;Assert.AreEqual(1,reader.ReadInt64(),"only one new opportunity draw");Assert.True(reader.ReadBoolean());}
             var copy=new AiDecisionArbiter(ai);copy.SaveSiteFundingMemory(memo);var restored=new AiExpansionFinancial(o.OwnerId,o.Generation);
             Assert.AreEqual(5,restored.ActiveSite(copy));Assert.True(restored.RemotePreference(o,ai,copy));
-            var old=finance.Detach(ledger);finance.Observe(Observation(o.Sites.ToArray(),tick:10),P,ai,opening,ledger,arbiter,planner,old,0,true);
+            var old=finance.Detach(ledger);finance.Observe(Observation(o.Sites.ToArray(),tick:10,readyOpeningIncome:true),P,ai,opening,ledger,arbiter,planner,old,0,true);
             Assert.AreEqual(memo,arbiter.SiteFundingMemory(),"waiting/funding is not a new opportunity");
         }
     }

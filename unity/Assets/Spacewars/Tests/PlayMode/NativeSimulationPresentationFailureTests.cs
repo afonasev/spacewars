@@ -86,8 +86,6 @@ public sealed class NativeSimulationPresentationFailureTests
                 runtime.RequestStop();Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped,3000));
             }
             UnityEngine.Object.DestroyImmediate(host);
-            foreach(var camera in UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsSortMode.None))UnityEngine.Object.DestroyImmediate(camera.gameObject);
-            foreach(var light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None))UnityEngine.Object.DestroyImmediate(light.gameObject);
             if(Directory.Exists(lab))Directory.Delete(lab,true);
         }
     }

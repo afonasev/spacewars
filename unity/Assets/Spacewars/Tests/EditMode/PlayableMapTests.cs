@@ -14,6 +14,21 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(0,map.Project(new NavPoint(-40,15)).X);Assert.AreEqual(0,map.Project(new NavPoint(-40,15)).Z);
             Assert.AreEqual(40,map.Ground(new NavPoint(2,2)).X);Assert.AreEqual(-15,map.Ground(new NavPoint(2,2)).Z);
         }
+        [TestCase(0)] [TestCase(45)] [TestCase(90)] [TestCase(180)] [TestCase(270)] [TestCase(359)]
+        public void CameraAlignedMapFitsCornersRoundtripsAndKeepsCameraAxes(double yaw)
+        {
+            var map=new PlayableMapTransform(40,15,yaw);
+            foreach(var point in new[]{new NavPoint(-40,15),new NavPoint(40,-15),new NavPoint(12,7),new NavPoint(40,15),new NavPoint(-40,-15)})
+            {
+                var uv=map.Project(point);Assert.That(uv.X,Is.InRange(-1e-10,1+1e-10));Assert.That(uv.Z,Is.InRange(-1e-10,1+1e-10));
+                var actual=map.Ground(uv);Assert.AreEqual(point.X,actual.X,1e-8);Assert.AreEqual(point.Z,actual.Z,1e-8);
+            }
+            double angle=yaw*Math.PI/180;
+            var forward=map.Project(new NavPoint(Math.Sin(angle)*10,Math.Cos(angle)*10));
+            var right=map.Project(new NavPoint(Math.Cos(angle)*10,-Math.Sin(angle)*10));
+            Assert.AreEqual(.5,forward.X,1e-8);Assert.Less(forward.Z,.5);
+            Assert.Greater(right.X,.5);Assert.AreEqual(.5,right.Z,1e-8);
+        }
         [Test] public void ProjectionPreservesAnchorsTypedConstructionAndMinimalMemoryWithoutSlots()
         {
             var p=PlayableProfile.Default;var vision=new PlayableVision(0,32,32,4,1.5);

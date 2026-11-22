@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -6,6 +8,7 @@ using Spacewars.Presentation;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
 using UnityEngine;
+using UnityEngine.TestTools;
 using UnityEngine.UIElements;
 
 public sealed class PlayableEscMenuTests
@@ -67,13 +70,74 @@ public sealed class PlayableEscMenuTests
             Assert.True(layer.Q<Button>("proving-tab-"+side+"-research").ClassListContains("proving-tab-active"));
             Assert.False(layer.Q<Button>("proving-tab-"+side+"-units").ClassListContains("proving-tab-active"));
             Assert.IsNull(layer.Q("proving-unit-detail"),"Tab switch removes stale hover card");
-            foreach(PlayableResearchKind kind in Enum.GetValues(typeof(PlayableResearchKind))){
-                var row=layer.Q("proving-research-row-"+side+"-"+kind);Assert.IsNotNull(row,"Every research kind must remain listed");
+            foreach(var kind in new[]{PlayableResearchKind.TankChassis,PlayableResearchKind.ExplorerAssaultGuns,PlayableResearchKind.ShkvalGuidance,PlayableResearchKind.HawkSalvoSystems,PlayableResearchKind.ImprovedWeaponSystems,PlayableResearchKind.ImprovedDefensiveSystems,PlayableResearchKind.ReinforcedConcrete}){
+                var row=layer.Q("proving-research-row-"+side+"-"+kind);Assert.IsNotNull(row,"Every approved chain must remain listed");
                 using(var enter=PointerEnterEvent.GetPooled()){enter.target=row;row.SendEvent(enter);}
                 Assert.That(layer.Q<Label>("proving-unit-description").text,Does.Contain(PlayableResearchRules.Description(PlayableProfile.Default,kind)));
                 using(var leave=PointerLeaveEvent.GetPooled()){leave.target=row;row.SendEvent(leave);}
                 Assert.AreEqual(DisplayStyle.None,layer.Q("proving-unit-detail").style.display.value);
             }
+        }
+    }
+
+    [UnityTest]
+    public IEnumerator ExplorerUpgradeSelectionIsImmediateAndDependentForBothSides()
+    {
+        var setup=new ProvingGroundSetup(PlayableProfile.Default);var runtime=new PlayableRuntime(setup.Configuration(),107);
+        IEnumerator Until(Func<bool> condition){float deadline=Time.realtimeSinceStartup+15;while(!condition()&&Time.realtimeSinceStartup<deadline)yield return null;Assert.True(condition(),"Proving edit reached the authority");}
+        bool Has(int side,PlayableResearchKind kind)=>runtime.ParticipantView(side==0?"player-1":"enemy-1")?.OwnerResearch.Any(o=>o.Kind==kind&&o.Complete)==true;
+        try
+        {
+            yield return Until(()=>runtime.IsPrepared&&runtime.Latest!=null);Set("runtime",runtime);Set("profile",setup.Profile);Set("provingGround",setup);Set("view",runtime.Latest);
+            var tabs=Get<string[]>("provingTabs");tabs[0]=tabs[1]="Исследования";Call("CreateProvingGroundUi");var nav=Get<NativeMenuNavigation>("menuNavigation");
+            for(int side=0;side<2;side++)
+            {
+                var row=Get<VisualElement>("provingGroundLayer").Q<Button>("proving-research-"+side+"-ExplorerAssaultGuns");var badge=row.Q<Label>("proving-research-stage-"+side+"-ExplorerAssaultGuns");
+                nav.ActivateElement(row);Assert.AreEqual("I",badge.text);
+                yield return Until(()=>!runtime.ProvingGroundEditsPending&&Has(side,PlayableResearchKind.ExplorerAssaultGuns));Assert.False(Has(side,PlayableResearchKind.ExplorerRocketLauncher));
+                nav.ActivateElement(row);Assert.AreEqual("II",badge.text);Call("UpdateProvingGroundUi");Assert.AreEqual("II",badge.text);
+                yield return Until(()=>!runtime.ProvingGroundEditsPending&&Has(side,PlayableResearchKind.ExplorerAssaultGuns)&&Has(side,PlayableResearchKind.ExplorerRocketLauncher));
+                Assert.AreEqual(3,row.Q<PortraitUpgradeMark>().ChevronCount);
+                nav.ActivateElement(row);Assert.AreEqual("—",badge.text);
+                yield return Until(()=>!runtime.ProvingGroundEditsPending&&!Has(side,PlayableResearchKind.ExplorerAssaultGuns)&&!Has(side,PlayableResearchKind.ExplorerRocketLauncher));
+                nav.ActivateElement(row);nav.ActivateElement(row);
+                yield return Until(()=>!runtime.ProvingGroundEditsPending&&Has(side,PlayableResearchKind.ExplorerRocketLauncher));
+                Assert.True(runtime.ProvingGroundResetSetup.Research(side).Contains(PlayableResearchKind.ExplorerAssaultGuns));
+            }
+        }
+        finally{runtime.RequestStop();Set("runtime",null);}
+    }
+
+    [Test]
+    public void ProvingResearchListsSpecializationsBeforeOrderedGlobalLevels()
+    {
+        Set("provingGround",new ProvingGroundSetup(PlayableProfile.Default));
+        var tabs=Get<string[]>("provingTabs");tabs[0]=tabs[1]="Исследования";Call("CreateProvingGroundUi");
+        var expected=new[]{PlayableResearchKind.TankChassis,PlayableResearchKind.ExplorerAssaultGuns,PlayableResearchKind.ShkvalGuidance,PlayableResearchKind.HawkSalvoSystems,
+            PlayableResearchKind.ImprovedWeaponSystems,PlayableResearchKind.ImprovedDefensiveSystems,PlayableResearchKind.ReinforcedConcrete};
+        for(int side=0;side<2;side++)
+        {
+            string prefix="proving-research-row-"+side+"-";
+            var panel=Get<VisualElement>("provingGroundLayer").Q("proving-side-"+side);
+            var rows=panel.Query<VisualElement>().ToList().Where(e=>e.name.StartsWith(prefix)).Select(e=>e.name).ToArray();
+            CollectionAssert.AreEqual(expected.Select(k=>prefix+k).ToArray(),rows,"The exact sequence must match on side "+side);
+        }
+    }
+
+    [Test]
+    public void ProvingGroundShowsRocketLauncherMarkForBothSides()
+    {
+        var setup=new ProvingGroundSetup(PlayableProfile.Default);for(int side=0;side<2;side++)setup.SetResearch(side,PlayableResearchKind.ExplorerRocketLauncher,true);
+        Set("provingGround",setup);Call("CreateProvingGroundUi");
+        var navigation=Get<NativeMenuNavigation>("menuNavigation");
+        for(int side=0;side<2;side++)
+        {
+            var layer=Get<VisualElement>("provingGroundLayer");
+            navigation.ActivateElement(layer.Q<Button>("proving-tab-"+side+"-research"));
+            layer=Get<VisualElement>("provingGroundLayer");
+            var row=layer.Q("proving-research-row-"+side+"-ExplorerAssaultGuns");
+            Assert.NotNull(row);
+            Assert.AreEqual(3,row.Q<PortraitUpgradeMark>().ChevronCount);
         }
     }
 

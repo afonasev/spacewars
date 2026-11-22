@@ -143,6 +143,83 @@ namespace Spacewars.Tests.PlayMode
                 Assert.Zero(d.Navigation.PhysicalHostBudget.PhysicalBytes);Assert.Zero(d.Navigation.PhysicalHostBudget.HeldBytes);
             }
         }
+        [Test,Timeout(120000)] public void MeridianFactoryRallySurvivesRefusedFirstMovementAdmission()
+        {
+            var baseline=PlayableProfile.Create(PlayableProfile.Default.CopyData(),new WhiteMeridianMap());
+            var store=new Spacewars.Presentation.NativeBalanceStore(baseline,
+                System.IO.Path.Combine(UnityEngine.Application.dataPath,"../../.local/factory-rally-test/"+Guid.NewGuid()+".json"),false,startOnRelease:true);
+            var p=store.Active;Assert.NotNull(p,store.Problem);
+            TestContext.WriteLine($"RALLY_PROFILE {store.SelectedId}@{store.SelectedVersion} map={p.AuthoredMap.Id}");
+            var d=new PlayableDomain(p,84,false);CertifiedRouteWorker worker=null;
+            object Call(string name,params object[] args)=>typeof(PlayableDomain).GetMethod(name,F).Invoke(d,args);
+            PlayableSnapshot View()=>d.Snapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+            try
+            {
+                Call("AddCredits",PlayableOwner.Player,10000d);
+                Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+                Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
+                var factory=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory);
+                var exit=FactoryReleaseRules.Exit(p,factory.Position,factory.Heading,PlayableEntityKind.Tank);
+                var goal=new[]{new NavPoint(exit.X+12,exit.Z),new NavPoint(exit.X-12,exit.Z),new NavPoint(exit.X,exit.Z-12)}
+                    .First(target=>d.Geometry.SegmentFree(exit,target,p.TankCollisionRadius)&&p.AuthoredMap.SupportsSweep(exit,target,p.TankCollisionRadius));
+                var original=View().Entities.Select(e=>e.Id).ToArray();
+                var authority=new PlayableAuthorityTick(d,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),7);
+                worker=new CertifiedRouteWorker(authority.NavigationBinding,p.NavigationRequestsPerFrame);
+                Assert.AreEqual(PlayableCommandStatus.Accepted,authority.Apply(new PlayableCommand(84,1,"player-1",PlayableCommandKind.SetRally,new[]{factory.Id},goal)).Status);
+                var clock=Stopwatch.StartNew();
+                while(!View().Buildings.Single(b=>b.Id==factory.Id).PrivateState.HasRally&&clock.Elapsed.TotalSeconds<15){authority.TryAdvance();Thread.Sleep(1);}
+                Assert.True(View().Buildings.Single(b=>b.Id==factory.Id).PrivateState.HasRally);
+                bool refused=false;
+                d.Navigation.AfterMovementObservationForQa=()=>{
+                    if(refused)return;refused=true;d.Navigation.PhysicalHostBudget.AllocationAdmission=_=>false;
+                };
+                for(int i=0;i<2;i++)Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(84,2+i,"player-1",PlayableCommandKind.QueueTank,new[]{factory.Id})).Status);
+                bool moved=false,inspectedRelease=false;int produced=0;
+                while(d.Tick<2400&&clock.Elapsed.TotalSeconds<110)
+                {
+                    try{authority.TryAdvance();}finally{d.Navigation.PhysicalHostBudget.AllocationAdmission=null;}
+                    Assert.IsNull(worker.Publication.Failure);
+                    var actors=View().Entities.Where(e=>!original.Contains(e.Id)).ToArray();produced=actors.Length;
+                    if(actors.Length>0)
+                    {
+                        var units=(IDictionary)typeof(PlayableDomain).GetField("units",F).GetValue(d);
+                        var first=units[actors[0].Id];
+                        var order=(PlayableTacticalOrderSnapshot)first.GetType().GetField("CurrentOrder").GetValue(first);
+                        if(!inspectedRelease){
+                            Assert.AreEqual(PlayableTacticalOrderKind.AttackMove,order?.Kind,"A temporary route-admission refusal must retain the produced unit's rally order");
+                            Assert.AreEqual(goal,order.Destination,"The player-visible order must retain the original rally flag");
+                            inspectedRelease=true;
+                        }
+                        moved|=Distance(actors[0].Position,exit)>3;
+                    }
+                    if(produced==2&&actors.All(e=>e.NavigationOutcome==NavigationOutcome.Arrived))break;
+                    Thread.Sleep(1);
+                }
+                TestContext.WriteLine($"MERIDIAN_RALLY tick={d.Tick} produced={produced} pumps={worker.Publication.Pumps} refusal={d.Navigation.LastCommandAdmissionRefusal} goal={goal.X},{goal.Z}");
+                foreach(var e in View().Entities.Where(e=>!original.Contains(e.Id)))
+                {
+                    d.Navigation.Crowd.TryGet(e.Id,out var actor);
+                    TestContext.WriteLine($"RALLY_ACTOR {e.Id} pos={e.Position.X},{e.Position.Z} outcome={e.NavigationOutcome} held={e.Held} moving={e.Moving} pending={d.Navigation.IsPending(e.Id)} goal={actor.Goal.X},{actor.Goal.Z} route={actor.Route.Count}");
+                }
+                Assert.True(refused,"Witness must exercise an actual refused movement admission");
+                Assert.True(moved,"The first tank must leave the exit without a manual order");
+                Assert.AreEqual(2,produced,"The queued second tank must also leave the factory");
+                foreach(var e in View().Entities.Where(e=>!original.Contains(e.Id)))
+                {
+                    d.Navigation.Crowd.TryGet(e.Id,out var actor);
+                    Assert.AreEqual(NavigationOutcome.Arrived,e.NavigationOutcome,"Both tanks must arrive at their allocated rally slots");
+                    Assert.LessOrEqual(Distance(e.Position,actor.Goal),p.Navigation.ArrivalTolerance);
+                }
+                Assert.Greater(worker.Publication.Pumps,0);
+            }
+            finally
+            {
+                d.Navigation.AfterMovementObservationForQa=null;d.Navigation.PhysicalHostBudget.AllocationAdmission=null;
+                worker?.Dispose();if(worker!=null)Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000));
+                d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();
+                Assert.Zero(d.Navigation.PhysicalHostBudget.PhysicalBytes);Assert.Zero(d.Navigation.PhysicalHostBudget.HeldBytes);
+            }
+        }
         static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt(Math.Pow(a.X-b.X,2)+Math.Pow(a.Z-b.Z,2));
         [Test,Timeout(120000)] public void FactoryAndHangarReleasePastHeldBlockersThroughOrdinaryThreadedHost()
         {

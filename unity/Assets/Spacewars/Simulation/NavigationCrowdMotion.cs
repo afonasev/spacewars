@@ -16,8 +16,9 @@ namespace Spacewars.Simulation
         // motor invents motion through the obstacle that prefix bends around.
         internal double LocalLookaheadSeconds;
         internal double OwnSpeed=>!Yielding&&OwnPaceCap>0?Math.Min(Speed,OwnPaceCap):Speed;
-        internal double ReverseDistance,ReverseSpeedRatio,ReverseConeRadians;
-        internal bool Active,Potential,Yielding,TerminalSeed;
+        internal double ReverseDistance,ReverseSpeedRatio,ReverseConeRadians,OwnedShortReverseDistance;
+        internal bool Active,Potential,Yielding,TerminalSeed,MovingTurn,MissingTypedTarget;
+        internal bool ExplorerMayYield,DirectArrival;
     }
     internal struct NavMotionProposal
     {
@@ -31,6 +32,7 @@ namespace Spacewars.Simulation
         internal bool IndependentTurn;
         internal bool RoleCapWait; // A physically qualified choice denied only by the frame's row cap.
         internal bool CurrentProgressExhausted; // No qualified eventual current-objective translation for this stationary turn.
+        internal bool TypedTranslationRefused; // Final authority rejected an actual own translation.
     }
     internal interface INavMotionClearance { bool ClearMotion(int actor,NavPoint end); }
 
@@ -151,15 +153,7 @@ namespace Spacewars.Simulation
 #endif
                 for(int i=0;i<bodies.Length;i++)components[i]=i;
             }
-            for(int i=0;i<bodies.Length;i++){
-                int count=0;for(int j=0;j<bodies.Length;j++)if(i!=j){
-                    if(!NeighborRelevant(in bodies[i],in bodies[j],profile,dt))continue;
-                    if(components!=null){int a=Root(components,i),b=Root(components,j);if(a!=b)components[b]=a;}
-                    if(count<0)continue;
-                    if(count==profile.CrowdNeighborCap){count=-1;if(components==null)break;continue;}
-                    neighbors[i*NeighborCapacity+count++]=j;
-                }counts[i]=count;
-            }
+            RebuildNeighbors(bodies,default,neighbors,counts,profile,dt,components);
             if(components!=null)for(int i=0;i<bodies.Length;i++)components[i]=Root(components,i);
         }
         private static void NeighborsWithComponents(NavMotionBody[] bodies,int[] neighbors,int[] counts,NavigationProfile profile,double dt,int[] components)
@@ -185,6 +179,95 @@ namespace Spacewars.Simulation
             if(count==cap){counts[row]=-1;return;}
             neighbors[row*NeighborCapacity+count]=peer;counts[row]=count+1;
         }
+        // Index along the wider axis. Each stripe contains its own rows and
+        // those of both adjacent stripes, in original iteration order.
+        private readonly ref struct ReachStripes
+        {
+            private readonly ReadOnlySpan<int> offsets, peers;
+            private readonly bool useX;
+            private readonly double origin, width;
+            internal ReachStripes(NavMotionBody[] bodies, double horizon, Span<int> offsets, Span<int> peers)
+            {
+                this = default;
+                if (peers.IsEmpty || !(horizon >= 1d / 1024 && horizon <= 1024)) return;
+                double x0 = double.PositiveInfinity, z0 = x0, x1 = double.NegativeInfinity, z1 = x1;
+                double maxRadius = 0, maxSpeed = 0;
+                foreach (ref readonly var body in bodies.AsSpan())
+                {
+                    double x = body.Position.X, z = body.Position.Z;
+                    double speed = body.Active || body.Potential ? body.Speed : 0;
+                    if (!(Math.Abs(x) <= 100000 && Math.Abs(z) <= 100000 &&
+                          body.Radius >= 0 && body.Radius <= 512 &&
+                          (speed == 0 || speed >= 1d / 1024 && speed <= 512))) return;
+                    x0 = Math.Min(x0, x); x1 = Math.Max(x1, x);
+                    z0 = Math.Min(z0, z); z1 = Math.Max(z1, z);
+                    maxRadius = Math.Max(maxRadius, body.Radius);
+                    maxSpeed = Math.Max(maxSpeed, speed);
+                }
+                useX = x1 - x0 > z1 - z0;
+                origin = useX ? x0 : z0;
+                double extent = useX ? x1 - x0 : z1 - z0;
+                // Include the rounding margin used by IndexedPairBoundary.
+                width = Math.Max(2 * (maxRadius + maxSpeed * horizon) + 1e-6, extent / (offsets.Length - 2));
+                int bins = (int)(extent / width) + 1;
+                if (bins <= 2 || bins >= offsets.Length) return;
+                offsets = offsets.Slice(0, bins + 1);
+                offsets.Clear();
+                for (int row = 0; row < bodies.Length; row++)
+                {
+                    int bin = Bin(bodies[row].Position);
+                    for (int k = Math.Max(0, bin - 1); k <= Math.Min(bins - 1, bin + 1); k++) offsets[k]++;
+                }
+                int total = 0;
+                for (int k = 0; k < bins; k++) { total += offsets[k]; offsets[k] = total; }
+                offsets[bins] = total;
+                for (int row = bodies.Length - 1; row >= 0; row--)
+                {
+                    int bin = Bin(bodies[row].Position);
+                    for (int k = Math.Max(0, bin - 1); k <= Math.Min(bins - 1, bin + 1); k++)
+                        peers[--offsets[k]] = row;
+                }
+                this.offsets = offsets;
+                this.peers = peers;
+            }
+            private int Bin(NavPoint p) => (int)(((useX ? p.X : p.Z) - origin) / width);
+            internal ReadOnlySpan<int> Around(NavPoint p)
+            {
+                if (offsets.IsEmpty) return default;
+                int k = Bin(p);
+                return peers.Slice(offsets[k], offsets[k + 1] - offsets[k]);
+            }
+        }
+
+        private static void RebuildNeighbors(NavMotionBody[] bodies, ReachStripes stripes,
+            int[] neighbors, int[] counts, NavigationProfile profile, double dt, int[] components = null)
+        {
+            for (int row = 0; row < bodies.Length; row++)
+            {
+                var candidates = stripes.Around(bodies[row].Position);
+                int count = 0, length = candidates.IsEmpty ? bodies.Length : candidates.Length;
+                for (int k = 0; k < length; k++)
+                {
+                    int peer = candidates.IsEmpty ? k : candidates[k];
+                    if (peer == row || !NeighborRelevant(in bodies[row], in bodies[peer], profile, dt)) continue;
+                    if (components != null)
+                    {
+                        int a = Root(components, row), b = Root(components, peer);
+                        if (a != b) components[b] = a;
+                        if (count < 0) continue;
+                    }
+                    if (count == profile.CrowdNeighborCap)
+                    {
+                        count = -1;
+                        if (components == null) break;
+                        continue;
+                    }
+                    neighbors[row * NeighborCapacity + count++] = peer;
+                }
+                counts[row] = count;
+            }
+        }
+
         internal static void ConstrainOverflowComponents(NavMotionBody[] bodies,int[] neighbors,int[] counts,int[] labels,double[] originalSpeeds,NavigationProfile profile,double dt)
         {
             for(int i=0;i<bodies.Length;i++)originalSpeeds[i]=bodies[i].Speed;
@@ -208,13 +291,17 @@ namespace Spacewars.Simulation
                 double reach=originalSpeeds[i]*horizon;
                 activeIslands=Finite(reach)&&reach>=2*profile.ArrivalTolerance;
             }
+            int indexedRows = safe && bodies.Length >= 64 && bodies.Length <= 1024 ? bodies.Length : 0;
+            Span<int> offsets = stackalloc int[128];
+            Span<int> peers = stackalloc int[3 * indexedRows];
+            var stripes = new ReachStripes(bodies, horizon, offsets, peers);
             bool handled=false;
             for(int root=0;root<bodies.Length;root++)if(labels[root]==root){
                 if(activeIslands&&!ComponentHasActive(bodies,labels,root))continue;
                 bool overflow=false;for(int i=0;i<bodies.Length;i++)if(labels[i]==root&&(bodies[i].Active||bodies[i].Potential)&&counts[i]<0){overflow=true;break;}
                 if(!overflow)continue;
                 handled=true;
-                if(!safe||!TryComponentRatio(bodies,neighbors,labels,originalSpeeds,profile,dt,root,out double ratio))continue;
+                if(!safe||!TryComponentRatio(bodies,stripes,neighbors,labels,originalSpeeds,profile,dt,root,out double ratio))continue;
                 bool scaleSafe=true;
                 for(int i=0;i<bodies.Length;i++)if(labels[i]==root&&(bodies[i].Active||bodies[i].Potential)&&!TryScaledDown(originalSpeeds[i],ratio,out _)){scaleSafe=false;break;}
                 if(!scaleSafe)continue;
@@ -223,7 +310,7 @@ namespace Spacewars.Simulation
             if(!handled)return; // No row scratch or speed was changed.
             // The row scratch was used transiently by the bounded order statistic.
             // Rebuild every exact row once after all initial components were handled.
-            Neighbors(bodies,neighbors,counts,profile,dt);
+            RebuildNeighbors(bodies,stripes,neighbors,counts,profile,dt);
             bool restored=false;
             for(int root=0;root<bodies.Length;root++)if(labels[root]==root){
                 if(activeIslands&&!ComponentHasActive(bodies,labels,root))continue;
@@ -232,49 +319,145 @@ namespace Spacewars.Simulation
                 for(int i=0;i<bodies.Length;i++)if(labels[i]==root&&(bodies[i].Active||bodies[i].Potential))bodies[i].Speed=originalSpeeds[i];
                 restored=true;
             }
-            if(restored)Neighbors(bodies,neighbors,counts,profile,dt);
+            if(restored)RebuildNeighbors(bodies,stripes,neighbors,counts,profile,dt);
             if(!safe)return;
             // The uniform component bound is the conservative baseline. Reclaim
             // only existing profile speed bands whose exact incident pairs fit.
             // Complete original caps get first choice; then the existing lower
             // bands reclaim remaining capacity in stable entity/index order.
             bool reclaimed=false;
+            Span<int> addedPeers = stackalloc int[NeighborCapacity];
+            bool ordered = InIdentityOrder(bodies);
             for(int band=profile.CrowdSpeedBands;band>=1;band--){
-            int previousId=int.MinValue,previousRow=-1;
+            int previousRow=-1;
             for(int order=0;order<bodies.Length;order++){
-                int row=-1;for(int i=0;i<bodies.Length;i++)if((bodies[i].Id>previousId||bodies[i].Id==previousId&&i>previousRow)&&(row<0||bodies[i].Id<bodies[row].Id||bodies[i].Id==bodies[row].Id&&i<row))row=i;
-                if(row<0)break;previousId=bodies[row].Id;previousRow=row;
+                int row = ordered ? order : NextIdentityRow(bodies, previousRow);
+                previousRow = row;
                 if(!(bodies[row].Active||bodies[row].Potential)||counts[row]<0||originalSpeeds[row]<=bodies[row].Speed)continue;
                 var candidate=bodies[row];candidate.Speed=band==profile.CrowdSpeedBands?originalSpeeds[row]:originalSpeeds[row]*band/profile.CrowdSpeedBands;
                 if(!Finite(candidate.Speed)||candidate.Speed<=bodies[row].Speed||candidate.Speed>originalSpeeds[row])continue;
-                int count=0;bool fits=true;
-                for(int peer=0;peer<bodies.Length;peer++)if(peer!=row&&NeighborRelevant(in candidate,in bodies[peer],profile,dt)){
+                var candidates = stripes.Around(bodies[row].Position);
+                int candidateCount = candidates.IsEmpty ? bodies.Length : candidates.Length;
+                int count=0, addedCount=0;bool fits=true;
+                for(int k=0;k<candidateCount;k++){
+                    int peer = candidates.IsEmpty ? k : candidates[k];
+                    if(peer==row||!NeighborRelevant(in candidate,in bodies[peer],profile,dt))continue;
                     if(++count>profile.CrowdNeighborCap){fits=false;break;}
-                    if(!NeighborRelevant(in bodies[row],in bodies[peer],profile,dt)&&(bodies[peer].Active||bodies[peer].Potential)&&(counts[peer]<0||counts[peer]>=profile.CrowdNeighborCap)){fits=false;break;}
+                    if(NeighborRelevant(in bodies[row],in bodies[peer],profile,dt))continue;
+                    if((bodies[peer].Active||bodies[peer].Potential)&&(counts[peer]<0||counts[peer]>=profile.CrowdNeighborCap)){fits=false;break;}
+                    addedPeers[addedCount++] = peer;
                 }
                 if(!fits)continue;
-                for(int peer=0;peer<bodies.Length;peer++)if(peer!=row&&NeighborRelevant(in candidate,in bodies[peer],profile,dt)&&!NeighborRelevant(in bodies[row],in bodies[peer],profile,dt)&&counts[peer]>=0)counts[peer]=counts[peer]==profile.CrowdNeighborCap?-1:counts[peer]+1;
+                for(int k=0;k<addedCount;k++){
+                    int peer=addedPeers[k];
+                    if(counts[peer]>=0)counts[peer]=counts[peer]==profile.CrowdNeighborCap?-1:counts[peer]+1;
+                }
                 bodies[row].Speed=candidate.Speed;counts[row]=count;reclaimed=true;
             }
             }
             // Preserve the ENTIRE full/band result as a floor before reclaiming
             // the remaining incident capacity with every other current speed fixed.
-            reclaimed|=ReclaimIncidentCapacity(bodies,counts,originalSpeeds,profile,dt);
-            if(reclaimed)Neighbors(bodies,neighbors,counts,profile,dt);
+            reclaimed|=ReclaimIncidentCapacity(bodies,stripes,counts,originalSpeeds,profile,dt);
+            if(reclaimed)RebuildNeighbors(bodies,stripes,neighbors,counts,profile,dt);
         }
-        private static bool ReclaimIncidentCapacity(NavMotionBody[] bodies,int[] counts,double[] originalSpeeds,NavigationProfile profile,double dt)
+        // Neighbor overflow bounds the general avoidance search. A unit with a clear
+        // forward sweep can use its original pace for that one straight proposal.
+        // ResolveJoint still tests every pair of actual swept hulls before commit.
+        internal static void RestoreClearForwardMotion(NavMotionBody[] bodies, NavMotionProposal[] proposals,
+            double[] originalSpeeds, NavigationProfile profile, double dt, INavMotionClearance clearance)
         {
-            bool reclaimed=false;int cap=profile.CrowdNeighborCap,previousId=int.MinValue,previousRow=-1;
+            for (int row = 0; row < bodies.Length; row++)
+            {
+                var body = bodies[row];
+                if (!body.Active || !body.OwnMoving || body.Yielding || body.YieldLabel != 0 ||
+                    body.Speed >= originalSpeeds[row]) continue;
+                var toTarget = Sub(body.Target, body.Position);
+                double distance = Length(toTarget);
+                if (!(distance > 0)) continue;
+                double aim = Math.Atan2(toTarget.Z, toTarget.X);
+                if (Math.Abs(Angle(aim - body.Heading)) > body.TurnSpeed * dt) continue;
+                double pace = body.OwnPaceCap > 0 ? Math.Min(originalSpeeds[row], body.OwnPaceCap) : originalSpeeds[row];
+                if (!(pace > body.OwnSpeed)) continue;
+                var direction = new NavPoint(toTarget.X / distance, toTarget.Z / distance);
+                double horizon = Math.Max(dt, profile.CrowdLookaheadSeconds);
+                double look = Math.Min(distance, pace * horizon);
+                double forwardPace = pace;
+                for (int peer = 0; peer < bodies.Length; peer++)
+                {
+                    if (peer == row) continue;
+                    var other = bodies[peer];
+                    var delta = Sub(other.Position, body.Position);
+                    double along = delta.X * direction.X + delta.Z * direction.Z;
+                    if (along <= 0) continue;
+                    double nearest = Math.Min(along, look);
+                    double x = delta.X - direction.X * nearest, z = delta.Z - direction.Z * nearest;
+                    double radius = body.Radius + other.Radius;
+                    if (x * x + z * z > radius * radius) continue;
+                    double side = delta.X * direction.Z - delta.Z * direction.X;
+                    double entry = along - Math.Sqrt(Math.Max(0, radius * radius - side * side));
+                    forwardPace = Math.Min(forwardPace, Math.Max(0, entry) / horizon);
+                    if (forwardPace <= body.OwnSpeed) break;
+                }
+                if (forwardPace <= body.OwnSpeed) continue;
+                double step = Math.Min(distance, forwardPace * dt);
+                var end = step == distance ? body.Target :
+                    new NavPoint(body.Position.X + direction.X * step, body.Position.Z + direction.Z * step);
+                if ((clearance is NavCrowd crowd && !crowd.AllowsCurrentMotion(row, end)) ||
+                    !clearance.ClearMotion(row, end)) continue;
+                bodies[row].Speed = forwardPace;
+                proposals[row] = new NavMotionProposal { Position = end, Heading = aim,
+                    Velocity = new NavPoint(direction.X * (step / dt), direction.Z * (step / dt)) };
+            }
+        }
+
+        // Runtime storage normally follows identity order. The fallback keeps
+        // the original stable (identity, row) order for arbitrary input arrays.
+        private static bool InIdentityOrder(NavMotionBody[] bodies)
+        {
+            for (int row = 1; row < bodies.Length; row++)
+                if (bodies[row].Id < bodies[row - 1].Id) return false;
+            return true;
+        }
+
+        private static int NextIdentityRow(NavMotionBody[] bodies, int previous)
+        {
+            int best = -1;
+            for (int i = 0; i < bodies.Length; i++)
+            {
+                int id = bodies[i].Id;
+                if (previous >= 0 && (id < bodies[previous].Id || id == bodies[previous].Id && i <= previous)) continue;
+                if (best < 0 || id < bodies[best].Id) best = i;
+            }
+            return best;
+        }
+#if UNITY_EDITOR
+        internal static bool ReclaimIncidentCapacityForTests(NavMotionBody[] bodies,int[] counts,double[] originalSpeeds,NavigationProfile profile,double dt)
+            => ReclaimIncidentCapacity(bodies,default,counts,originalSpeeds,profile,dt);
+#endif
+        private static bool ReclaimIncidentCapacity(NavMotionBody[] bodies,ReachStripes stripes,int[] counts,double[] originalSpeeds,NavigationProfile profile,double dt)
+        {
+            bool reclaimed=false;int cap=profile.CrowdNeighborCap,previousRow=-1;
+            Span<int> addedPeers = stackalloc int[NeighborCapacity];
+            bool ordered = InIdentityOrder(bodies);
             // Retain at most cap smallest new-edge boundaries; the next boundary
             // stays scalar. Scratch is private, so a no-gain row cannot corrupt rows.
             Span<double> smallest=stackalloc double[NeighborCapacity];
             for(int order=0;order<bodies.Length;order++){
-                int row=-1;for(int i=0;i<bodies.Length;i++)if((bodies[i].Id>previousId||bodies[i].Id==previousId&&i>previousRow)&&(row<0||bodies[i].Id<bodies[row].Id||bodies[i].Id==bodies[row].Id&&i<row))row=i;
-                if(row<0)break;previousId=bodies[row].Id;previousRow=row;
+                int row = ordered ? order : NextIdentityRow(bodies, previousRow);
+                previousRow = row;
                 var origin=bodies[row];double original=originalSpeeds[row];
                 if(!(origin.Active||origin.Potential)||counts[row]<0||counts[row]>cap||original<=origin.Speed)continue;
+                var candidates = stripes.Around(bodies[row].Position);
+                int candidateCount = candidates.IsEmpty ? bodies.Length : candidates.Length;
                 int slack=cap-counts[row],kept=0;double limit=original;
-                for(int peer=0;peer<bodies.Length;peer++)if(peer!=row&&!NeighborRelevant(in origin,in bodies[peer],profile,dt)){
+                var full = origin;
+                full.Speed = original;
+                for(int k=0;k<candidateCount;k++){
+                    int peer = candidates.IsEmpty ? k : candidates[k];
+                    // A missing edge at full speed contributes the original ceiling
+                    // and cannot reduce the (slack + 1)th boundary.
+                    if(peer==row||!NeighborRelevant(in full,in bodies[peer],profile,dt)||
+                       NeighborRelevant(in origin,in bodies[peer],profile,dt))continue;
                     double boundary=FixedPeerBoundary(in origin,in bodies[peer],original,profile,dt);
                     // The (slack+1)th new edge would overflow the candidate row.
                     if(kept<slack){int at=kept++;while(at>0&&boundary<smallest[at-1]){smallest[at]=smallest[at-1];at--;}smallest[at]=boundary;}
@@ -283,23 +466,28 @@ namespace Spacewars.Simulation
                     if((bodies[peer].Active||bodies[peer].Potential)&&(counts[peer]<0||counts[peer]>=cap))limit=Math.Min(limit,boundary);
                 }
                 if(!Finite(limit)||limit<=origin.Speed||limit>original)continue;
-                var candidate=origin;candidate.Speed=limit;int count=0;bool fits=true;
+                var candidate=origin;candidate.Speed=limit;int count=0, addedCount=0;bool fits=true;
                 // Exact certificate includes every incident pair, even those
                 // outside the current capped neighbor rows.
-                for(int peer=0;peer<bodies.Length;peer++)if(peer!=row&&NeighborRelevant(in candidate,in bodies[peer],profile,dt)){
+                for(int k=0;k<candidateCount;k++){
+                    int peer = candidates.IsEmpty ? k : candidates[k];
+                    if(peer==row||!NeighborRelevant(in candidate,in bodies[peer],profile,dt))continue;
                     if(++count>cap){fits=false;break;}
-                    if(!NeighborRelevant(in origin,in bodies[peer],profile,dt)&&(bodies[peer].Active||bodies[peer].Potential)&&(counts[peer]<0||counts[peer]>=cap)){fits=false;break;}
+                    if(NeighborRelevant(in origin,in bodies[peer],profile,dt))continue;
+                    if((bodies[peer].Active||bodies[peer].Potential)&&(counts[peer]<0||counts[peer]>=cap)){fits=false;break;}
+                    addedPeers[addedCount++] = peer;
                 }
                 if(!fits)continue;
-                for(int peer=0;peer<bodies.Length;peer++)if(peer!=row&&NeighborRelevant(in candidate,in bodies[peer],profile,dt)&&!NeighborRelevant(in origin,in bodies[peer],profile,dt)&&counts[peer]>=0)counts[peer]=counts[peer]==cap?-1:counts[peer]+1;
+                for(int k=0;k<addedCount;k++){
+                    int peer=addedPeers[k];
+                    if(counts[peer]>=0)counts[peer]=counts[peer]==profile.CrowdNeighborCap?-1:counts[peer]+1;
+                }
                 bodies[row].Speed=limit;counts[row]=count;reclaimed=true;
             }
             return reclaimed;
         }
         private static double FixedPeerBoundary(in NavMotionBody origin,in NavMotionBody peer,double original,NavigationProfile profile,double dt)
         {
-            var full=origin;full.Speed=original;
-            if(!NeighborRelevant(in full,in peer,profile,dt))return original;
             // Caller proved absence at the current floor. Reuse the verified
             // lower-distance arithmetic of TryNonPermanentPairBoundary, then
             // subtract the peer's fixed CURRENT speed instead of scaling it.
@@ -315,16 +503,16 @@ namespace Spacewars.Simulation
         }
         private static bool ComponentHasActive(NavMotionBody[] bodies,int[] labels,int root)
         {for(int row=0;row<bodies.Length;row++)if(labels[row]==root&&bodies[row].Active)return true;return false;}
-        private static bool TryComponentRatio(NavMotionBody[] bodies,int[] neighbors,int[] labels,double[] originalSpeeds,NavigationProfile profile,double dt,int root,out double ratio)
+        private static bool TryComponentRatio(NavMotionBody[] bodies,ReachStripes stripes,int[] neighbors,int[] labels,double[] originalSpeeds,NavigationProfile profile,double dt,int root,out double ratio)
         {
             ratio=1;bool found=false;
             for(int row=0;row<bodies.Length;row++)if(labels[row]==root&&(bodies[row].Active||bodies[row].Potential)){
-                if(!TryRowRatio(bodies,neighbors,originalSpeeds,profile,dt,row,out double rowRatio))return false;
+                if(!TryRowRatio(bodies,stripes,neighbors,originalSpeeds,profile,dt,row,out double rowRatio))return false;
                 ratio=Math.Min(ratio,rowRatio);found=true;
             }
             return found;
         }
-        private static bool TryRowRatio(NavMotionBody[] bodies,int[] neighbors,double[] originalSpeeds,NavigationProfile profile,double dt,int row,out double ratio)
+        private static bool TryRowRatio(NavMotionBody[] bodies,ReachStripes stripes,int[] neighbors,double[] originalSpeeds,NavigationProfile profile,double dt,int row,out double ratio)
         {
             ratio=1;int cap=profile.CrowdNeighborCap,permanent=0;
             Span<int> permanentPeers=stackalloc int[NeighborCapacity];
@@ -332,7 +520,11 @@ namespace Spacewars.Simulation
             // actor. Evaluate that same radius-only predicate directly; it has
             // no dependency on flags, speeds, dt or the lookahead horizon.
             ref readonly var origin=ref bodies[row];
-            for(int peer=0;peer<bodies.Length;peer++)if(peer!=row){
+            var candidates = stripes.Around(origin.Position);
+            int candidateCount = candidates.IsEmpty ? bodies.Length : candidates.Length;
+            for(int k=0;k<candidateCount;k++){
+                int peer = candidates.IsEmpty ? k : candidates[k];
+                if(peer==row)continue;
                 ref readonly var other=ref bodies[peer];
                 double dx=origin.Position.X-other.Position.X,dz=origin.Position.Z-other.Position.Z;
                 double radius=origin.Radius+other.Radius;
@@ -349,10 +541,21 @@ namespace Spacewars.Simulation
             Span<double> boundaries=stackalloc double[NeighborCapacity];
             double thresholdBoundary=0;
             int nextPermanent=0;
-            for(int peer=0;peer<bodies.Length;peer++)if(peer!=row){
+            double horizon = Math.Max(dt, profile.CrowdLookaheadSeconds);
+            double speed = origin.Active || origin.Potential ? originalSpeeds[row] : 0;
+            for(int k=0;k<candidateCount;k++){
+                int peer = candidates.IsEmpty ? k : candidates[k];
+                if(peer==row)continue;
                 // The ordered zero-scale results were frozen above for this row.
                 if(nextPermanent<permanent&&peer==permanentPeers[nextPermanent]){nextPermanent++;continue;}
-                if(!TryNonPermanentPairBoundary(bodies,originalSpeeds,row,peer,profile,dt,out double boundary))return false;
+                double boundary;
+                if (!candidates.IsEmpty)
+                {
+                    ref readonly var other = ref bodies[peer];
+                    boundary = IndexedPairBoundary(in origin, in other, speed,
+                        other.Active || other.Potential ? originalSpeeds[peer] : 0, horizon);
+                }
+                else if(!TryNonPermanentPairBoundary(bodies,originalSpeeds,row,peer,profile,dt,out boundary))return false;
                 // Once the retained kth boundary is below one, a verified one
                 // cannot enter the retained row or replace its threshold. Skip
                 // only that proven no-op, preserving even unused scratch slots.
@@ -376,6 +579,28 @@ namespace Spacewars.Simulation
                     if(evicted>=0&&(threshold<0||CompareBoundary(lastBoundary,evicted,thresholdBoundary,threshold,bodies)<0)){threshold=evicted;thresholdBoundary=lastBoundary;}
                 }else if(threshold<0||CompareBoundary(boundary,peer,thresholdBoundary,threshold,bodies)<0){threshold=peer;thresholdBoundary=boundary;}
             }
+            // In sparse rows, ratio-one peers may survive in unused neighbor
+            // scratch. Merge omitted ties by the original (ID,row) ordering.
+            if (!candidates.IsEmpty && keep > 0 && (kept < keep || boundaries[keep - 1] == 1))
+            {
+                int next = 0;
+                for (int peer = 0; peer < bodies.Length; peer++)
+                {
+                    if (next < candidates.Length && candidates[next] == peer) { next++; continue; }
+                    if (kept == keep && CompareBoundary(1, peer, boundaries[keep - 1],
+                        neighbors[offset + keep - 1], bodies) >= 0) continue;
+                    int at = kept < keep ? kept++ : keep - 1;
+                    while (at > 0 && CompareBoundary(1, peer, boundaries[at - 1],
+                        neighbors[offset + at - 1], bodies) < 0)
+                    {
+                        neighbors[offset + at] = neighbors[offset + at - 1];
+                        boundaries[at] = boundaries[at - 1];
+                        at--;
+                    }
+                    neighbors[offset + at] = peer;
+                    boundaries[at] = 1;
+                }
+            }
             if(threshold>=0){
                 ratio=thresholdBoundary;
             }
@@ -384,6 +609,35 @@ namespace Spacewars.Simulation
         private static int CompareBoundary(double a,int peerA,double b,int peerB,NavMotionBody[] bodies)
         {
             int c=a.CompareTo(b);if(c!=0)return c;c=bodies[peerA].Id.CompareTo(bodies[peerB].Id);return c!=0?c:peerA.CompareTo(peerB);
+        }
+        // ReachStripes has already certified bounded finite inputs. Outside
+        // the full reach plus 1e-6 the conservative boundary is exactly one:
+        // the largest distance, radius or reach here is below 2^21, and the
+        // root, gap, division and speed-sum roundoffs together are < 1e-8 m.
+        // Inside the margin keep the same downward-rounded scalar operations
+        // and the final exact scaled-speed certificate as the exhaustive path.
+        private static double IndexedPairBoundary(in NavMotionBody a, in NavMotionBody b,
+            double speedA, double speedB, double horizon)
+        {
+            double sum = speedA + speedB;
+            if (sum == 0) return 1;
+            double dx = a.Position.X - b.Position.X, dz = a.Position.Z - b.Position.Z;
+            double squared = dx * dx + dz * dz, radius = a.Radius + b.Radius;
+            double far = radius + sum * horizon + 1e-6;
+            if (squared > far * far) return 1;
+            // The caller has excluded permanent peers, hence squared > 0.
+            double distance = Math.Max(0, NextDown(Math.Sqrt(Math.Max(0, NextDown(squared)))));
+            double gap = Math.Max(0, NextDown(distance - radius));
+            double lowerSpeed = Math.Max(0, NextDown(gap / horizon));
+            double ratio = Math.Max(0, Math.Min(1, NextDown(lowerSpeed / NextUp(sum))));
+            if (ratio == 0) return 0;
+            if (ratio < 1)
+            {
+                speedA = Math.Max(0, NextDown(speedA * ratio));
+                speedB = Math.Max(0, NextDown(speedB * ratio));
+            }
+            double reach = radius + (speedA + speedB) * horizon;
+            return squared <= reach * reach ? 0 : ratio;
         }
         private static bool TryNonPermanentPairBoundary(NavMotionBody[] bodies,double[] originalSpeeds,int row,int peer,NavigationProfile profile,double dt,out double boundary)
         {
@@ -526,10 +780,10 @@ namespace Spacewars.Simulation
             // The caller holds this snapshot immutable for one Select; no cross-call cache.
             Span<RiskInput> riskInputs=stackalloc RiskInput[count<=NeighborCapacity?count:0];bool riskPrepared=false;
             var delta=Sub(a.Target,a.Position);double distance=Length(delta),aim=Math.Atan2(delta.Z,delta.X),limit=a.TurnSpeed*dt;
-            // Reverse is limited to the assigned FINAL point. Intermediate route corners
-            // retain forward steering and all route/terrain guards. Exact joint sweeps
-            // below still arbitrate peers; this proposal carries no avoidance certificate.
-            if(a.ReverseDistance>0&&assignedGoal.HasValue&&a.Target.Equals(assignedGoal.Value)&&distance<=a.ReverseDistance&&
+            // An ordinary reverse still needs the final point. A certified short
+            // command can also back toward a guide on the same straight segment.
+            bool ownedReverse=assignedGoal.HasValue&&OwnedReverseGuide(in a,assignedGoal.Value,profile.ArrivalTolerance);
+            if((ownedReverse||a.ReverseDistance>0&&assignedGoal.HasValue&&a.Target.Equals(assignedGoal.Value)&&distance<=a.ReverseDistance)&&
                 Math.Abs(Angle(aim-a.Heading-Math.PI))<=a.ReverseConeRadians){
                 double rearAim=Angle(aim+Math.PI),rearHeading=Turn(a.Heading,rearAim,limit);
                 bool aligned=Math.Abs(Angle(rearAim-rearHeading))<=profile.ForwardAlignmentAngle;
@@ -537,9 +791,32 @@ namespace Spacewars.Simulation
                 var eventual=Velocity(rearAim,-speed);var velocity=aligned?Velocity(rearHeading,-speed):default;
                 var end=new NavPoint(a.Position.X+velocity.X*dt,a.Position.Z+velocity.Z*dt);
                 var future=new NavPoint(a.Position.X+eventual.X*dt,a.Position.Z+eventual.Z*dt);
-                if(SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&SelectClear(row,future,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt)&&
+                if((!ownedReverse||StepAllowed(end)&&StepAllowed(future))&&
+                    SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&SelectClear(row,future,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt)&&
                     Risk(bodies,row,eventual,neighbors,count,profile.CrowdLookaheadSeconds,riskInputs,ref riskPrepared)<=Risk(bodies,row,default,neighbors,count,profile.CrowdLookaheadSeconds,riskInputs,ref riskPrepared)+1e-12)
                     return new NavMotionProposal{Position=end,Velocity=velocity,Heading=rearHeading,IndependentTurn=!aligned&&!rearHeading.Equals(a.Heading)&&ImprovesGoal(a.Position,future,assignedGoal.Value)};
+            }
+            if (a.DirectArrival && !a.Yielding && !allowStaticGoalTurn)
+            {
+                double heading = Turn(a.Heading, aim, limit);
+                double speed = Math.Min(a.Speed, distance / dt);
+                var eventual = Velocity(aim, speed);
+                // Near the place, finish turning before applying a full step.
+                // Entering on the edge of the broad march cone can overshoot
+                // into the next slot and force several reverse turns.
+                double error = Math.Abs(Angle(aim - heading));
+                var velocity = error <= Math.Min(profile.ForwardAlignmentAngle, limit)
+                    ? Velocity(heading, speed * Math.Cos(error)) : default;
+                var end = new NavPoint(a.Position.X + velocity.X * dt, a.Position.Z + velocity.Z * dt);
+                var forward = new NavPoint(a.Position.X + eventual.X * dt, a.Position.Z + eventual.Z * dt);
+                // Prefer the assigned place while the immediate sweeps are clear.
+                // Joint still checks every actual moving footprint before commit.
+                if (StepAllowed(end) && StepAllowed(forward) &&
+                    StaticPeersClear(bodies, row, neighbors, count, velocity, dt) &&
+                    StaticPeersClear(bodies, row, neighbors, count, eventual, dt) &&
+                    SelectClear(row, end, clearance, clearEntries, ref clearUsed, ref clearNext) &&
+                    SelectClear(row, forward, clearance, clearEntries, ref clearUsed, ref clearNext))
+                    return new NavMotionProposal { Position = end, Velocity = velocity, Heading = heading, IndependentTurn = velocity.Equals(default(NavPoint)) };
             }
             double turning=Turn(a.Heading,aim,limit);result.Heading=turning;
             var preferred=Preferred(in a);double bestRisk=Risk(bodies,row,default,neighbors,count,profile.CrowdLookaheadSeconds,riskInputs,ref riskPrepared),bestError=a.Speed*a.Speed;
@@ -659,6 +936,29 @@ namespace Spacewars.Simulation
                 else RefineStaticAvoidanceTurn(bodies,row,neighbors,count,profile,dt,clearance,objective,aim,limit,bestSteering,bestSpeed,bestRisk,bestError,errorEpsilon,ref result,currentGoal.HasValue);
             }
             if(!won&&hasStaticGoalEscape){result=staticGoalEscape;won=true;futureStaticMove=true;if(CausalActor!=0&&a.Id==CausalActor)Causal.RetryGoalTurn=result.IndependentTurn;}
+            // Blend only the last part of an otherwise stationary direct turn.
+            // Keep the ranked heading, path and speed ceiling; admit the actual step
+            // against the same policy, terrain and peer checks before Joint.
+            if(a.MovingTurn&&!a.Yielding&&!staticTurnThreat&&result.IndependentTurn&&bestSteering==aim&&
+                distance>profile.ArrivalTolerance+bestSpeed*dt){
+                double remaining=Math.Abs(Angle(aim-result.Heading))-profile.ForwardAlignmentAngle;
+                // At most two early 30%-speed ticks, below one normal stride.
+                const double earlyTurnTicks=2, earlyTurnSpeedFraction=.3;
+                double blend=1-remaining/(earlyTurnTicks*limit);
+                if(remaining>0&&blend>0){
+                    var velocity=Velocity(result.Heading,bestSpeed*blend*earlyTurnSpeedFraction);
+                    var end=new NavPoint(a.Position.X+velocity.X*dt,a.Position.Z+velocity.Z*dt);
+                    if(ImprovesGoal(a.Position,end,a.Target)&&StepAllowed(end)&&
+                        SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&
+                        StaticPeersClear(bodies,row,neighbors,count,velocity,dt)&&
+                        Risk(bodies,row,velocity,neighbors,count,profile.CrowdLookaheadSeconds,riskInputs,ref riskPrepared)<=
+                        Risk(bodies,row,default,neighbors,count,profile.CrowdLookaheadSeconds,riskInputs,ref riskPrepared)+1e-12){
+                        result.Position=end;
+                        result.Velocity=velocity;
+                        result.IndependentTurn=false;
+                    }
+                }
+            }
             result.Blocked=!futureStaticMove;
             // An active neighbor is a forecast input, not evidence that this
             // stationary no-winner will recover. Keep actual turns voluntary;
@@ -682,10 +982,8 @@ namespace Spacewars.Simulation
             if(!a.Active||a.Speed<=0)return result;
             if(count<0){result.Overflow=true;return result;}
             var delta=Sub(a.Target,a.Position);double distance=Length(delta),aim=Math.Atan2(delta.Z,delta.X),limit=a.TurnSpeed*dt;
-            // Reverse is limited to the assigned FINAL point. Intermediate route corners
-            // retain forward steering and all route/terrain guards. Exact joint sweeps
-            // below still arbitrate peers; this proposal carries no avoidance certificate.
-            if(a.ReverseDistance>0&&assignedGoal.HasValue&&a.Target.Equals(assignedGoal.Value)&&distance<=a.ReverseDistance&&
+            bool ownedReverse=assignedGoal.HasValue&&OwnedReverseGuide(in a,assignedGoal.Value,profile.ArrivalTolerance);
+            if((ownedReverse||a.ReverseDistance>0&&assignedGoal.HasValue&&a.Target.Equals(assignedGoal.Value)&&distance<=a.ReverseDistance)&&
                 Math.Abs(Angle(aim-a.Heading-Math.PI))<=a.ReverseConeRadians){
                 double rearAim=Angle(aim+Math.PI),rearHeading=Turn(a.Heading,rearAim,limit);
                 bool aligned=Math.Abs(Angle(rearAim-rearHeading))<=profile.ForwardAlignmentAngle;
@@ -759,6 +1057,16 @@ namespace Spacewars.Simulation
             if(!Finite(from.X)||!Finite(from.Z)||!Finite(to.X)||!Finite(to.Z)||!Finite(goal.X)||!Finite(goal.Z))return false;
             double bx=goal.X-from.X,bz=goal.Z-from.Z,ax=goal.X-to.X,az=goal.Z-to.Z,before=bx*bx+bz*bz,after=ax*ax+az*az;
             return Finite(before)&&Finite(after)&&after<before;
+        }
+        private static bool OwnedReverseGuide(in NavMotionBody body,NavPoint goal,double tolerance)
+        {
+            if(body.OwnedShortReverseDistance<=0)return false;
+            var destination=Sub(goal,body.Position);var guide=Sub(body.Target,body.Position);
+            double lengthSquared=destination.X*destination.X+destination.Z*destination.Z;
+            if(lengthSquared<=0||lengthSquared>body.OwnedShortReverseDistance*body.OwnedShortReverseDistance)return false;
+            double along=guide.X*destination.X+guide.Z*destination.Z;
+            double cross=guide.X*destination.Z-guide.Z*destination.X;
+            return along>0&&along<=lengthSquared&&cross*cross<=tolerance*tolerance*lengthSquared;
         }
         private static NavPoint StaticTurnForecastEnd(NavPoint position,double steering,double speed,double distance,double horizon)
         {var reach=Velocity(steering,Math.Min(distance,speed*horizon));return new NavPoint(position.X+reach.X,position.Z+reach.Z);}
@@ -836,6 +1144,46 @@ namespace Spacewars.Simulation
             if(!proposals[actor].HasJointRefuser){proposals[actor].HasJointRefuser=true;proposals[actor].JointFirstRefuser=bodies[peer].Id;}
             proposals[actor].Refuse=true;
         }
+        // Bounds enclose both ends of each swept disk. A refusal can only
+        // retract its endpoint, so these bounds survive every fixed-point pass.
+        private struct SweepBounds
+        {
+            internal double Left, Right, Bottom, Top;
+            internal bool Disjoint(in SweepBounds other) =>
+                Right < other.Left || other.Right < Left || Top < other.Bottom || other.Top < Bottom;
+
+            internal void Include(in SweepBounds other)
+            {
+                Left = Math.Min(Left, other.Left); Right = Math.Max(Right, other.Right);
+                Bottom = Math.Min(Bottom, other.Bottom); Top = Math.Max(Top, other.Top);
+            }
+        }
+        private const int SweepBlockSize = 8;
+
+        private static bool IndexSweeps(NavMotionBody[] bodies, NavMotionProposal[] proposals, double dt,
+            Span<SweepBounds> rows, Span<SweepBounds> blocks)
+        {
+            if (rows.IsEmpty || !(dt > 0 && dt <= 1024)) return false;
+            for (int row = 0; row < bodies.Length; row++)
+            {
+                ref readonly var body = ref bodies[row];
+                var v = proposals[row].Velocity;
+                var p = body.Position;
+                if (!(Math.Abs(p.X) <= 100000 && Math.Abs(p.Z) <= 100000 &&
+                      Math.Abs(v.X) <= 512 && Math.Abs(v.Z) <= 512 &&
+                      body.Radius >= 0 && body.Radius <= 512)) return false;
+                double x = p.X + v.X * dt, z = p.Z + v.Z * dt;
+                // Above bounds keep coordinate roundoff well below this padding.
+                double pad = body.Radius + 1e-7;
+                var box = new SweepBounds { Left = Math.Min(x, p.X) - pad, Right = Math.Max(x, p.X) + pad,
+                    Bottom = Math.Min(z, p.Z) - pad, Top = Math.Max(z, p.Z) + pad };
+                rows[row] = box;
+                int block = row / SweepBlockSize;
+                if (row % SweepBlockSize == 0) blocks[block] = box;
+                else blocks[block].Include(in box);
+            }
+            return true;
+        }
         internal static void ResolveJoint(NavMotionBody[] bodies,NavMotionProposal[] proposals,double dt)
         {
             // Keep actual rejected translation as frame provenance. A forecast
@@ -843,12 +1191,25 @@ namespace Spacewars.Simulation
             // Refusal changes a moving hazard into a stationary one. At most N
             // trajectories can be refused, so the fixed point is finite.
             if(CausalActor!=0)Causal.JointPasses++;
+            int indexedCount = bodies.Length >= 64 && bodies.Length <= 512 ? bodies.Length : 0;
+            Span<SweepBounds> rows = stackalloc SweepBounds[indexedCount];
+            Span<SweepBounds> blocks = stackalloc SweepBounds[(indexedCount + SweepBlockSize - 1) / SweepBlockSize];
+            bool indexed = IndexSweeps(bodies, proposals, dt, rows, blocks);
             bool changed;do{changed=false;for(int i=0;i<bodies.Length;i++){
                 // Velocities change only in the final refusal sweep, not while
                 // pairs are inspected. Reuse this row's frozen proposal.
                 var vi=proposals[i].Velocity;bool stationaryI=vi.X==0&&vi.Z==0;
                 ref readonly var a=ref bodies[i];
                 for(int j=i+1;j<bodies.Length;j++){
+                    if (indexed)
+                    {
+                        if (j % SweepBlockSize == 0 && rows[i].Disjoint(in blocks[j / SweepBlockSize]))
+                        {
+                            j += SweepBlockSize - 1;
+                            continue;
+                        }
+                        if (rows[i].Disjoint(in rows[j])) continue;
+                    }
                     var vj=proposals[j].Velocity;
                     // Two exact stationary proposals cannot acquire a refusal here,
                     // even for overlapping footprints. Keep the final Refuse sweep.

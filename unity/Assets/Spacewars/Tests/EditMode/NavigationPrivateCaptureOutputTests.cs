@@ -60,6 +60,46 @@ namespace Spacewars.Tests.EditMode
             using(var state=domain.CaptureWorldState(7,"private-output-lifetime")){CollectionAssert.AreEqual(state.Encode(),state.Encode());}
             Assert.AreEqual(baseline,budget.PhysicalBytes);
         }
+        [Test] public void StreamingCaptureComparisonKeepsWireEqualityAndReleasesScratch()
+        {
+            var budget=nav.PhysicalHostBudget;
+            long baseline=budget.PhysicalBytes;
+            var block=Enumerable.Range(0,1024).Select(i=>(byte)i).ToArray();
+            void Write(BinaryWriter writer,int marker,int count,bool suffix)
+            {
+                writer.Write(marker);
+                WorldWire.String(writer,"авиация");
+                writer.Write(true);
+                Assert.AreEqual(9+System.Text.Encoding.UTF8.GetByteCount("авиация"),writer.BaseStream.Position);
+                writer.Write(block,0,count);
+                writer.Write(17.25d);
+                if(suffix)writer.Write((byte)42);
+            }
+            Assert.True(budget.TryOpenScope(NavigationPreparationKind.Capture,71,0,out var scope));
+            using(scope)
+            {
+                var reservation=scope.OwnedReservation();
+                using var original=NavigationCaptureBytes.Write(reservation,w=>Write(w,7,block.Length,true));
+                var input=original.Bytes;
+                int extraBuffers=0;
+                budget.AllocationAdmission=bytes=>{if(bytes>512+NavStorageScratch.LeaseBytes)extraBuffers++;return true;};
+                try
+                {
+                    Assert.True(NavigationCaptureBytes.MatchesWrite(input,reservation,w=>Write(w,7,block.Length,true)));
+                    Assert.False(NavigationCaptureBytes.MatchesWrite(input,reservation,w=>Write(w,8,block.Length,true)));
+                    Assert.False(NavigationCaptureBytes.MatchesWrite(input,reservation,w=>Write(w,7,block.Length-1,true)));
+                    Assert.False(NavigationCaptureBytes.MatchesWrite(input,reservation,w=>Write(w,7,block.Length,false)));
+                    Assert.False(NavigationCaptureBytes.MatchesWrite(input.Take(input.Length-1).ToArray(),reservation,
+                        w=>Write(w,7,block.Length,true)));
+                    Assert.Zero(extraBuffers,"Comparison needs only fixed writer and UTF-8 scratch.");
+                }
+                finally{budget.AllocationAdmission=null;}
+            }
+            Assert.AreEqual(baseline,budget.PhysicalBytes);
+            Assert.Zero(budget.HeldBytes);
+            Assert.Zero(budget.ActiveScopes);
+        }
+
         [Test] public void PublicCaptureCallerMutationStillCannotChangeFreshAuthorityCapture()
         {
             var first=nav.CaptureState();var expected=Pack(first);Assert.IsNotEmpty(first.HostAuthority);Assert.IsNotEmpty(first.ArrivalAuthority);first.HostAuthority[0]^=1;first.ArrivalAuthority[0]^=1;first.Dispose();

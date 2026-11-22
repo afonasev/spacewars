@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using Spacewars.Presentation;
@@ -6,6 +8,7 @@ using Spacewars.Simulation;
 using Spacewars.Runtime;
 using UnityEngine;
 using UnityEngine.UIElements;
+using UnityEngine.TestTools;
 
 public class PortraitActionWheelTests
 {
@@ -115,6 +118,119 @@ public class PortraitActionWheelTests
         ring.Set(actions,"Фабрика",null);Assert.False(ring.Q<RadialActionCard>().HasAction);
         Assert.NotNull(ring.Q("radial-footer"));Assert.AreEqual(0,ring.Q<RadialActionCard>().Query<Image>().ToList().Count,"card never duplicates model");
     }
+    [UnityTest] public IEnumerator FactoryAndHangarShowProductionPortraitsAtTheSameScale()
+    {
+        var host=new GameObject("Producer portrait framing");
+        var panel=ScriptableObject.CreateInstance<PanelSettings>();
+        panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");
+        panel.scaleMode=PanelScaleMode.ConstantPixelSize;panel.scale=1;
+        var target=new RenderTexture(940,500,24);
+        target.Create();
+        panel.targetTexture=target;
+        try
+        {
+            var document=host.AddComponent<UIDocument>();document.panelSettings=panel;
+            var root=document.rootVisualElement;OrbitalTheme.Install(root);
+            root.style.backgroundColor=OrbitalTheme.Background;
+            var turns=new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Hangar};
+            var wheels=new System.Collections.Generic.List<(OrbitalBattleRing Ring,OfflinePadAction[] Actions,string Title,string Glyph)>();
+            var research=new[]{PlayableResearchKind.TankChassis,PlayableResearchKind.ShkvalGuidance,PlayableResearchKind.HawkSalvoSystems}
+                .Select((kind,index)=>new PlayableResearchOrderSnapshot(index+1,kind,9,0,30,30,false,true)).ToArray();
+            for(int i=0;i<turns.Length;i++)
+            {
+                var kind=turns[i];
+                var building=new PlayableBuildingSnapshot(7,PlayableOwner.Player,kind,default,100,1,0,0,default,
+                    lifecycle:new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false));
+                var actions=OfflinePadWorldActions.Building(Snapshot(building,research),PlayableProfile.Default,7);
+                var ring=new OrbitalBattleRing();
+                ring.style.left=46+i*450;ring.style.top=50;ring.style.display=DisplayStyle.Flex;
+                string title=kind==PlayableBuildingKind.Factory?"Фабрика":"Ангар";
+                string glyph=OrbitalPrecision.BuildingGlyph(kind);
+                ring.ConfigureInput(true);ring.Resize(360);
+                ring.Set(actions,title,contextGlyph:glyph);
+                root.Add(ring);
+                wheels.Add((ring,actions,title,glyph));
+                if(kind==PlayableBuildingKind.Factory)
+                    Assert.AreEqual("cerberus",actions.Last(a=>a.Sector.Hold=="repeat").Presentation.Artwork);
+                Assert.True(actions.Any(a=>a.Sector.Hold=="repeat"&&a.Presentation.Upgrade));
+                Assert.True(actions.Any(a=>a.Sector.Hold=="repeat"&&!a.Presentation.Upgrade));
+            }
+            var unitKeys=wheels.SelectMany(wheel=>wheel.Actions)
+                .Where(action=>action.Sector.Hold=="repeat").Select(action=>action.Presentation.Artwork);
+            CollectionAssert.IsSubsetOf(new[]{"igla","cerberus","skat"},unitKeys.ToArray());
+            void AssertProductionScale(float expected)
+            {
+                foreach(var (ring,actions,_,_) in wheels)
+                foreach(var action in actions.Where(a=>a.Sector.Hold=="repeat"))
+                {
+                    var petal=ring.Q<Button>("radial-"+action.Sector.Id);
+                    var artwork=petal.Q<RadialArtwork>();
+                    var image=artwork.Q<Image>("model-portrait");
+                    var outline=artwork.Q<Image>("portrait-outline");
+                    string key=action.Presentation.Artwork;
+                    Assert.IsNotNull(image.image,key);
+                    Assert.AreEqual(key,image.image.name);
+                    Assert.IsNotNull(outline.image,key);
+                    Assert.AreEqual(key+"-outline",outline.image.name);
+                    Assert.AreEqual(image.uv,outline.uv);
+                    Assert.That(image.uv.width,Is.InRange(.1f,.99f),action.Presentation.Artwork);
+                    Assert.That(image.uv.width*image.image.width,Is.EqualTo(image.uv.height*image.image.height));
+                    Assert.That(image.worldBound.width,Is.EqualTo(expected).Within(.5f));
+                    Assert.That(image.worldBound.height,Is.EqualTo(expected).Within(.5f));
+                    Assert.False(artwork.worldBound.Overlaps(petal.Q<Label>("radial-sector-count").worldBound),
+                        "The normalized unit portrait must leave the price clear.");
+                }
+            }
+            for(int i=0;i<5;i++)yield return null;
+            float standard=RadialCardProfile.Load().compositionSize;
+            AssertProductionScale(standard);
+            var output=Environment.GetEnvironmentVariable("SPACEWARS_PRODUCER_PORTRAIT_EVIDENCE");
+            if(!string.IsNullOrEmpty(output))
+            {
+                Assert.AreNotEqual(UnityEngine.Rendering.GraphicsDeviceType.Null,SystemInfo.graphicsDeviceType);
+                Directory.CreateDirectory(output);
+                var old=RenderTexture.active;RenderTexture.active=target;
+                var pixels=new Texture2D(target.width,target.height,TextureFormat.RGB24,false);
+                try
+                {
+                    pixels.ReadPixels(new Rect(0,0,target.width,target.height),0,0);pixels.Apply();
+                    File.WriteAllBytes(Path.Combine(output,"factory-hangar.png"),pixels.EncodeToPNG());
+                }
+                finally{RenderTexture.active=old;UnityEngine.Object.DestroyImmediate(pixels);}
+            }
+            foreach(var (ring,actions,title,glyph) in wheels)
+            {
+                ring.Resize(200);
+                var selected=actions.First(a=>a.Sector.Hold=="repeat").Sector.Id;
+                ring.Set(actions,title,selected,contextGlyph:glyph);
+            }
+            for(int i=0;i<3;i++)yield return null;
+            AssertProductionScale(Mathf.Round(standard*48f/70f));
+        }
+        finally
+        {
+            panel.targetTexture=null;target.Release();
+            UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);UnityEngine.Object.DestroyImmediate(target);
+        }
+    }
+    [Test] public void ProductionCropAppliesAndClearsForNewUnitsAndRocketExplorer()
+    {
+        foreach(var key in new[]{"explorerRocket","skat","cerberus","igla"})
+        {
+            var artwork=new RadialArtwork();
+            artwork.Set(key,fitProductionPortrait:true);
+            var image=artwork.Q<Image>("model-portrait");
+            var outline=artwork.Q<Image>("portrait-outline");
+            Assert.IsNotNull(outline.image);
+            Assert.AreEqual(image.uv,outline.uv);
+            Assert.IsNotNull(image.image);
+            Assert.That(image.uv.width,Is.InRange(.1f,.99f));
+            Assert.That(image.uv.width,Is.EqualTo(image.uv.height));
+            artwork.Set(key);
+            Assert.AreEqual(new Rect(0,0,1,1),image.uv);
+        }
+    }
+
     [Test] public void UtilityCardsUsePublishedRepairAndSaleConsequences()
     {
         var actions=OfflinePadWorldActions.Building(Snapshot(Factory()),PlayableProfile.Default,7);

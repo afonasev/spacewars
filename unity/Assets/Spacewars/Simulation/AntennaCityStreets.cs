@@ -9,6 +9,24 @@ namespace Spacewars.Simulation
         public IReadOnlyList<NavObstacle> Streets{get;private set;}
         public IReadOnlyList<NavObstacle> Yards{get;private set;}
         public IReadOnlyList<IReadOnlyList<NavObstacle>> Quarters{get;private set;}
+        public int MunicipalHallQuarter { get; private set; }
+        public int StationQuarter { get; private set; }
+        public int WorkshopQuarter { get; private set; }
+        // Local right axis of the authored street/plaza at each site, in world XZ radians.
+        // These angles derive from the sixfold street topology, not a new tuning control.
+        public double SiteHeading(int siteId)
+        {
+            if(siteId<1||siteId>27)throw new ArgumentOutOfRangeException(nameof(siteId));
+            if(siteId<=18)return (120-60*((siteId-1)%6))*Math.PI/180;
+            if(siteId<=24)return (180-60*(siteId-19))*Math.PI/180;
+            return (180-120*(siteId-25))*Math.PI/180;
+        }
+        public static NavObstacle AlignedYard(NavPoint center,double radius,double heading)
+        {
+            double c=Math.Cos(heading),s=Math.Sin(heading);
+            return new NavObstacle(new NavPolygon(new[]{new NavPoint(-radius,-radius),new NavPoint(radius,-radius),new NavPoint(radius,radius),new NavPoint(-radius,radius)}
+                .Select(p=>new NavPoint(center.X+c*p.X-s*p.Z,center.Z+s*p.X+c*p.Z))));
+        }
         // Authored F2 route vertices, not solver or movement tuning. Both sides skirt
         // the OUTSIDE of a ramp foot before reaching the ground loop at the center.
         public NavPoint[] CenterApproach(int start)
@@ -27,7 +45,7 @@ namespace Spacewars.Simulation
         {
             var roads=new List<NavObstacle>();var yards=new List<NavObstacle>();
             void Road(NavPoint a,NavPoint b,double width)=>roads.Add(Street(a,b,width*Scale));
-            void Yard(NavPoint p,double r){r*=Scale;yards.Add(new NavObstacle(p.X-r,p.Z-r,p.X+r,p.Z+r));}
+            void Yard(int site,NavPoint p,double r){yards.Add(AlignedYard(p,r*Scale,SiteHeading(site)));}
             for(int i=0;i<6;i++){
                 double a=-120+60*i;
                 Road(PointAt(a,124),PointAt(a+60,124),MainStreetWidth);
@@ -35,8 +53,8 @@ namespace Spacewars.Simulation
                 Road(PointAt(a+30,106),PointAt(a+30,124),SideStreetWidth);
                 Road(PointAt(a,24),PointAt(a+60,24),SideStreetWidth);
                 var approach=CenterApproach(i);for(int j=1;j<approach.Length;j++)Road(approach[j-1],approach[j],SideStreetWidth);
-                Yard(PointAt(a,120),BaseYardRadius);Yard(PointAt(a,82),OutpostYardRadius);
-                Yard(PointAt(a,142),MineYardRadius);Yard(PointAt(a+30,124),MineYardRadius);
+                Yard(i+1,PointAt(a,120),BaseYardRadius);Yard(i+7,PointAt(a,82),OutpostYardRadius);
+                Yard(i+13,PointAt(a,142),MineYardRadius);Yard(i+19,PointAt(a+30,124),MineYardRadius);
             }
             for(int i=0;i<3;i++)foreach(int side in new[]{-1,1})Road(Local(-90+120*i,52,side*42,0),RampFoot(i,side),SideStreetWidth);
             Streets=roads.AsReadOnly();Yards=yards.AsReadOnly();
@@ -51,16 +69,53 @@ namespace Spacewars.Simulation
             for(int i=0;i<6;i++){
                 double a=-90+60*i;
                 for(int j=0;j<4;j++)Lot(a,133,145,j/4d,(j+1)/4d);
-                for(int j=0;j<2;j++){Lot(a,115,130,j/2d,(j+1)/2d);Lot(a,71.5+DistrictPassageWidth/2,99,j/2d,(j+1)/2d);Lot(a,32,71.5-DistrictPassageWidth/2,j/2d,(j+1)/2d);}
+                for(int j=0;j<2;j++){
+                    Lot(a,115,130,j/2d,(j+1)/2d);
+                    Lot(a,71.5+DistrictPassageWidth/2,99,j/2d,(j+1)/2d);
+                    // The three halls have open forecourts on both sides.
+                    if(i%2==1)continue;
+                    Lot(a,32,71.5-DistrictPassageWidth/2,j/2d,(j+1)/2d);
+                }
             }
             var cuts=roads.Concat(yards).Concat(supports.Where(s=>s.Id!="city/street").Select(s=>s.Bounds)).ToArray();
             var result=new List<NavObstacle>();var quarters=new List<IReadOnlyList<NavObstacle>>();
+            const double hallAngle = 210;
             foreach(var lot in lots){
                 var pieces=new List<NavPoint[]>{new NavPolygon(lot).Vertices.ToArray()};
                 foreach(var cut in cuts){var next=new List<NavPoint[]>();foreach(var piece in pieces)Subtract(piece,cut,next);pieces=next;if(pieces.Count==0)break;}
                 int first=result.Count;foreach(var piece in pieces)result.Add(new NavObstacle(new NavPolygon(piece),0,BlockHeight));
                 if(result.Count>first)quarters.Add(result.Skip(first).ToArray());
             }
+            // The west-northwest works occupy one parcel between two diverging approach roads.
+            // Its chamfered street corners keep the marked approaches clear at every road width.
+            double setback = (SideStreetWidth - 12) * .65;
+            NavPoint Corner(double radius,double tangent) =>
+                Local(hallAngle, radius, Math.Sign(tangent)*(Math.Abs(tangent)-setback), 0);
+            var hall = new NavObstacle(new NavPolygon(new[]{
+                Corner(41,-3.1), Corner(41,3.1), Corner(54,1.7), Corner(58,1.7),
+                Corner(61.8,3.4), Corner(66,10.1), Corner(69,10.1),
+                Corner(70,8.6), Corner(70,-8.6), Corner(69,-10.1), Corner(66,-10.1), Corner(61.8,-3.4), Corner(58,-1.7), Corner(54,-1.7)
+            }),0,BlockHeight);
+            MunicipalHallQuarter = quarters.Count;
+            quarters.Add(new[]{hall});
+            result.Add(hall);
+            int Terminal(double angle, double rear, double width)
+            {
+                NavPoint Side(double radius,double halfWidth,int sign) =>
+                    Local(angle,radius,sign*(halfWidth-setback),0);
+                var outline=new List<NavPoint>();
+                // Follow the western hall's inner frontage between the two marked approaches.
+                var sections=new[]{(41.0,3.1),(54.0,1.7),(58.0,1.7),(61.8,3.4),(66.0,width),(rear,width)};
+                foreach(var (radius,halfWidth) in sections)outline.Add(Side(radius,halfWidth,1));
+                foreach(var (radius,halfWidth) in sections.Reverse())outline.Add(Side(radius,halfWidth,-1));
+                var solid=new NavObstacle(new NavPolygon(outline),0,BlockHeight);
+                int index=quarters.Count;
+                quarters.Add(new[]{solid});
+                result.Add(solid);
+                return index;
+            }
+            StationQuarter=Terminal(-30,74,10);
+            WorkshopQuarter=Terminal(90,72,11);
             Quarters=quarters.AsReadOnly();return result;
         }
         // Convex authoring cuts keep every resulting footprint convex. This is

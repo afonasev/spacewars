@@ -4,11 +4,47 @@ using System.Threading;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
+using Spacewars.Simulation.Ai;
 
 namespace Spacewars.Tests.EditMode
 {
     public sealed partial class PreparedTacticalCommitTests
     {
+        [TestCase(false)][TestCase(true)]
+        public void PhysicalFrontierCapacityRefusalPreservesRootAndResumesAfterRelease(bool injected)
+        {
+            using var w=new World();
+            w.PumpTo(CertifiedRouteKernel.PumpStage.PreFlush);
+            var port=w.Nav.RoutePort;var budget=w.Nav.PhysicalHostBudget;
+            var original=w.Nav.PinCommittedHostRoot();
+            NavigationRetentionBudget.Scope pressure=null;
+            var publish=typeof(CertifiedRouteKernel).GetMethod("PublishPhysicalFrame",F);
+            var f=original.Frontier;
+            var next=new CertifiedRouteKernel.PumpFrontier(CertifiedRouteKernel.PumpStage.Allocation,
+                f.OriginalBudget,f.ScansUsed,f.TransfersUsed,f.ReadyUsed,f.ProjectionUsed,
+                f.ProjectionAllowance,f.SolveWorkLimit,f.SolveConsumed,f.AllocationFloor,f.PhaseUsed,f.ScanAllowance);
+            try
+            {
+                if(injected)budget.AllocationAdmission=bytes=>bytes<=NavigationRetentionBudget.ScopeBytes;
+                else
+                {
+                    Assert.True(budget.TryOpenScope(NavigationPreparationKind.Capture,1,0,out pressure));
+                    long held=LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes-budget.LiveHeadroom-
+                        NavigationRetentionBudget.ScopeBytes-64;
+                    Assert.Greater(held,0);Assert.True(pressure.TryReserve(held));
+                }
+                Assert.False((bool)publish.Invoke(w.Kernel,new object[]{port,next,null}));
+                var unchanged=w.Nav.PinCommittedHostRoot();
+                try{Assert.AreSame(original,unchanged);Assert.AreEqual(f.Stage,unchanged.Frontier.Stage);}
+                finally{unchanged.Release();}
+                budget.AllocationAdmission=null;pressure?.Discard();pressure=null;
+                Assert.True((bool)publish.Invoke(w.Kernel,new object[]{port,next,null}));
+                Assert.True(w.At(CertifiedRouteKernel.PumpStage.Allocation));
+                Assert.Zero(budget.ActiveScopes);Assert.Zero(budget.HeldBytes);
+            }
+            finally{budget.AllocationAdmission=null;pressure?.Discard();original.Release();}
+        }
+
         [TestCase(PlayableCommandKind.Move)][TestCase(PlayableCommandKind.AttackMove)]
         public void OrdinaryRuntimeOriginalMoveSurvivesRealWorkerProjectionPublication(PlayableCommandKind kind)
         {
@@ -247,6 +283,108 @@ namespace Spacewars.Tests.EditMode
                 if(controller!=null)Assert.True(controller.Wait(10000));runtime.Dispose();original?.Release();completed?.Release();domain.DestroyOwnedNavigation();
             }
         }
+        [TestCase(PlayableCommandKind.Move)]
+        [TestCase(PlayableCommandKind.AttackMove)]
+        public void ScheduledAiMovementWaitsForTheRealWorkerBeforeApplying(PlayableCommandKind kind)
+        {
+            const long generation=71, actionId=88;
+            var config=QueuedAiCompletionConfiguration();
+            var domain=new PlayableDomain(config.Profile,generation,config);
+            var nav=domain.Navigation;
+            var owner=new PlayableAiOwnerLoop(config.Profile,
+                PlayableAiOpeningComposition.Initialize(config.Seed,config.Roster[0].Id),generation,null);
+            var scheduler=new AiAuthorityScheduler(new[]{owner});
+            var authority=new PlayableAuthorityTick(domain,scheduler,config.Seed,config,asynchronousRoutes:true);
+            authority.EnableAccruedCredits();
+            var kernel=new CertifiedRouteKernel();
+            using var reached=new ManualResetEventSlim();
+            using var release=new ManualResetEventSlim();
+            using var completed=new ManualResetEventSlim();
+            int park=0;
+            CertifiedRouteWorker worker=null;
+            kernel.PauseAtPhysicalBoundary=()=>{
+                var root=nav.PinCommittedHostRoot();
+                try{
+                    if(root?.Frontier.Stage==CertifiedRouteKernel.PumpStage.ArrivalAdvance&&Interlocked.CompareExchange(ref park,1,0)==0){
+                        reached.Set();
+                        if(!release.Wait(10000))throw new TimeoutException("scheduled AI worker release");
+                    }
+                }finally{root?.Release();}
+                return nav.RoutePort.CaptureRequested;
+            };
+            bool ObserveCompletion()
+            {
+                if(Volatile.Read(ref park)==0||!release.IsSet)return false;
+                var root=nav.PinCommittedHostRoot();
+                try{if(root?.QuantumCompleted==true)completed.Set();}finally{root?.Release();}
+                return false;
+            }
+            try{
+                PlayableSnapshot View(string id)=>domain.PlayerSnapshot(1,RuntimeStatus.Running,false,
+                    new PlayableRuntimeMetrics(0,0,0,0,0),null,config.Seed,domain.OwnerFor(id));
+                var foreign=View(config.Roster[1].Id);
+                var peer=foreign.Entities.First(e=>e.Owner==foreign.Owner);
+                var peerGoal=new NavPoint(peer.Position.X-3,peer.Position.Z+3);
+                Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(
+                    generation,1,config.Roster[1].Id,PlayableCommandKind.Move,new[]{peer.Id},peerGoal)).Status);
+                for(int i=0;i<4;i++)Assert.True(authority.TryAdvance());
+                worker=new CertifiedRouteWorker(authority.NavigationBinding,4,kernel,stopRequested:ObserveCompletion);
+                Assert.True(reached.Wait(10000),worker.Publication.Failure);
+
+                var view=View(owner.OwnerId);
+                var actor=view.Entities.First(e=>e.Owner==view.Owner);
+                var goal=new NavPoint(actor.Position.X+2,actor.Position.Z+3);
+                var action=new PlayableAiAction(actionId,owner.OwnerId,config.Profile.ProfileId,config.Profile.Revision,
+                    generation,view.Sequence,kind,new[]{actor.Id},goal,seed:config.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+                var pending=(System.Collections.IList)Field(owner,"pendingItems");
+                var item=Activator.CreateInstance(pending.GetType().GetGenericArguments()[0],true);
+                Set(item,"Action",action);
+                Set(item,"Intent",new AiIntent("route-contention","fixture",action,domain.Tick+120,0,0,Array.Empty<string>()));
+                Set(item,"Identity",new AiReceiptIdentity(generation,owner.OwnerId,1,1));
+                Set(item,"SnapshotSequence",view.Sequence);
+                Set(item,"DueTick",domain.Tick);
+                Set(item,"PolicyName","fixture");
+                Set(item,"LocalActionId",actionId);
+                PlayableAiTraceRecord receipt=null;
+                Set(item,"Receipt",new Action<PlayableAiTraceRecord>(value=>receipt=value));
+                pending.Add(item);
+                int observations=0;
+                nav.CommandAdmissionDiagnosticsForQa=true;
+                nav.AfterMovementObservationForQa=()=>{
+                    observations++;
+                    // The original unprotected delivery lets this real worker
+                    // finish between movement observation and publication.
+                    if(!nav.RoutePort.CaptureRequested){
+                        release.Set();
+                        Assert.True(completed.Wait(10000),"real worker completed during unprotected AI preparation");
+                    }
+                };
+
+                long sequence=(long)Field(domain,"nextAiSequence");
+                scheduler.Deliver(domain,_=>0,false);
+                TestContext.WriteLine($"scheduled receipt={receipt?.RuntimeStatus} reason={receipt?.Message} pending={pending.Count}");
+                Assert.IsNull(receipt,"a busy worker leaves the original intent pending");
+                Assert.AreEqual(1,pending.Count);
+                Assert.Zero(observations);
+                Assert.AreEqual(sequence,Field(domain,"nextAiSequence"));
+                Assert.AreEqual(actor.OrderStamp,View(owner.OwnerId).Entities.Single(e=>e.Id==actor.Id).OrderStamp);
+
+                release.Set();
+                Assert.True(SpinWait.SpinUntil(()=> (int)Field(nav.RoutePort,"hostOperations")==0,10000));
+                scheduler.Deliver(domain,_=>0,false);
+                Assert.NotNull(receipt);
+                Assert.AreEqual(PlayableAiDeliveryStatus.Applied,receipt.Status,receipt.Message);
+                Assert.AreEqual(sequence,receipt.CommandSequence);
+                Assert.AreEqual(1,observations);
+                Assert.Zero(pending.Count);
+                Assert.False(nav.RoutePort.CaptureRequested);
+            }finally{
+                nav.AfterMovementObservationForQa=null;release.Set();worker?.Dispose();
+                Assert.True(SpinWait.SpinUntil(()=>worker==null||worker.IsStopped,10000));
+                scheduler.Stop(domain.Tick);nav.ReleaseCommittedHostRoot();domain.DestroyOwnedNavigation();
+            }
+        }
+
         private sealed class ProgressWorker : IDisposable
         {
             private readonly World world;private readonly Thread thread;private readonly ManualResetEventSlim reached=new ManualResetEventSlim();private readonly AutoResetEvent resume=new AutoResetEvent(false);
@@ -276,7 +414,7 @@ namespace Spacewars.Tests.EditMode
                     Observe(); // actual token released, EndAllocation root still published
                     if(closing)return true;
                     var next=new CertifiedRouteKernel.PumpFrontier(CertifiedRouteKernel.PumpStage.PostFlush,f.OriginalBudget,f.ScansUsed,f.TransfersUsed,f.ReadyUsed,f.ProjectionUsed,f.ProjectionAllowance,f.SolveWorkLimit,f.SolveConsumed,f.AllocationFloor,0,f.ScanAllowance);
-                    Assert.True((bool)typeof(CertifiedRouteKernel).GetMethod("PublishPhysicalFrame",F).Invoke(kernel,new object[]{port,next}));
+                    Assert.True((bool)typeof(CertifiedRouteKernel).GetMethod("PublishPhysicalFrame",F).Invoke(kernel,new object[]{port,next,null}));
                     return true; // resume from the real published frame on next Pump
                 }
                 return closing;
@@ -315,7 +453,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void GuardDiagnosticsKeepValidationSnapshotAcrossLaterWorkerProgress()
         {
-            using(var w=new World()){
+            using(var w=new World(certifiedFlat:true)){
                 var authority=new PlayableAuthorityTick(w.Domain,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),7,asynchronousRoutes:true);
                 authority.EnableAccruedCredits();var at=w.Position(4);Assert.True(w.Nav.Move(4,new NavPoint(at.X-3,at.Z+3)));
                 var routing=w.Domain.RoutingProfile;
@@ -361,7 +499,8 @@ namespace Spacewars.Tests.EditMode
         [TestCase("attack","stage")][TestCase("attack","commit")]
         public void RemainingWorkerProgressPreservesHostBankAndExactCold(string family,string boundary)
         {
-            using(var w=new World()){
+            // The worker phase is observed on the certified-arrival backend.
+            using(var w=new World(certifiedFlat:true)){
                 int enemy=PrepareRemainingProgress(w);NavigationHostRoot advanced=null;NavPagedList<long> bank=null;byte[] body=null;long[] values=null;int hits=0;
                 using(var worker=new ProgressWorker(w)){
                     var advance=PrimeRemainingProgress(w,worker,family);
@@ -389,7 +528,7 @@ namespace Spacewars.Tests.EditMode
         [TestCase("attack","actor")][TestCase("attack","token")][TestCase("attack","serial")][TestCase("attack","cancel")]
         public void RemainingWorkerProgressRejectsConflictWithoutDomainEffects(string family,string defect)
         {
-            using(var w=new World()){
+            using(var w=new World(certifiedFlat:true)){
                 int enemy=PrepareRemainingProgress(w);Action restore=null;NavigationHostRoot changed=null;int hits=0;
                 using(var worker=new ProgressWorker(w)){
                     var advance=PrimeRemainingProgress(w,worker,family);string before=UnitState(w.Domain,3);
@@ -419,7 +558,7 @@ namespace Spacewars.Tests.EditMode
         [TestCase(PlayableCommandKind.Stop)][TestCase(PlayableCommandKind.Hold)]
         public void AttackSuccessorDoesNotRelaxStopOrHold(PlayableCommandKind kind)
         {
-            using(var w=new World()){
+            using(var w=new World(certifiedFlat:true)){
                 PrepareRemainingProgress(w);
                 using(var worker=new ProgressWorker(w)){
                     var advance=PrimeRemainingProgress(w,worker,"attack");w.Nav.BeforeCommandMailboxSnapshotForQa=_=>advance();

@@ -33,29 +33,34 @@ namespace Spacewars.Presentation
         private void BindKeyboardCommands()
         {
             input.SignalPointer=(at,left,down,alt)=>ScanPointer(at,left,down,alt)||SignalPointer(at,left,down,alt);input.SignalModal=()=>signalWheelOpen||orbitalOpen||orbitalReleaseGate;input.CancelSignal=()=>{if(orbitalOpen)CloseOrbital();else CancelTeamSignal();};
-            input.IsKeyboardBlockingCamera=()=>BotCameraLocked||orbitalOpen||orbitalReleaseGate||signalWheelOpen||KeyboardBlocksCamera;
+            input.IsKeyboardBlockingCamera=()=>BotSeat||orbitalOpen||orbitalReleaseGate||signalWheelOpen||KeyboardBlocksCamera;
             input.SelectionDragPixels=(float)profile.SelectionDragPixels;
             input.DoubleClickMilliseconds=KeyboardProfile.doubleTapMs;
-            input.SelectionKey=KeyboardSelection;
+            input.SelectionKey=KeyboardSelection;input.DeleteSelection=DeleteProvingSelection;
             input.CanIssueAttack=()=>view!=null&&(view.Entities.Any(e=>e.Owner==view.Owner&&e.Health>0&&selection.Contains(e.Id))||view.Buildings.Any(b=>TerritoryRules.ArmedDefense(b.Kind)&&b.Owner==view.Owner&&b.Health>0&&selection.Contains(b.Id)));
             input.SelectSameType=SelectSameType;
             input.ResetCamera=ResetKeyboardCamera;input.FocusLatestEvent=()=>FocusMatchNotification(false);
             // HUD overlays still block orders, but must not cover the camera edge zones.
-            input.IsPointerBlockingCamera=point=>!cameraView.pixelRect.Contains(point);
+            input.IsPointerBlockingCamera=point=>!cameraView.pixelRect.Contains(point)||spectatorMode&&OverUi(point);
             input.EdgePanAxis=point=>SeatUsesKeyboard?AngularCommandCursor.EdgePan(point,cameraView.pixelRect,(float)profile.CameraEdgePanZonePixels):Vector2.zero;
-            input.EdgePan=axis=>{if(!BotCameraLocked)cameraView.transform.position+=NativeCameraScrollSettings.Displacement(cameraView.transform,axis,NativeCameraScrollSettings.EdgeSpeed(profile.CameraEdgePanSpeed),Time.unscaledDeltaTime);};
+            input.EdgePan=axis=>PanCameraManually(NativeCameraScrollSettings.Displacement(cameraView.transform,axis,NativeCameraScrollSettings.EdgeSpeed(profile.CameraEdgePanSpeed),Time.unscaledDeltaTime));
             commandCursor=new AngularCommandCursor();commandCursor.Set(false);
         }
         private void RememberKeyboardCamera()
         { keyboardHomePosition=cameraView.transform.position;keyboardHomeRotation=cameraView.transform.rotation;keyboardHomeZoom=cameraView.orthographicSize; }
         private void ResetKeyboardCamera()
-        { if(BotCameraLocked)return;cameraView.transform.SetPositionAndRotation(keyboardHomePosition,keyboardHomeRotation);cameraView.orthographicSize=keyboardHomeZoom; }
+        {
+            if(BotSeat)return;
+            if(cameraView.transform.position!=keyboardHomePosition||cameraView.transform.rotation!=keyboardHomeRotation||cameraView.orthographicSize!=keyboardHomeZoom)ReleaseSpectatorCamera();
+            cameraView.transform.SetPositionAndRotation(keyboardHomePosition,keyboardHomeRotation);
+            cameraView.orthographicSize=keyboardHomeZoom;
+        }
         private void KeyboardSelection(int index,bool assign,double time)
         {
             if(view==null)return;
             runtime?.RecordHumanAction(LocalOwnerId);
             var entities=KeyboardEntities();var ids=keyboardGroups.Apply(index,assign,time,selection,entities,KeyboardProfile.doubleTapMs,out bool focus);
-            selection.Clear();foreach(int id in ids)selection.Add(id);selectedSite=selectedSlot=primarySelection=0;confirmSaleBuilding=0;battleDismissed=false;battleRally=false;
+            inspectionEntityId=0;selection.Clear();foreach(int id in ids)selection.Add(id);selectedSite=selectedSlot=primarySelection=0;confirmSaleBuilding=0;battleDismissed=false;battleRally=false;
             if(focus)
             {
                 var center=Ground(SeatScreenCenter);
@@ -64,18 +69,7 @@ namespace Spacewars.Presentation
             }
             SelectionMarkerEvent();root.Focus();Record("keyboard group="+index+" assign="+assign+" focus="+focus+" ids="+string.Join(",",ids));
         }
-        private void SelectSameType(Vector2 point)
-        {
-            if(view==null)return;int id=Pick(point,true);var clicked=view.Entities.FirstOrDefault(e=>e.Id==id&&e.Owner==view.Owner&&e.Health>0);
-            if(clicked==null){Select(point,point,false);return;}
-            runtime?.RecordHumanAction(LocalOwnerId);selection.Clear();
-            foreach(var entity in view.Entities.Where(e=>e.Owner==view.Owner&&e.Health>0&&e.Kind==clicked.Kind))
-            {
-                var screen=cameraView.WorldToScreenPoint(world.Point(entity.Position));
-                if(screen.z>0&&cameraView.pixelRect.Contains(new Vector2(screen.x,screen.y)))selection.Add(entity.Id);
-            }
-            selectedSite=selectedSlot=primarySelection=0;confirmSaleBuilding=0;keyboardGroups.Observe(selection);SelectionMarkerEvent();root.Focus();
-        }
+        private void SelectSameType(Vector2 point) => SelectAt(point,point,false,true);
         private bool HostileAt(Vector2 point)
         { int id=Pick(point,false);return view.Entities.Any(e=>e.Id==id&&e.Health>0&&IsOpponent(e.Owner))||view.Buildings.Any(b=>b.Id==id&&b.Health>0&&IsOpponent(b.Owner)); }
         private void UpdateKeyboardPresentation()

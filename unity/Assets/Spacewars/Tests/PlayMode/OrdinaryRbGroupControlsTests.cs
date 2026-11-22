@@ -12,23 +12,28 @@ namespace Spacewars.Input.Tests
 {
     public sealed partial class OrdinaryLocalPadTests
     {
-        [UnityTest] public IEnumerator RbAssignXAddRecallAndRtOrbitalStayLocal()
+        private float RadialHoldWait(PlayableBootstrap seat)=>(float)Get<NativeLocalInputProfile>(seat,"battleInputProfile").RadialHoldMs/1000f+.05f;
+        [UnityTest] public IEnumerator RbAssignXAddRecallAndTriggerMenusStayLocal()
         {
             yield return StartOrdinary(2,false,true);
             var seat=Seats[0];var other=Seats[1];var pad=pads[0];var v=Get<PlayableSnapshot>(seat,"view");
+            float radialWait=RadialHoldWait(seat);
             var ids=v.Entities.Where(e=>e.Owner==v.Owner).Select(e=>e.Id).Take(1).ToArray();Assert.AreEqual(1,ids.Length);
             var groups=Get<KeyboardControlGroups>(seat,"keyboardGroups");var entities=(KeyboardSelectable[])Call(seat,"KeyboardEntities");
             var otherBefore=Selection(other).ToArray();long sequence=Get<long>(seat,"sequence");
             Selection(seat).Clear();Selection(seat).Add(ids[0]);Call(app,"UpdateFrame");
             ButtonFrame(pad,pad.rightShoulder,true);Assert.AreEqual("groupWheel",Get<OfflinePadGestures>(seat,"battleGestures").Mode);
-            Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");
-            Assert.IsEmpty(groups.Members(1,entities),"hold prepares assignment, release confirms");ButtonFrame(pad,pad.rightShoulder,false);CollectionAssert.AreEqual(new[]{ids[0]},groups.Members(1,entities));Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");
+            Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");yield return new WaitForSecondsRealtime(radialWait);Call(app,"UpdateFrame");
+            Assert.IsEmpty(groups.Members(1,entities),"RB only opens the wheel");
+            ButtonFrame(pad,pad.buttonSouth,true);yield return new WaitForSecondsRealtime(radialWait);Call(app,"UpdateFrame");
+            Assert.IsEmpty(groups.Members(1,entities),"release of A confirms the hold");ButtonFrame(pad,pad.buttonSouth,false);
+            CollectionAssert.AreEqual(new[]{ids[0]},groups.Members(1,entities));ButtonFrame(pad,pad.rightShoulder,false);Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");
             Selection(seat).Clear();Selection(seat).Add(ids[0]);Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,true);Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");
-            yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");
+            yield return new WaitForSecondsRealtime(radialWait);Call(app,"UpdateFrame");
             yield return Capture("rb-group-actions",captureWidth:1600,captureHeight:1000,captureChecks:()=>
             {
                 var ring=Get<OrbitalBattleRing>(seat,"padAuxiliaryRing");Inside(Get<VisualElement>(seat,"root").worldBound,ring.Q<RadialActionCard>().worldBound,"group action card");
-                Assert.True(ring.Query<Label>().ToList().Any(l=>l.text.Contains("Добавить")));Assert.False(ring.Query<Label>().ToList().Any(l=>l.text.Contains("RT")));
+                Assert.True(ring.Query<Label>().ToList().Any(l=>l.text.Contains("Добавить")));Assert.True(ring.Query<Label>().ToList().Any(l=>l.text=="Выбрать"));Assert.False(ring.Query<Label>().ToList().Any(l=>l.text.Contains("RT")));
             });
             Tap(pad,pad.buttonWest);CollectionAssert.AreEquivalent(ids,groups.Members(1,entities));CollectionAssert.AreEqual(new[]{ids[0]},Selection(seat));
             yield return Capture("rb-group-added",captureWidth:1600,captureHeight:1000,captureChecks:()=>
@@ -37,16 +42,26 @@ namespace Spacewars.Input.Tests
                 Assert.True(ring.Query<Label>().ToList().Any(l=>l.text.Contains("Сохранено")));Assert.False(ring.Query<Label>().ToList().Any(l=>l.text.Contains("RT")));
             });
             ButtonFrame(pad,pad.rightShoulder,false);Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");CollectionAssert.AreEqual(new[]{ids[0]},Selection(seat));
-            Selection(seat).Clear();Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,true);Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,false);Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");CollectionAssert.AreEquivalent(ids,Selection(seat));
-            ButtonFrame(pad,pad.rightTrigger,true);yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightTrigger,false);Assert.AreEqual("world",Get<OfflinePadGestures>(seat,"battleGestures").Mode);
-            Assert.True(Get<bool>(seat,"orbitalOpen"),"RT now opens orbital support without changing group selection");Call(seat,"CloseOrbital");
-            Assert.AreEqual(sequence,Get<long>(seat,"sequence"),"group buttons/X/opening RT cannot issue simulation commands");CollectionAssert.AreEquivalent(otherBefore,Selection(other));Assert.IsEmpty(Get<KeyboardControlGroups>(other,"keyboardGroups").Members(1,(KeyboardSelectable[])Call(other,"KeyboardEntities")));
+            Selection(seat).Clear();Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,true);Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");yield return new WaitForSecondsRealtime(radialWait);Call(app,"UpdateFrame");
+            var camera=Get<Camera>(seat,"cameraView");
+            var beforeRecall=camera.transform.position;
+            Tap(pad,pad.buttonSouth);
+            Assert.AreEqual(beforeRecall,camera.transform.position,"recalling a group from a petal keeps the current camera");
+            ButtonFrame(pad,pad.rightShoulder,false);Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");CollectionAssert.AreEquivalent(ids,Selection(seat));
+            Tap(pad,pad.rightTrigger);
+            Assert.True(Get<bool>(seat,"selectionRosterPadFocus"),"RT opens the recalled unit's details");Assert.False(Get<bool>(seat,"orbitalOpen"));
+            CollectionAssert.AreEquivalent(ids,Selection(seat));Tap(pad,pad.buttonEast);
+            Tap(pad,pad.leftTrigger);
+            Assert.AreEqual("world",Get<OfflinePadGestures>(seat,"battleGestures").Mode);
+            Assert.True(Get<bool>(seat,"orbitalOpen"),"LT opens orbital support");CollectionAssert.AreEquivalent(ids,Selection(seat));Call(seat,"CloseOrbital");
+            Assert.AreEqual(sequence,Get<long>(seat,"sequence"),"group and trigger menus cannot issue simulation commands");CollectionAssert.AreEquivalent(otherBefore,Selection(other));Assert.IsEmpty(Get<KeyboardControlGroups>(other,"keyboardGroups").Members(1,(KeyboardSelectable[])Call(other,"KeyboardEntities")));
         }
-        [UnityTest] public IEnumerator BumperTapsNavigateImmediatelyWithoutShowingWheels()
+        [UnityTest] public IEnumerator BumperTapsSelectImmediatelyWithoutShowingWheels()
         {
             yield return StartOrdinary(2,false,true);
             var seat=Seats[0];var pad=pads[0];var other=Seats[1];var before=Selection(other).ToArray();
-            var v=Get<PlayableSnapshot>(seat,"view");var building=v.Buildings.First(b=>b.Owner==v.Owner&&b.Kind==PlayableBuildingKind.Headquarters);
+            var v=Get<PlayableSnapshot>(seat,"view");
+            float radialWait=RadialHoldWait(seat);var building=v.Buildings.First(b=>b.Owner==v.Owner&&b.Kind==PlayableBuildingKind.Headquarters);
             var unit=v.Entities.First(e=>e.Owner==v.Owner);var groups=Get<KeyboardControlGroups>(seat,"keyboardGroups");var entities=(KeyboardSelectable[])Call(seat,"KeyboardEntities");
             groups.Apply(1,true,0,new[]{building.Id},entities,300,out _);groups.Apply(2,true,0,new[]{unit.Id},entities,300,out _);
             Selection(seat).Clear();Call(app,"UpdateFrame");long sequence=Get<long>(seat,"sequence");
@@ -56,23 +71,42 @@ namespace Spacewars.Input.Tests
                 Assert.AreEqual(DisplayStyle.None,Get<OrbitalBattleRing>(seat,"padAuxiliaryRing").style.display.value,"auxiliary wheel flashed");
                 Assert.AreEqual(DisplayStyle.None,Get<OrbitalBattleRing>(seat,"battleRing").style.display.value,"intermediate building wheel flashed");
             }
+            var camera=Get<Camera>(seat,"cameraView");camera.transform.position+=new Vector3(50,0,50);
+            var cameraBefore=camera.transform.position;
+            float doubleTapWait=Get<NativeLocalInputProfile>(seat,"battleInputProfile").doubleTapMs/1000f+.05f;
             ButtonFrame(pad,pad.rightShoulder,true);Hidden();ButtonFrame(pad,pad.rightShoulder,false);Hidden();
             CollectionAssert.AreEqual(new[]{building.Id},Selection(seat),"first release must cycle immediately, including building groups");
+            Assert.AreEqual(cameraBefore,camera.transform.position,"the first release must not jump before a potential double tap");
             ButtonFrame(pad,pad.rightShoulder,true);Hidden();ButtonFrame(pad,pad.rightShoulder,false);Hidden();
             CollectionAssert.AreEquivalent(v.Entities.Where(e=>e.Owner==v.Owner&&e.Health>0).Select(e=>e.Id),Selection(seat),"second short release selects army immediately");
-            Call(app,"UpdateFrame");Hidden();
-            var camera=Get<Camera>(seat,"cameraView");camera.transform.position+=new Vector3(50,0,50);var cameraBefore=camera.transform.position;
+            Assert.AreEqual(cameraBefore,camera.transform.position,"the second release selects the army in place");
+            yield return new WaitForSecondsRealtime(doubleTapWait);Call(app,"UpdateFrame");Hidden();
+            Assert.AreEqual(cameraBefore,camera.transform.position,"the double tap cancels pending focus");
+            Tap(pad,pad.rightShoulder);Hidden();
+            Assert.AreEqual(cameraBefore,camera.transform.position,"a single tap still waits for the double-tap window");
+            yield return new WaitForSecondsRealtime(doubleTapWait);Call(app,"UpdateFrame");Hidden();
+            Assert.Greater(Vector3.Distance(cameraBefore,camera.transform.position),1,"a confirmed single tap focuses the selected group");
+            camera.transform.position+=new Vector3(50,0,50);cameraBefore=camera.transform.position;
             ButtonFrame(pad,pad.leftShoulder,true);Hidden();ButtonFrame(pad,pad.leftShoulder,false);Hidden();
             Assert.Greater(Vector3.Distance(cameraBefore,camera.transform.position),1,"first LB release focuses base immediately");
             Call(app,"UpdateFrame");ButtonFrame(pad,pad.leftShoulder,true);Hidden();ButtonFrame(pad,pad.leftShoulder,false);Hidden();
             yield return Capture("bumper-short-no-wheel",captureWidth:1600,captureHeight:1000,captureChecks:Hidden);
-            ButtonFrame(pad,pad.rightShoulder,true);Hidden();yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");
+            ButtonFrame(pad,pad.rightShoulder,true);Hidden();yield return new WaitForSecondsRealtime(radialWait);Call(app,"UpdateFrame");
             Assert.True(Get<OfflinePadGestures>(seat,"battleGestures").AuxiliaryWheelVisible);Assert.AreEqual(DisplayStyle.Flex,Get<OrbitalBattleRing>(seat,"padAuxiliaryRing").style.display.value);
             yield return Capture("bumper-held-group-wheel",captureWidth:1600,captureHeight:1000,captureChecks:()=>Assert.AreEqual(DisplayStyle.Flex,Get<OrbitalBattleRing>(seat,"padAuxiliaryRing").style.display.value));
             ButtonFrame(pad,pad.rightShoulder,false);Call(app,"UpdateFrame");Hidden();
-            ButtonFrame(pad,pad.leftShoulder,true);Hidden();yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");
+            ButtonFrame(pad,pad.leftShoulder,true);Hidden();yield return new WaitForSecondsRealtime(radialWait);Call(app,"UpdateFrame");
             Assert.True(Get<OfflinePadGestures>(seat,"battleGestures").AuxiliaryWheelVisible);Assert.AreEqual(DisplayStyle.Flex,Get<OrbitalBattleRing>(seat,"padAuxiliaryRing").style.display.value);
-            ButtonFrame(pad,pad.leftShoulder,false);Call(app,"UpdateFrame");Hidden();
+            camera.transform.position+=new Vector3(50,0,50);cameraBefore=camera.transform.position;
+            Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");
+            yield return Capture("lb-base-actions",captureWidth:1600,captureHeight:1000,captureChecks:()=>
+            {
+                var ring=Get<OrbitalBattleRing>(seat,"padAuxiliaryRing");
+                Assert.True(ring.Query<Label>().ToList().Any(l=>l.text=="Перейти"));
+            });
+            Tap(pad,pad.buttonSouth);Assert.Greater(Vector3.Distance(cameraBefore,camera.transform.position),1,"A focuses the highlighted base");
+            Assert.Zero(Get<OfflinePadGestures>(seat,"battleGestures").Progress);
+            ButtonFrame(pad,pad.leftShoulder,false);Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");Hidden();
             CollectionAssert.AreEquivalent(before,Selection(other));Assert.AreEqual(sequence,Get<long>(seat,"sequence"),"navigation must not issue simulation commands");
         }
         [UnityTest] public IEnumerator AHeldTwoSecondsShowsOwnViewportRectangleAndSelectsOnce()

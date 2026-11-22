@@ -22,12 +22,20 @@ namespace Spacewars.Tests.PlayMode
             try{
                 Wait(()=>runtime.IsPrepared&&runtime.Latest.Paused);runtime.RequestPause(false);Wait(()=>runtime.Latest.Orbital.Level==1);
                 Assert.True(runtime.TrySubmit(new PlayableCommand(902,1,"player-1",PlayableCommandKind.ChooseOrbital,null,targetId:2)).Accepted);Wait(()=>runtime.Latest.Orbital.Abilities.Count==1);
-                Assert.True(runtime.TrySubmit(new PlayableCommand(902,2,"player-1",PlayableCommandKind.UseOrbital,null,new NavPoint(-6,1),targetId:2)).Accepted);Wait(()=>runtime.Latest.Mines.Count==1);
+                Assert.True(runtime.TrySubmit(new PlayableCommand(902,2,"player-1",PlayableCommandKind.UseOrbital,null,new NavPoint(-6,1),targetId:2)).Accepted);
+                Wait(()=>runtime.ReceiptsAfter(0).Any(r=>r.OwnerId=="player-1"&&r.Sequence==2));
+                Assert.AreEqual(PlayableCommandStatus.InvalidTarget,runtime.ReceiptsAfter(0).Single(r=>r.OwnerId=="player-1"&&r.Sequence==2).Status);
+                Assert.Zero(runtime.Latest.Orbital.Abilities.Single().Remaining);
+                Assert.Zero(runtime.Latest.Orbital.CommonRemaining);
+                Assert.IsEmpty(runtime.Latest.Mines);
+                // Leave a straight approach clear of the opposing tank at (-10, 0).
+                var minePoint=new NavPoint(-5,8);
+                Assert.True(runtime.TrySubmit(new PlayableCommand(902,3,"player-1",PlayableCommandKind.UseOrbital,null,minePoint,targetId:2)).Accepted);Wait(()=>runtime.Latest.Mines.Count==1);
                 var speech=new NativeSpeechPlan(new GameplayAudioProfile());
                 GameplayAudioScreen[] Screens()=>new[]{new GameplayAudioScreen(runtime.ParticipantView("player-1"),default,new NavPoint(1,0)),new GameplayAudioScreen(runtime.ParticipantView("player-2"),default,new NavPoint(1,0))};
                 speech.Observe(Screens(),0,true);
                 var enemy=runtime.Latest.Entities.Single(e=>e.Owner==PlayableOwner.Enemy&&e.Kind==PlayableEntityKind.Tank);int before=enemy.Health;
-                Assert.True(runtime.TrySubmit(new PlayableCommand(902,1,"player-2",PlayableCommandKind.Move,new[]{enemy.Id},new NavPoint(-6,1))).Accepted);
+                Assert.True(runtime.TrySubmit(new PlayableCommand(902,1,"player-2",PlayableCommandKind.Move,new[]{enemy.Id},minePoint)).Accepted);
                 Wait(()=>runtime.Latest.Entities.Any(e=>e.Id==enemy.Id&&Math.Abs(e.Position.X-enemy.Position.X)>.1));
                 Wait(()=>runtime.Latest.Mines.Count==0&&runtime.Latest.MineBlasts.Count==1);
                 Assert.AreEqual(before-80,runtime.Latest.Entities.Single(e=>e.Id==enemy.Id).Health,"primary is not hit by its own splash");Assert.AreEqual(1.4,runtime.Latest.MineBlasts[0].Radius);

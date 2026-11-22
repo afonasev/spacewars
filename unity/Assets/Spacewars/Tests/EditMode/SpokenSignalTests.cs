@@ -61,7 +61,9 @@ namespace Spacewars.Tests.EditMode
         {
             var n=new NativeMatchNotifications();n.Update(View(1,PlayableOwner.Player,Fact(1,1,MatchEventKind.UnitsAttacked),Fact(2,1,MatchEventKind.MineHit,PlayableOwner.Player,8)),false,1,PlayableProfile.Default);
             Assert.AreEqual(1,n.Count);Assert.AreEqual("Мина!",n.Latest.Text);
-            foreach(MatchEventKind kind in Enum.GetValues(typeof(MatchEventKind)))Assert.True(SpokenSignalCatalog.Phrases.ContainsKey(SpokenSignalCatalog.Key(kind)),kind.ToString());
+            foreach(MatchEventKind kind in Enum.GetValues(typeof(MatchEventKind)))
+                if(kind==MatchEventKind.DominationCountdown)Assert.IsNull(SpokenSignalCatalog.Key(kind),"The last ten seconds use the separate timer sound.");
+                else Assert.True(SpokenSignalCatalog.Phrases.ContainsKey(SpokenSignalCatalog.Key(kind)),kind.ToString());
             foreach(var phrase in SpokenSignalCatalog.Phrases.Values)Assert.False(phrase.StartsWith("Ваш"));
         }
         [Test] public void OverviewNeverAdmitsSpeechAndSelectedOwnerCannotHearOpposingEvents()

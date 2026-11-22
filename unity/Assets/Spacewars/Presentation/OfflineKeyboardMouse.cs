@@ -42,15 +42,7 @@ namespace Spacewars.Presentation
             SelectionMarkerEvent(0);
             if(focus){var center=Center(0);var point=KeyboardControlGroups.Focus(ids,entities,center.X,center.Z,padProfile.controlGroupFocusRadius);if(point.HasValue)Focus(0,new NavPoint(point.Value.X,point.Value.Z));}
         }
-        private void OfflineSelectSameType(Vector2 point)
-        {
-            if(session==null)return;var v=views[0];var ground=Ground(0,point);
-            var clicked=v.View.Entities.Where(e=>e.Owner==v.View.Owner&&e.Health>0).OrderBy(e=>Distance(e.Position,ground)).FirstOrDefault();
-            if(clicked==null||Distance(clicked.Position,ground)>PlayableUnitRules.Radius(profile,clicked.Kind)*profile.TargetPickRadiusMultiplier){SelectMouse(point,point,false);return;}
-            session.RecordHumanAction(session.Seats[0].Id);v.Selection.Clear();v.Site=v.Slot=v.Parent=v.Anchor=0;
-            foreach(var entity in v.View.Entities.Where(e=>e.Owner==v.View.Owner&&e.Health>0&&e.Kind==clicked.Kind))if(OfflinePadSelection.InViewport(v.Camera,v.World.Point(entity.Position)))v.Selection.Add(entity.Id);
-            offlineKeyboardGroups.Observe(v.Selection);SelectionMarkerEvent(0);
-        }
+        private void OfflineSelectSameType(Vector2 point) => SelectOfflineAt(point,point,false,true);
         private (PlayableCommandKind? Kind,int Target) OfflineMouseCommand(NavPoint p,bool attack,bool map)
         {
             if(map)return (attack?PlayableCommandKind.AttackMove:PlayableCommandKind.Move,0);

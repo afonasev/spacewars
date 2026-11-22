@@ -157,6 +157,51 @@ public sealed class SelectedTowerRangeTests
         }
     }
 
+    [UnityTest] public IEnumerator MouseHoverOverridesSelectionForAllOwnersAndRestoresIt()
+    {
+        var host=new GameObject("Tower hover input");var app=host.AddComponent<PlayableBootstrap>();app.enabled=false;
+        var mouse=UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Mouse>();
+        const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+        void Set(string name,object value)=>typeof(PlayableBootstrap).GetField(name,flags).SetValue(app,value);
+        T Get<T>(string name)=>(T)typeof(PlayableBootstrap).GetField(name,flags).GetValue(app);
+        object Call(string name,params object[] args)=>typeof(PlayableBootstrap).GetMethods(flags).Single(m=>m.Name==name&&m.GetParameters().Length==args.Length).Invoke(app,args);
+        void Move(Vector2 point){UnityEngine.InputSystem.InputSystem.QueueStateEvent(mouse,new UnityEngine.InputSystem.LowLevel.MouseState{position=point});UnityEngine.InputSystem.InputSystem.Update();}
+        try
+        {
+            var profile=PlayableProfile.Default;Set("profile",profile);Call("CreateWorld");Call("CreateHud");
+            var input=host.AddComponent<PlayableInput>();input.AssignedMouse=mouse;Set("input",input);
+            input.SetFocus(true);
+            var world=Get<PlayableWorld>("world");world.Fog.ShowPublic();var camera=Get<Camera>("cameraView");
+            camera.transform.position=new Vector3(0,24,-20);camera.transform.LookAt(Vector3.zero);
+            var own=Tower(70,PlayableBuildingKind.RepairTower,new NavPoint(-6,0));
+            var selection=Get<HashSet<int>>("selection");selection.Add(70);
+            var center=(Vector2)camera.WorldToScreenPoint(world.Point(new NavPoint(3,0))+Vector3.up);
+            foreach(var owner in new[]{PlayableOwner.Player,PlayableOwner.Third,PlayableOwner.Enemy})
+            foreach(var kind in new[]{PlayableBuildingKind.SentryTurret,PlayableBuildingKind.GaussTower,PlayableBuildingKind.RepairTower})
+            {
+                var tower=Tower(80,kind,new NavPoint(3,0),owner:owner);Set("view",Frame(profile,own,tower));
+                Move(new Vector2(-100,-100));Call("Render");Assert.AreEqual(70,world.RangeTowerId);
+                Move(center);Call("Render");Assert.AreEqual(80,world.RangeTowerId,owner+" "+kind);
+                Assert.That(Properties(world).GetVector("_Zone").w,Is.EqualTo(PlayableWorld.TowerActionRange(profile,kind)).Within(.0001));
+                CollectionAssert.AreEquivalent(new[]{70},selection,"Hover does not change selection");
+                input.IsPointerOverUi=_=>true;Call("Render");Assert.AreEqual(70,world.RangeTowerId);input.IsPointerOverUi=null;
+                input.WorldInputEnabled=false;Call("Render");Assert.AreEqual(70,world.RangeTowerId);input.WorldInputEnabled=true;
+                Set("inLobby",true);Call("Render");Assert.False(world.TowerRangeVisual.activeSelf);Set("inLobby",false);
+            }
+            foreach(var invalid in new[]{Tower(80,PlayableBuildingKind.GaussTower,new NavPoint(3,0),ConstructionPhase.Constructing),Tower(80,PlayableBuildingKind.GaussTower,new NavPoint(3,0),health:0),Tower(80,PlayableBuildingKind.Factory,new NavPoint(3,0))})
+            {Set("view",Frame(profile,own,invalid));Move(center);Call("Render");Assert.AreEqual(70,world.RangeTowerId);}
+            var vision=new PlayableVision(0,profile.ArenaHalfExtent,profile.ArenaHalfExtent,1,.5);
+            vision.Refresh(Array.Empty<VisionSource>(),Array.Empty<KnownBuilding>());
+            var hidden=Tower(80,PlayableBuildingKind.GaussTower,new NavPoint(3,0),owner:PlayableOwner.Enemy);
+            Set("view",new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,Array.Empty<PlayableEntitySnapshot>(),new[]{own,hidden},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision.Snapshot(),activeProfile:profile));
+            Move(center);Call("Render");Assert.AreEqual(70,world.RangeTowerId,"No live radius from a hidden tower");
+            Set("view",Frame(profile,own,hidden));Move(center);Call("Render");Assert.AreEqual(80,world.RangeTowerId);
+            selection.Clear();Move(new Vector2(-100,-100));Call("Render");Assert.False(world.TowerRangeVisual.activeSelf);
+            yield return null;
+        }
+        finally{UnityEngine.InputSystem.InputSystem.RemoveDevice(mouse);UnityEngine.Object.DestroyImmediate(host);}
+    }
+
     [UnityTest] public IEnumerator ActualSelectionHookShowsAndClearsRadius()
     {
         var host=new GameObject("Ordinary tower range selection hook");var app=host.AddComponent<PlayableBootstrap>();app.enabled=false;var flags=BindingFlags.Instance|BindingFlags.NonPublic;
@@ -195,7 +240,11 @@ public sealed class SelectedTowerRangeTests
                 {
                     camera.orthographicSize=range*zoom;camera.Render();var selected=Read();Assert.Greater(Count(selected,kind==PlayableBuildingKind.RepairTower),120,"Range edge must be visible in actual render "+kind);Save(selected,kind+(zoom>1?"-normal":"-close"));UnityEngine.Object.DestroyImmediate(selected);
                 }
-                selection.Clear();world.RenderTowerRange(frame,selection);actor.Selection.SetActive(false);camera.Render();var clear=Read();Assert.Less(Count(clear,kind==PlayableBuildingKind.RepairTower),30,"Deselection removes coverage");Save(clear,kind+"-deselected");UnityEngine.Object.DestroyImmediate(clear);
+                selection.Clear();actor.Selection.SetActive(false);
+                var enemy=Tower(1,kind,new NavPoint(0,0),owner:PlayableOwner.Enemy);
+                world.RenderTowerRange(Frame(profile,enemy),selection,hovered:1);camera.Render();var hovered=Read();
+                Assert.Greater(Count(hovered,kind==PlayableBuildingKind.RepairTower),120,"Enemy hover uses the same functional radius");Save(hovered,kind+"-enemy-hover");UnityEngine.Object.DestroyImmediate(hovered);
+                world.RenderTowerRange(frame,selection);actor.Selection.SetActive(false);camera.Render();var clear=Read();Assert.Less(Count(clear,kind==PlayableBuildingKind.RepairTower),30,"Deselection removes coverage");Save(clear,kind+"-deselected");UnityEngine.Object.DestroyImmediate(clear);
                 selection.Add(1);world.RenderTowerRange(frame,selection);world.Fog.Reset();camera.Render();var hidden=Read();Assert.Less(Count(hidden,kind==PlayableBuildingKind.RepairTower),30,"Unexplored fog hides coverage");UnityEngine.Object.DestroyImmediate(hidden);
                 world.Fog.ShowPublic();camera.cullingMask=1<<9;camera.Render();var other=Read();Assert.Less(Count(other,kind==PlayableBuildingKind.RepairTower),30,"Other local camera cannot see this world's coverage");UnityEngine.Object.DestroyImmediate(other);camera.cullingMask=1<<8;
             }

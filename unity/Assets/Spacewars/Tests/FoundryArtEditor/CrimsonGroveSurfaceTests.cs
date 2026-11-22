@@ -9,6 +9,30 @@ namespace Spacewars.Tests.EditMode
 {
  public sealed class CrimsonGroveSurfaceTests
  {
+  [Test] public void MinimapUsesTheMapPaletteForBasinTerracesAndRock(){
+   var map=new CrimsonGroveMap();
+   var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);
+   var art=CrimsonGroveArtProfile.Load();
+   var terrain=new PlayableMapTerrain(profile);
+   try{
+    terrain.ShowPublicTerrain();
+    Color PixelAt(NavPoint point){
+     int size=terrain.Texture.width;
+     int Pixel(double world)=>(int)((world/profile.ArenaHalfExtent+1)*.5*size);
+     return terrain.Texture.GetPixel(Pixel(point.X),Pixel(point.Z));
+    }
+    void Check(NavPoint point,Color expected,string label){
+     var actual=PixelAt(point);
+     Assert.That(actual.r,Is.EqualTo(expected.r).Within(1f/255),label);
+     Assert.That(actual.g,Is.EqualTo(expected.g).Within(1f/255),label);
+     Assert.That(actual.b,Is.EqualTo(expected.b).Within(1f/255),label);
+    }
+    Check(map.Polar(0,50),art.Ground,"basin");
+    Check(map.Polar(0,112),art.Terrace,"terrace");
+    Check(new NavPoint(0,0),art.Rock,"ridge");
+    Assert.That(PixelAt(new NavPoint(profile.ArenaHalfExtent*.95,profile.ArenaHalfExtent*.95)).a,Is.Zero);
+   }finally{UnityEngine.Object.DestroyImmediate(terrain.Texture);}
+  }
   [Test] public void ApronsContainAllSlotsAndStayOnTheirExistingTerrace(){
    var m=new CrimsonGroveMap();var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),m);var art=CrimsonGroveArtProfile.Load();
    foreach(var site in m.Sites(p).Where(s=>s.Kind!=PlayableBuildingKind.Mine)){

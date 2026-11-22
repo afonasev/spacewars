@@ -7,7 +7,7 @@ using Spacewars.Simulation.Ai;
 
 namespace Spacewars.Runtime
 {
-    internal enum AiCombatMicroPhase { Withdraw, Return, Repair, Regroup, Focus }
+    internal enum AiCombatMicroPhase { Withdraw, Return, Repair, Regroup, Focus, Resume, AvoidCerberusFlame, SpreadAroundCerberus }
     internal sealed class AiCombatMicroPlan
     {
         internal PlayableAiAction Action;
@@ -21,7 +21,7 @@ namespace Spacewars.Runtime
         internal const string Policy="combat-micro";
         sealed class Fire {internal int Source,Victim;internal long Tick;}
         readonly List<Fire> fire=new List<Fire>();
-        sealed class Sample {internal long Tick,DamageTick=-1;internal double Health,Loss;}
+        sealed class Sample {internal long Tick,DamageTick=-1,FirstDamageTick=-1;internal double Health,Loss,ContactHealth;}
         sealed class Certificate
         {
             internal int Unit,Target;
@@ -30,6 +30,7 @@ namespace Spacewars.Runtime
             internal PlayableCommandKind Kind;
             internal NavPoint Goal;
         }
+        internal Func<int,bool> GroupPassage;
         readonly Dictionary<int,Certificate> certificates=new Dictionary<int,Certificate>();
         sealed class Client
         {
@@ -37,6 +38,7 @@ namespace Spacewars.Runtime
             internal long Started,SafeSince=-1,Sequence,ActionId,Army;
             internal int Tower;
             internal NavPoint Goal;
+            internal NavLocation? RepairOrigin;
         }
         readonly Dictionary<int,Sample> samples=new Dictionary<int,Sample>();
         readonly Dictionary<int,Client> clients=new Dictionary<int,Client>();
@@ -46,16 +48,37 @@ namespace Spacewars.Runtime
         AiCombatMicroPlan pending;
         internal long PendingId=>pendingId;
         internal long PendingGeneration=>pendingGeneration;
+        internal bool HasPendingRecipients=>pending!=null&&pending.Action.EntityIds.All(id=>
+            clients.TryGetValue(id,out var client)&&client.Sequence==0&&client.Phase==pending.Phase);
         internal IEnumerable<int> ReservedActors=>clients.Keys.Where(Reserves);
         static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
         static double Health(PlayableEntitySnapshot u)=>u.ExactHealth??u.Health;
         static bool Eligible(PlayableEntitySnapshot u)=>u.Health>0&&!u.Held&&!u.Departing&&u.OrderStamp?.Origin!=PlayableOrderOrigin.Human;
         static bool Tower(PlayableBuildingSnapshot b,PlayableOwner owner)=>b.Owner==owner&&b.Health>0&&b.Kind==PlayableBuildingKind.RepairTower&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true;
-        PlayableEntitySnapshot[] Attackers(PlayableAiObservation o,PlayableEntitySnapshot u,PlayableProfile p)=>o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&fire.Any(f=>f.Source==e.Id&&f.Victim==u.Id)&&o.Vision?.IsVisible(e.Position)==true&&AiRosterCatalog.Initial.Targets(e.Kind,u.Kind==PlayableEntityKind.Hawk?"air":"ground")&&Distance(e.Position,u.Position)<=PlayableUnitRules.Range(p,e.Kind,e.Upgraded)+PlayableUnitRules.Radius(p,u.Kind)+PlayableUnitRules.Radius(p,e.Kind)).ToArray();
+        PlayableEntitySnapshot[] Attackers(PlayableAiObservation o,PlayableEntitySnapshot u,PlayableProfile p)=>o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&fire.Any(f=>f.Source==e.Id&&f.Victim==u.Id&&!SwitchedFire(f,u.Id))&&o.Vision?.IsVisible(e.Position)==true&&AiRosterCatalog.Initial.Targets(e.Kind,u.Kind==PlayableEntityKind.Hawk?"air":"ground")&&Distance(e.Position,u.Position)<=PlayableUnitRules.Range(p,e.Kind,e.Upgraded)+PlayableUnitRules.Radius(p,u.Kind)+PlayableUnitRules.Radius(p,e.Kind)).ToArray();
         static AiArmyState Army(AiArmyRegistry registry,int unit)=>registry.Capture().Armies.FirstOrDefault(a=>a.Members.Contains(unit)&&a.Major&&a.Phase!=AiArmyPhase.Disbanded&&!a.Reinforcements.Contains(unit));
         static long T(AiProfile ai,AiDifficulty d,string key)=>AiProfile.SecondsToTicks(ai.DifficultyValue(d,"micro."+key),30);
         static double V(AiProfile ai,AiDifficulty d,string key)=>ai.DifficultyValue(d,"micro."+key);
-        internal bool Reserves(int unit)=>clients.TryGetValue(unit,out var c)&&(c.Phase==AiCombatMicroPhase.Withdraw||c.Phase==AiCombatMicroPhase.Repair||c.Phase==AiCombatMicroPhase.Return);
+        internal bool Reserves(int unit) => clients.TryGetValue(unit, out var client) &&
+            (CerberusManeuver(client.Phase) || ReservesMotion(unit, client));
+
+        // Lateral maneuvers retain tactical custody while their exact Move
+        // runs on the ordinary navigator. They have no rotation-motion descriptor.
+        internal bool ReservesExecutionMotion(int unit) => clients.TryGetValue(unit, out var client) &&
+            ReservesMotion(unit, client);
+
+        private bool ReservesMotion(int unit, Client client) =>
+            client.Phase is AiCombatMicroPhase.Withdraw or AiCombatMicroPhase.Repair ||
+            client.Phase == AiCombatMicroPhase.Return && !JoinedReturn(unit, client) ||
+            client.Phase == AiCombatMicroPhase.Resume && client.Sequence == 0;
+        internal bool IsAppliedWithdrawal(PlayableOrderStamp stamp)=>
+            stamp?.Kind==PlayableCommandKind.Move&&clients.TryGetValue(stamp.UnitId,out var client)&&
+            client.Phase==AiCombatMicroPhase.Withdraw&&RetainsAppliedExecutionStamp(stamp.UnitId,stamp)&&
+            certificates.TryGetValue(stamp.UnitId,out var certificate)&&certificate.Kind==stamp.Kind&&
+            certificate.Generation==stamp.Generation&&certificate.Tick==stamp.Tick&&
+            certificate.ActionId==stamp.ActionId&&certificate.ActionId==stamp.JobId;
+        bool JoinedReturn(int unit,Client client)=>client.Sequence>0&&certificates.TryGetValue(unit,out var certificate)&&
+            client.SafeSince>=certificate.Tick;
         internal bool CurrentOverride(PlayableAiObservation o,AiArmyState army,PlayableEntitySnapshot u)
         {
             if(o==null||army==null||u==null||!certificates.TryGetValue(u.Id,out var c)||c.Army!=army.Id||c.Army<=0||army.OwnerId!=o.OwnerId||!army.Major||army.Phase==AiArmyPhase.Disbanded||!army.Members.Contains(u.Id)||army.Reinforcements.Contains(u.Id)||!Eligible(u)||u.Owner!=o.Owner)return false;
@@ -69,6 +92,10 @@ namespace Spacewars.Runtime
             var pending=u.Queue?.Pending;
             if(pending!=null&&pending.CommandSequence==c.Sequence&&pending.AiActionId==c.ActionId&&pending.Kind==c.Kind)return true;
             var order=u.CurrentOrder;
+            if(c.Kind==PlayableCommandKind.AttackMove)
+                return order?.Kind==PlayableTacticalOrderKind.AttackMove&&order.CommandSequence==c.Sequence&&
+                    order.UnitId==u.Id&&order.Owner==owner&&order.Generation==generation&&order.IssuedTick==c.Tick&&
+                    (u.Queue?.Active?.Anchor?.Position??order.Destination).Equals(c.Goal);
             if(order!=null)return order.Owner==owner&&order.UnitId==u.Id&&order.Generation==c.Generation&&order.CommandSequence==c.Sequence&&order.IssuedTick==c.Tick&&
                 (c.Kind==PlayableCommandKind.Move?order.Kind==PlayableTacticalOrderKind.Move&&order.Destination.Equals(c.Goal):c.Kind==PlayableCommandKind.Follow?order.Kind==PlayableTacticalOrderKind.Follow&&order.TargetId==c.Target:c.Kind==PlayableCommandKind.Attack&&order.Kind==PlayableTacticalOrderKind.Attack&&order.TargetId==c.Target);
             // Stop and completed Move are still the current accepted order. They
@@ -94,16 +121,19 @@ namespace Spacewars.Runtime
             {
                 var u=o.Entities.FirstOrDefault(e=>e.Id==id&&e.Owner==o.Owner&&e.Health>0);
                 var c=certificates[id];
-                if(u==null||!Eligible(u)||!Matches(c,o,u)||c.Army!=0&&!armies.Capture().Armies.Any(a=>a.Id==c.Army&&a.Major&&a.Phase!=AiArmyPhase.Disbanded&&a.Members.Contains(id)&&!a.Reinforcements.Contains(id))&&!AppliedRepair(o,u)&&!CancelFollow(o,p,ai,d,armies,u))certificates.Remove(id);
+                if(u==null||!Eligible(u)||!Matches(c,o,u)||c.Army!=0&&c.Kind!=PlayableCommandKind.Attack&&
+                    !armies.Capture().Armies.Any(a=>a.Id==c.Army&&a.Major&&a.Phase!=AiArmyPhase.Disbanded&&a.Members.Contains(id)&&!a.Reinforcements.Contains(id))&&!AppliedRepair(o,u)&&!CancelFollow(o,p,ai,d,armies,u))
+                {
+                    certificates.Remove(id);
+                    // Only an applied client depends on this certificate. A pending
+                    // replacement is bound to its proposal and still needs delivery.
+                    if(clients.TryGetValue(id,out var client)&&client.Sequence>0)
+                        Release(id,o.Tick,ai,d);
+                }
             }
-            long fireWindow=T(ai,d,"observedFireSeconds");
-            fire.RemoveAll(f=>o.Tick-f.Tick>fireWindow||!o.Entities.Any(e=>e.Id==f.Victim&&e.Owner==o.Owner&&e.Health>0));
-            foreach(var shot in o.ObservedHostileShots)
-            {
-                var fact=fire.FirstOrDefault(f=>f.Source==shot.OwnerId&&f.Victim==shot.TargetId);
-                if(fact==null){fact=new Fire{Source=shot.OwnerId,Victim=shot.TargetId};fire.Add(fact);}fact.Tick=o.Tick;
-            }
+            ObserveFire(o,p,ai,d);
             var live=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0).ToDictionary(u=>u.Id);
+            ObserveRepairRetries(o,p,ai,d,live);
             foreach(var id in samples.Keys.Where(id=>!live.ContainsKey(id)).ToArray())samples.Remove(id);
             foreach(var id in cooldowns.Keys.Where(id=>!live.ContainsKey(id)||cooldowns[id]<=o.Tick).ToArray())cooldowns.Remove(id);
             foreach(var u in live.Values)
@@ -112,7 +142,24 @@ namespace Spacewars.Runtime
                 if(o.Tick>s.Tick)
                 {
                     double loss=Math.Max(0,s.Health-Health(u));
-                    if(loss>0){s.Loss=loss*30/(o.Tick-s.Tick);s.DamageTick=o.Tick;}
+                    if(loss>0)
+                    {
+                        bool newContact=s.FirstDamageTick<0||o.Tick-s.DamageTick>T(ai,d,"safeSeconds");
+                        if(newContact)
+                        {
+                            s.FirstDamageTick=o.Tick;
+                            s.ContactHealth=s.Health;
+                            s.Loss=loss*30/(o.Tick-s.Tick);
+                        }
+                        else
+                        {
+                            // Measure sustained contact across its hit intervals.
+                            // Staggered shells in one volley must not look like
+                            // the same damage repeated every one or two ticks.
+                            s.Loss=Math.Max(0,s.ContactHealth-Health(u))*30/(o.Tick-s.FirstDamageTick);
+                        }
+                        s.DamageTick=o.Tick;
+                    }
                     else if(s.DamageTick>=0&&o.Tick-s.DamageTick>T(ai,d,"safeSeconds"))s.Loss=0;
                     s.Tick=o.Tick;s.Health=Health(u);
                 }
@@ -136,20 +183,103 @@ namespace Spacewars.Runtime
                     bool installed=stamp!=null&&stamp.Owner==o.Owner&&stamp.UnitId==u.Id&&stamp.Generation==o.Generation&&stamp.Origin==PlayableOrderOrigin.Ai&&stamp.Source==PlayableAiOpeningComposition.SourceIdentity&&stamp.Sequence==c.Sequence&&stamp.ActionId==c.ActionId&&stamp.JobId==c.ActionId;
                     if(!pendingRoute&&!installed||(u.NavigationOutcome==NavigationOutcome.Unreachable||u.NavigationOutcome==NavigationOutcome.Rejected))
                     {Release(pair.Key,o.Tick,ai,d);continue;}
-                    if(c.Phase==AiCombatMicroPhase.Focus&&u.CurrentOrder==null&&u.Queue?.Pending==null){Release(pair.Key,o.Tick,ai,d);continue;}
+                    if((c.Phase==AiCombatMicroPhase.Focus||CerberusManeuver(c.Phase))&&u.CurrentOrder==null&&u.Queue?.Pending==null){Release(pair.Key,o.Tick,ai,d);continue;}
                     if(c.Phase==AiCombatMicroPhase.Return)
                     {
                         var leader=o.Entities.FirstOrDefault(e=>e.Id==u.CurrentOrder?.TargetId&&e.Owner==o.Owner&&e.Health>0);
-                        if(leader!=null&&ReturnJoined(p,u,leader))Release(pair.Key,o.Tick,ai,d);
+                        if(leader!=null&&ReturnJoined(p,u,leader))
+                        {
+                            if(ResumesArmyAttack(d))
+                            {
+                                // Physical return is complete. Keep the exact Follow
+                                // through the first shot or a local AttackMove.
+                                if(!JoinedReturn(pair.Key,c))c.SafeSince=o.Tick;
+                            }
+                            else Release(pair.Key,o.Tick,ai,d);
+                        }
                         continue;
                     }
                     if(c.Phase==AiCombatMicroPhase.Regroup){Release(pair.Key,o.Tick,ai,d);continue;}
+                    if(c.Phase==AiCombatMicroPhase.Resume)continue;
                 }
-                bool danger=Attackers(o,u,p).Length>0||samples[u.Id].Loss>0;
+                bool danger=c.Phase==AiCombatMicroPhase.Withdraw||c.Phase==AiCombatMicroPhase.Resume
+                    ?o.ObservedHostileShots.Any(shot=>shot.TargetId==u.Id)||samples[u.Id].DamageTick==o.Tick
+                    :Attackers(o,u,p).Length>0||samples[u.Id].Loss>0;
                 c.SafeSince=danger?-1:c.SafeSince<0?o.Tick:c.SafeSince;
             }
         }
+        void ObserveFire(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d)
+        {
+            long fireWindow=T(ai,d,"observedFireSeconds");
+            var visiblePursuit=clients.Where(x=>x.Value.Phase==AiCombatMicroPhase.Withdraw)
+                .Select(x=>o.Entities.FirstOrDefault(u=>u.Id==x.Key&&u.Owner==o.Owner&&u.Health>0))
+                .Where(u=>u!=null).SelectMany(u=>Pursuers(o,u,p).Select(e=>(e.Id,u.Id))).ToHashSet();
+            fire.RemoveAll(f=>o.Tick-f.Tick>fireWindow&&!visiblePursuit.Contains((f.Source,f.Victim))||
+                !o.Entities.Any(e=>e.Id==f.Victim&&e.Owner==o.Owner&&e.Health>0));
+            foreach(var shot in o.ObservedHostileShots)
+            {
+                var fact=fire.FirstOrDefault(f=>f.Source==shot.OwnerId&&f.Victim==shot.TargetId);
+                if(fact==null){fact=new Fire{Source=shot.OwnerId,Victim=shot.TargetId};fire.Add(fact);}
+                fact.Tick=Math.Max(fact.Tick,shot.DirectLaunchTick??o.Tick);
+            }
+        }
+
+        internal bool HasSwitchRecovery=>clients.Values.Any(c=>c.Sequence>0&&
+            c.Phase is AiCombatMicroPhase.Withdraw or AiCombatMicroPhase.Return);
+
+        internal AiCombatMicroPlan PlanSwitchedReturn(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d,AiArmyRegistry armies)
+        {
+            if(pendingId!=0||!ResumesArmyAttack(d)||!HasSwitchRecovery)return null;
+            ObserveFire(o,p,ai,d);
+            foreach(var u in o.Entities.Where(u=>u.Owner==o.Owner&&Eligible(u)).OrderBy(u=>u.Id))
+            {
+                if(!clients.TryGetValue(u.Id,out var c)||c.Sequence==0||c.Phase is not (AiCombatMicroPhase.Withdraw or AiCombatMicroPhase.Return)||
+                    o.Tick-c.Started>T(ai,d,"maxPhaseSeconds")||!AttackersSwitched(o,u,p)||!ReadyToResume(o,p,ai,d,u))continue;
+                var plan=ResumeArmyAttack(o,p,ai,d,armies,u,c.Army);
+                if(plan!=null&&IsShortReturn(p,ai,d,u,plan.Action.Target))
+                    return proposed=plan;
+            }
+            return null;
+        }
+
+        internal static bool IsShortReturn(PlayableProfile p,AiProfile ai,AiDifficulty d,PlayableEntitySnapshot unit,NavPoint point)=>
+            Distance(unit.Position,point)<=WithdrawalStepLength(p,ai,d,unit)+p.Navigation.ArrivalTolerance;
+
+        internal bool IsQuickRecovery(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d,PlayableAiAction action)
+        {
+            if(proposed?.Phase!=AiCombatMicroPhase.Resume||!IsWithdrawalRecovery(o,action))return false;
+            var unit=o.Entities.First(u=>u.Id==action.EntityIds[0]&&u.Owner==o.Owner);
+            return IsShortReturn(p,ai,d,unit,action.Target)&&AttackersSwitched(o,unit,p);
+        }
+
         internal int ObservedAttackCount(PlayableAiObservation o,PlayableEntitySnapshot unit,PlayableProfile p)=>Attackers(o,unit,p).Length;
+        internal bool UnderWithdrawalPressure(PlayableAiObservation o,PlayableEntitySnapshot unit,PlayableProfile p)=>
+            o.ObservedHostileShots.Any(s=>s.TargetId==unit.Id)||
+            Attackers(o,unit,p).Any(e=>fire.Any(f=>f.Source==e.Id&&f.Victim==unit.Id&&!SwitchedFire(f,unit.Id)))||
+            Pursuers(o,unit,p).Length>0;
+        PlayableEntitySnapshot[] Pursuers(PlayableAiObservation o,PlayableEntitySnapshot unit,PlayableProfile p)
+        {
+            return o.Entities.Where(enemy=>o.IsHostile(enemy.Owner)&&enemy.Health>0&&enemy.Moving&&
+                o.Vision?.IsVisible(enemy.Position)==true&&AiRosterCatalog.Initial.Targets(enemy.Kind,unit.Kind==PlayableEntityKind.Hawk?"air":"ground")&&
+                fire.Any(f=>f.Source==enemy.Id&&f.Victim==unit.Id&&!SwitchedFire(f,unit.Id))&&
+                (unit.Position.X-enemy.Position.X)*Math.Cos(enemy.HullHeading)+
+                (unit.Position.Z-enemy.Position.Z)*Math.Sin(enemy.HullHeading)>0).ToArray();
+        }
+        bool SwitchedFire(Fire attack,int patient)=>fire.Any(f=>f.Source==attack.Source&&f.Victim!=patient&&f.Tick>attack.Tick);
+        bool AttackersSwitched(PlayableAiObservation o,PlayableEntitySnapshot unit,PlayableProfile p)
+        {
+            var prior=fire.Where(f=>f.Victim==unit.Id).ToArray();
+            // An old attacker that is now outside the fight cannot keep a
+            // unit waiting for a switch it will never see.
+            return prior.Any(f=>SwitchedFire(f,unit.Id))&&!UnderWithdrawalPressure(o,unit,p);
+        }
+        bool WithdrawalCanReturn(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d,PlayableEntitySnapshot unit,Client client)=>
+            unit.Queue?.Pending==null&&!(unit.Queue?.Deferred.Count>0)&&!AutomaticallyResuming(o,p,unit)&&
+            !o.ObservedHostileShots.Any(s=>s.TargetId==unit.Id)&&SplashSafe(o,p,unit,unit.Position)&&
+            (AttackersSwitched(o,unit,p)||!unit.Moving&&Pursuers(o,unit,p).Length==0&&Attackers(o,unit,p).Length==0&&
+                client.SafeSince>=0&&o.Tick-client.SafeSince>=WithdrawalQuiet(ai,d));
+        long WithdrawalQuiet(AiProfile ai,AiDifficulty d)=>
+            Math.Min(T(ai,d,"safeSeconds"),AiProfile.SecondsToTicks(ai.DifficultyValue(d,"control.reactionMaxSeconds"),30));
         bool Attention(PlayableAiObservation o,int id,AiProfile ai,AiDifficulty d)
         {
             if(cooldowns.TryGetValue(id,out var until)&&o.Tick<until)return false;
@@ -161,14 +291,32 @@ namespace Spacewars.Runtime
         PlayableAiAction Action(PlayableAiObservation o,PlayableCommandKind kind,IEnumerable<int> ids,NavPoint goal,int target=0,int tower=0)=>new PlayableAiAction(nextId,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,kind,ids.ToArray(),goal,targetId:target,parentId:tower,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         internal AiCombatMicroPlan Propose(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d,AiArmyRegistry armies)
         {
+#if UNITY_INCLUDE_TESTS
+            if(PlayableAiOwnerLoop.IsolatedRotationForTests&&PlayableAiOwnerLoop.IsolatedRotationOwnerForTests!=o.OwnerId)return null;
+#endif
             if(pendingId!=0)return null;
-            var own=o.Entities.Where(u=>u.Owner==o.Owner&&Eligible(u)).OrderBy(u=>u.Id).ToArray();
+            var own=o.Entities.Where(u=>u.Owner==o.Owner&&Eligible(u)&&GroupPassage?.Invoke(u.Id)!=true).OrderBy(u=>u.Id).ToArray();
             foreach(var u in own.Where(u=>CancelFollow(o,p,ai,d,armies,u)))
                 return new AiCombatMicroPlan{Action=Action(o,PlayableCommandKind.Stop,new[]{u.Id},u.Position),Phase=AiCombatMicroPhase.Regroup,Army=certificates[u.Id].Army};
             foreach(var pair in clients.OrderBy(x=>x.Key).ToArray())
             {
                 var c=pair.Value;var u=own.FirstOrDefault(u=>u.Id==pair.Key);if(u==null||c.Sequence==0)continue;
                 if(c.Phase==AiCombatMicroPhase.Focus)continue;
+                if(c.Phase==AiCombatMicroPhase.Withdraw&&ReadyToResume(o,p,ai,d,u))
+                {
+                    var resume=ResumeArmyAttack(o,p,ai,d,armies,u,c.Army);
+                    if(resume!=null)return resume;
+                }
+                if(c.Phase==AiCombatMicroPhase.Withdraw&&!u.Moving&&u.Queue?.Pending==null&&!(u.Queue?.Deferred.Count>0)&&
+                    ReturnAnchor(o,p,ai,d,armies,u,c.Army)!=null)
+                {
+                    var pursuers=Pursuers(o,u,p);
+                    var pressure=pursuers.Length>0?pursuers:Attackers(o,u,p).Where(e=>o.ObservedHostileShots.Any(s=>s.OwnerId==e.Id&&s.TargetId==u.Id)).ToArray();
+                    var next=pressure.Length==0?null:Withdrawal(o,p,ai,d,u,pressure,continuing:true);
+                    if(next.HasValue)
+                        return new AiCombatMicroPlan{Action=Action(o,PlayableCommandKind.Move,new[]{u.Id},next.Value),
+                            Phase=AiCombatMicroPhase.Withdraw,Army=c.Army,Survival=true};
+                }
                 if(c.Phase==AiCombatMicroPhase.Withdraw&&V(ai,d,"repairEnabled")>0&&PlayableUnitRules.HealthRatio(p,u)<V(ai,d,"combatRepairHealth")&&
                     Army(armies,u.Id)?.Id==c.Army&&u.Queue?.Pending==null&&(u.Queue==null||u.Queue.Deferred.Count==0)&&
                     certificates.TryGetValue(u.Id,out var applied)&&Matches(applied,o,u))
@@ -176,7 +324,7 @@ namespace Spacewars.Runtime
                     var repair=Repair(o,p,ai,d,u,Army(armies,u.Id));if(repair!=null)return repair;
                 }
                 bool ready=c.Phase==AiCombatMicroPhase.Repair?PlayableUnitRules.HealthRatio(p,u)>=V(ai,d,"repairReturnHealth"):
-                    c.Phase==AiCombatMicroPhase.Withdraw&&c.SafeSince>=0&&o.Tick-c.SafeSince>=T(ai,d,"safeSeconds");
+                    c.Phase==AiCombatMicroPhase.Withdraw&&WithdrawalCanReturn(o,p,ai,d,u,c);
                 if(!ready)continue;
                 if(c.Phase==AiCombatMicroPhase.Repair&&c.Army==0){Release(u.Id,o.Tick,ai,d);continue;}
                 // Repair custody records the accepted job's original army. A new
@@ -189,8 +337,17 @@ namespace Spacewars.Runtime
                 // restore an old enemy destination or chase the sole survivor.
                 Release(u.Id,o.Tick,ai,d);
             }
+            if(ResumesArmyAttack(d))
+                foreach(var unit in own.Where(u=>u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Follow&&ReadyToResume(o,p,ai,d,u)))
+                {
+                    var resume=ResumeArmyAttack(o,p,ai,d,armies,unit,certificates[unit.Id].Army);
+                    if(resume!=null)return resume;
+                }
+            var friendlyEvade = PlanCerberusManeuver(o, p, ai, d, armies, own, friendly: true);
+            if (friendlyEvade != null) return friendlyEvade;
             foreach(var u in own.Where(u=>(!clients.TryGetValue(u.Id,out var active)||active.Phase==AiCombatMicroPhase.Focus)&&u.Queue?.Pending==null&&(u.Queue==null||u.Queue.Deferred.Count==0)&&u.CurrentOrder?.Kind!=PlayableTacticalOrderKind.Follow&&Attention(o,u.Id,ai,d)).OrderBy(u=>PlayableUnitRules.HealthRatio(p,u)))
             {
+                var coverPlan=ArtilleryCover(o,p,ai,d,armies,u);if(coverPlan!=null)return coverPlan;
                 var army=Army(armies,u.Id);var threats=Attackers(o,u,p);
                 samples.TryGetValue(u.Id,out var s);double loss=s?.Loss??0;
                 bool damaged=s?.DamageTick>=0&&o.Tick-s.DamageTick<=T(ai,d,"safeSeconds");
@@ -199,27 +356,172 @@ namespace Spacewars.Runtime
                 {
                     var repair=Repair(o,p,ai,d,u,army);if(repair!=null)return repair;
                 }
-                if(army==null||V(ai,d,"withdrawEnabled")==0||!damaged||threats.Length<V(ai,d,"focusAttackers")||
-                    PlayableUnitRules.HealthRatio(p,u)>V(ai,d,"withdrawHealth")&&loss/Math.Max(1,u.MaxHealth)<V(ai,d,"lossPerSecond"))continue;
-                var goal=Withdrawal(o,p,ai,d,u,threats);if(!goal.HasValue)continue;
-                double seconds=Distance(u.Position,goal.Value)/Math.Max(double.Epsilon,PlayableUnitRules.Speed(p,u.Kind));
-                // Only factual recent loss is used. When escape takes longer than
-                // the remaining observed life, leave ordinary fire untouched.
-                if(loss>0&&Health(u)/loss<=seconds)continue;
-                return new AiCombatMicroPlan{Action=Action(o,PlayableCommandKind.Move,new[]{u.Id},goal.Value),Phase=AiCombatMicroPhase.Withdraw,Army=army.Id,Survival=true};
+                if(damaged&&threats.Length>0&&V(ai,d,"withdrawEnabled")>0&&PlayableUnitRules.HealthRatio(p,u)<V(ai,d,"withdrawHealth"))
+                {
+                    bool hasCore=army!=null;
+                    var shortGoal=hasCore?Withdrawal(o,p,ai,d,u,threats):null;
+                    // A brief contact can contain one concentrated volley. Use
+                    // the reaction and reverse forecast only after sustained fire.
+                    bool sustained=s.FirstDamageTick>=0&&s.DamageTick-s.FirstDamageTick>=T(ai,d,"safeSeconds");
+                    bool escape=shortGoal.HasValue&&(loss<=0||Health(u)/loss>(sustained?
+                        WithdrawalSeconds(p,ai,d,u,shortGoal.Value):
+                        Distance(u.Position,shortGoal.Value)/PlayableUnitRules.Speed(p,u.Kind)));
+                    if(escape)return new AiCombatMicroPlan{Action=Action(o,PlayableCommandKind.Move,new[]{u.Id},shortGoal.Value),
+                        Phase=AiCombatMicroPhase.Withdraw,Army=army.Id,Survival=true};
+                }
             }
-            var chase=Chase(o,p,ai,d,armies,own);return chase??Focus(o,p,ai,d,armies,own);
+            var maneuver = PlanCerberusManeuver(o, p, ai, d, armies, own, friendly: false);
+            var chase = maneuver == null ? Chase(o, p, ai, d, armies, own) : null;
+            return maneuver ?? chase ?? Focus(o, p, ai, d, armies, own);
+        }
+        internal static bool CerberusManeuver(AiCombatMicroPhase phase) =>
+            phase is AiCombatMicroPhase.AvoidCerberusFlame or AiCombatMicroPhase.SpreadAroundCerberus;
+
+        internal bool IsAppliedCerberusManeuver(PlayableOrderStamp stamp) =>
+            stamp?.Kind == PlayableCommandKind.Move && clients.TryGetValue(stamp.UnitId, out var client) &&
+            CerberusManeuver(client.Phase) && RetainsAppliedExecutionStamp(stamp.UnitId, stamp) &&
+            certificates.TryGetValue(stamp.UnitId, out var certificate) &&
+            stamp.Generation == certificate.Generation && stamp.ActionId == certificate.ActionId &&
+            stamp.Tick == certificate.Tick;
+
+        private AiCombatMicroPlan PlanCerberusManeuver(PlayableAiObservation view, PlayableProfile profile,
+            AiProfile ai, AiDifficulty difficulty, AiArmyRegistry armies, PlayableEntitySnapshot[] own, bool friendly)
+        {
+            if (difficulty == AiDifficulty.Recruit || !friendly && difficulty == AiDifficulty.Fighter) return null;
+            var sources = view.Entities.Where(unit => unit.Kind == PlayableEntityKind.Cerberus &&
+                unit.Health > 0 && view.IsHostile(unit.Owner) != friendly &&
+                (!friendly || unit.Flames?.LeftLength > 0 || unit.Flames?.RightLength > 0)).ToArray();
+            if (sources.Length == 0) return null;
+
+            foreach (var unit in own.Where(unit => !PlayableUnitRules.Aircraft(unit.Kind) &&
+                !clients.ContainsKey(unit.Id) && unit.Queue?.Pending == null && !(unit.Queue?.Deferred.Count > 0) &&
+                !cooldowns.ContainsKey(unit.Id)))
+            {
+                var army = Army(armies, unit.Id);
+                if (army == null || army.Phase is AiArmyPhase.Regrouping or AiArmyPhase.Retreating or AiArmyPhase.Recovering)
+                    continue;
+
+                foreach (var source in sources.Where(source => source.Id != unit.Id))
+                {
+                    var phase = friendly ? AiCombatMicroPhase.AvoidCerberusFlame : AiCombatMicroPhase.SpreadAroundCerberus;
+                    double x = unit.Position.X - source.Position.X, z = unit.Position.Z - source.Position.Z;
+                    double distance = Math.Sqrt(x * x + z * z);
+                    if (distance <= 0 || distance > profile.CerberusRange +
+                        PlayableUnitRules.Radius(profile, source.Kind) + PlayableUnitRules.Radius(profile, unit.Kind)) continue;
+
+                    double step = 2 * PlayableUnitRules.Radius(profile, unit.Kind) + profile.Navigation.ArrivalTolerance;
+                    foreach (int side in new[] { -1, 1 })
+                    {
+                        var goal = new NavPoint(unit.Position.X + side * z * step / distance,
+                            unit.Position.Z - side * x * step / distance);
+                        if (!CerberusMoveStillHelpful(view, profile, difficulty, unit, source.Id, goal, phase) ||
+                            !RotationReturnSafe(view, profile, ai, difficulty, unit, goal)) continue;
+                        return new AiCombatMicroPlan
+                        {
+                            Action = Action(view, PlayableCommandKind.Move, new[] { unit.Id }, goal, source.Id),
+                            Phase = phase, Army = army.Id, Survival = friendly
+                        };
+                    }
+                }
+            }
+            return null;
+        }
+
+        internal static bool CerberusMoveStillHelpful(PlayableAiObservation view, PlayableProfile profile,
+            AiDifficulty difficulty, PlayableEntitySnapshot unit, int sourceId, NavPoint goal, AiCombatMicroPhase phase)
+        {
+            if (difficulty == AiDifficulty.Recruit || PlayableUnitRules.Aircraft(unit.Kind)) return false;
+            var source = view.Entities.FirstOrDefault(entity => entity.Id == sourceId &&
+                entity.Kind == PlayableEntityKind.Cerberus && entity.Health > 0 && entity.Id != unit.Id);
+            double radius = PlayableUnitRules.Radius(profile, unit.Kind);
+            if (source == null || view.Vision?.IsVisible(goal) != true ||
+                !WithdrawalSpaceFree(view, profile, unit, new[] { goal }) ||
+                !SplashPathSafe(view, profile, unit, unit.Position, goal)) return false;
+            if (profile.AuthoredMap != null && !profile.AuthoredMap.SupportsSweep(unit.Position, goal, radius)) return false;
+
+            if (phase == AiCombatMicroPhase.AvoidCerberusFlame)
+                return !view.IsHostile(source.Owner) && CoversCerberusFlame(profile, source, unit.Position, radius) &&
+                    !view.Entities.Any(ally => ally.Id != unit.Id && !view.IsHostile(ally.Owner) &&
+                        CoversCerberusFlame(profile, ally, goal, radius));
+
+            if (difficulty == AiDifficulty.Fighter || !view.IsHostile(source.Owner) ||
+                view.Vision?.IsVisible(source.Position) != true ||
+                unit.TargetId != sourceId && (unit.CurrentOrder?.Kind != PlayableTacticalOrderKind.Attack ||
+                    unit.CurrentOrder.TargetId != sourceId)) return false;
+            if (Distance(source.Position, goal) > PlayableUnitRules.Range(profile, unit.Kind, unit.Upgraded) ||
+                CoversCerberusFlame(profile, source, goal, radius)) return false;
+
+            var adjacent = view.Entities.Where(peer => peer.Owner == view.Owner && peer.Id != unit.Id &&
+                peer.Health > 0 && !PlayableUnitRules.Aircraft(peer.Kind)).ToArray();
+            double Gap(NavPoint point) => adjacent.Select(peer =>
+                Distance(point, peer.Position) - PlayableUnitRules.Radius(profile, peer.Kind) - radius)
+                .DefaultIfEmpty(double.PositiveInfinity).Min();
+            double currentGap = Gap(unit.Position);
+            return currentGap < radius && Gap(goal) > currentGap &&
+                AiCombatMicroSafety.FireClear(view, profile, unit, source, goal);
+        }
+
+        private static bool CoversCerberusFlame(PlayableProfile profile, PlayableEntitySnapshot tank,
+            NavPoint point, double radius)
+        {
+            if (!tank.Flames.HasValue) return false;
+            var arms = tank.Flames.Value;
+            double scale = PlayableUnitRules.CerberusModelScale(profile);
+
+            bool Covers(int side, double localYaw, double length)
+            {
+                if (length <= 0) return false;
+                double yaw = tank.HullHeading + localYaw;
+                double sideYaw = tank.HullHeading + side * Math.PI / 2;
+                double x = point.X - tank.Position.X - scale * (.41 * Math.Cos(tank.HullHeading) +
+                    1.17 * Math.Cos(sideYaw) + .785 * Math.Cos(yaw));
+                double z = point.Z - tank.Position.Z - scale * (.41 * Math.Sin(tank.HullHeading) +
+                    1.17 * Math.Sin(sideYaw) + .785 * Math.Sin(yaw));
+                double along = x * Math.Cos(yaw) + z * Math.Sin(yaw);
+                double across = Math.Abs(z * Math.Cos(yaw) - x * Math.Sin(yaw));
+                double width = Math.Clamp(along, 0, length) * Math.Tan(profile.CerberusAngle * Math.PI / 360) *
+                    PlayableUnitRules.CerberusPlumeWidthScale;
+                return along >= -radius && along <= length + radius && across <= width + radius;
+            }
+            return Covers(1, arms.LeftYaw, arms.LeftLength) || Covers(-1, arms.RightYaw, arms.RightLength);
+        }
+
+        internal AiCombatMicroPlan PlanEarlyWithdrawal(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d,AiArmyRegistry armies)
+        {
+            var plan=Propose(o,p,ai,d,armies);
+            return proposed=plan?.Phase==AiCombatMicroPhase.Withdraw?plan:null;
         }
         internal AiCombatMicroPlan Plan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d,AiArmyRegistry armies)
         {proposed=Propose(o,p,ai,d,armies);return proposed;}
         internal AiCombatMicroPhase PendingPhase=>pending?.Phase??proposed?.Phase??AiCombatMicroPhase.Focus;
+        internal bool IsWithdrawalRecovery(PlayableAiObservation o,PlayableAiAction action)
+        {
+            if(proposed?.Action!=action||action.EntityIds.Count!=1||
+                proposed.Phase is not (AiCombatMicroPhase.Return or AiCombatMicroPhase.Resume))return false;
+            int id=action.EntityIds[0];
+            if(!clients.TryGetValue(id,out var client)||client.Sequence<=0||
+                client.Phase is not (AiCombatMicroPhase.Withdraw or AiCombatMicroPhase.Return)||
+                !certificates.TryGetValue(id,out var certificate))return false;
+            var unit=o.Entities.FirstOrDefault(u=>u.Id==id&&u.Owner==o.Owner&&Eligible(u));
+            return unit!=null&&Matches(certificate,o,unit);
+        }
         internal bool Authorizes(AiIntent intent,PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty difficulty,AiArmyRegistry registry)
         {
             var plan=pending??proposed;var action=intent.Action;
             if(o==null||plan==null||action.PlayerId!=o.OwnerId||action.Generation!=o.Generation||action.Seed!=o.Seed||
                 plan.Action.Kind!=action.Kind||plan.Action.TargetId!=action.TargetId||!plan.Action.Target.Equals(action.Target)||!plan.Action.EntityIds.SequenceEqual(action.EntityIds))return false;
             if(plan.Phase==AiCombatMicroPhase.Focus&&!FocusCurrent(o,p,ai,difficulty,registry,plan,action))return false;
-            if(plan.Phase==AiCombatMicroPhase.Repair&&!action.EntityIds.All(id=>o.Entities.Any(u=>u.Id==id&&RepairEligible(o,p,ai,difficulty,u,Army(registry,id))&&RepairAvailable(o,p,ai,difficulty,u,action.ParentId))))return false;
+            if(plan.Phase==AiCombatMicroPhase.Withdraw&&!action.EntityIds.All(id=>o.Entities.Any(u=>u.Id==id&&u.Owner==o.Owner&&Eligible(u)&&
+                Army(registry,u.Id)?.Id==plan.Army)))return false;
+            if(plan.Phase==AiCombatMicroPhase.Repair&&!action.EntityIds.All(id=>o.Entities.Any(u=>u.Id==id&&RepairEligible(o,p,ai,difficulty,u,Army(registry,id))&&RepairAvailable(o,p,ai,difficulty,u,action.ParentId)&&
+                !BlocksRepairRetry(o,p,u,action.ParentId))))return false;
+            if(plan.Phase==AiCombatMicroPhase.Resume)
+                return ResumesArmyAttack(difficulty)&&action.EntityIds.Count==1&&o.Entities.Any(u=>
+                    u.Id==action.EntityIds[0]&&u.Owner==o.Owner&&Eligible(u)&&ReadyToResume(o,p,ai,difficulty,u)&&
+                    ResumeContacts(o,p,ai,difficulty,registry,u,plan.Army).Any(pair=>pair.Anchor.Id==action.TargetId&&
+                        (!pair.ShortOnly||IsShortReturn(p,ai,difficulty,u,action.Target)&&WithdrawalSpaceFree(o,p,u,new[]{action.Target}))&&
+                        ResumeEndpoint(p,ai,difficulty,u,pair.Anchor,pair.Enemy,action.Target)&&RotationReturnSafe(o,p,ai,difficulty,u,action.Target)&&
+                        AiCombatMicroSafety.FireClear(o,p,u,pair.Enemy,action.Target)));
             if(plan.Phase==AiCombatMicroPhase.Return&&(!action.EntityIds.All(id=>o.Entities.Any(u=>u.Id==id&&ValidReturnTarget(o,p,ai,difficulty,registry,u,plan.Army,action.TargetId)))))return false;
             if(plan.Phase==AiCombatMicroPhase.Regroup&&action.Kind==PlayableCommandKind.Stop&&action.EntityIds.All(id=>o.Entities.Any(u=>u.Id==id&&certificates.TryGetValue(id,out var previous)&&previous.Army==plan.Army&&CancelFollow(o,p,ai,difficulty,registry,u))))return true;
             return action.EntityIds.All(id=>o.Entities.Any(u=>u.Id==id&&u.Owner==o.Owner&&Eligible(u)&&
@@ -248,46 +550,127 @@ namespace Spacewars.Runtime
             u.Owner==o.Owner&&Eligible(u)&&u.Queue?.Pending==null&&(u.Queue==null||u.Queue.Deferred.Count==0)&&
             certificates.TryGetValue(u.Id,out var c)&&c.Kind==PlayableCommandKind.Follow&&Matches(c,o,u)&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Follow&&
             !ValidReturnTarget(o,p,ai,d,registry,u,c.Army,c.Target);
-        static NavPoint? Withdrawal(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d,PlayableEntitySnapshot u,PlayableEntitySnapshot[] attackers)
+        internal bool ContinuesWithdrawal(int unit)=>clients.TryGetValue(unit,out var client)&&client.Phase==AiCombatMicroPhase.Withdraw&&
+            certificates.TryGetValue(unit,out var previous)&&previous.Kind==PlayableCommandKind.Move&&client.Started<=previous.Tick;
+        internal static double WithdrawalStepLength(PlayableProfile p,AiProfile ai,AiDifficulty d,PlayableEntitySnapshot u,bool continuing=false)=>
+            WithdrawalStepLength(ai,d,PlayableUnitRules.Radius(p,u.Kind),continuing);
+        internal static double WithdrawalStepLength(AiProfile ai,AiDifficulty d,double radius,bool continuing=false)=>
+            Math.Min(V(ai,d,"shortStep"),(continuing?4:2)*radius);
+        NavPoint? Withdrawal(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d,PlayableEntitySnapshot u,PlayableEntitySnapshot[] attackers,bool continuing=false)
         {
+            if(attackers.Length==0)return null;
             double x=u.Position.X-attackers.Average(e=>e.Position.X),z=u.Position.Z-attackers.Average(e=>e.Position.Z),length=Math.Sqrt(x*x+z*z);
             if(length<double.Epsilon)return null;x/=length;z/=length;
-            double first=V(ai,d,"shortStep"),maximum=V(ai,d,"maxWithdrawal");
-            // Search short first. Opposing directions, blocked geography and unsafe
-            // paths are refused by authoritative observed routing before delivery.
-            for(double step=first;step<=maximum;step+=first)
+            double minimum=p.Navigation.ArrivalTolerance;
+            var geometry=u.Kind==PlayableEntityKind.Hawk?null:AiTacticalExecutor.ObservedGroundGeometry(o,p);
+            double maximum=RotationLimit(p,ai,d,u);
+            // Search outward at the existing arrival precision, accepting the first
+            // safe point behind compatible cover (or outside all firing envelopes).
+            for(double step=minimum;step<=maximum;step+=p.Navigation.ArrivalTolerance)
+            foreach(int side in new[]{0,-1,1})
             {
-                var goal=new NavPoint(u.Position.X+x*step,u.Position.Z+z*step);
-                if(o.Vision?.IsVisible(goal)!=true)continue;
-                if(attackers.All(e=>Distance(goal,e.Position)>PlayableUnitRules.Range(p,e.Kind,e.Upgraded)+PlayableUnitRules.Radius(p,u.Kind)+PlayableUnitRules.Radius(p,e.Kind)+V(ai,d,"safetyMargin"))&&
-                    AiTacticalExecutor.WithdrawalPathForUnit(o,u.Position,new[]{goal},PlayableUnitRules.Radius(p,u.Kind),p,u.Kind==PlayableEntityKind.Hawk))return goal;
+                // Straight rear and its two diagonal alternatives avoid asking
+                // a wounded unit to drive through its own covering soldier.
+                double dx=x-side*z,dz=z+side*x,norm=Math.Sqrt(dx*dx+dz*dz);
+                var goal=new NavPoint(u.Position.X+dx*step/norm,u.Position.Z+dz*step/norm);var path=new[]{goal};
+                if(!Covered(o,p,ai,d,u,attackers,goal)||!SplashSafe(o,p,u,goal)||
+                    u.Kind==PlayableEntityKind.Hawk&&!AirRotationSpaceFree(o,p,u,goal))continue;
+                if(o.Vision?.IsVisible(goal)==true&&(u.Kind==PlayableEntityKind.Hawk||WithdrawalSpaceFree(o,p,u,path)&&
+                    geometry.IsFree(goal,PlayableUnitRules.Radius(p,u.Kind))&&geometry.SegmentFree(u.Position,goal,PlayableUnitRules.Radius(p,u.Kind))&&
+                    p.AuthoredMap?.SupportsSweep(u.Position,goal,PlayableUnitRules.Radius(p,u.Kind))!=false)&&
+                    AiTacticalExecutor.WithdrawalPathForUnit(o,u.Position,path,PlayableUnitRules.Radius(p,u.Kind),p,u.Kind==PlayableEntityKind.Hawk,
+                        centerRangeOnly:true,firingThreats:new HashSet<int>())&&AiCombatMicroSafety.Path(o,p,u,path,true))return goal;
             }
             return null;
+        }
+
+        internal static bool WithdrawalSpaceFree(PlayableAiObservation o,PlayableProfile p,PlayableEntitySnapshot unit,NavPoint[] path)
+        {
+            double radius=PlayableUnitRules.Radius(p,unit.Kind);
+            var neighbors=o.Entities.Where(other=>other.Id!=unit.Id&&other.Health>0&&(other.Kind==PlayableEntityKind.Hawk)==(unit.Kind==PlayableEntityKind.Hawk)).ToArray();
+            var at=unit.Position;
+            foreach(var end in path)
+            {
+                double x=end.X-at.X,z=end.Z-at.Z,length=x*x+z*z;
+                foreach(var other in neighbors)
+                {
+                    double spacing=radius+PlayableUnitRules.Radius(p,other.Kind);
+                    double t=length==0?0:Math.Clamp(((other.Position.X-at.X)*x+(other.Position.Z-at.Z)*z)/length,0,1);
+                    if(Distance(other.Position,new NavPoint(at.X+t*x,at.Z+t*z))<spacing-1e-6)return false;
+                }
+                at=end;
+            }
+            return true;
         }
         internal void Commit(AiCombatMicroPlan plan,long generation,long tick)
         {
             if(plan?.Action==null||pendingId!=0||plan.Action.ActionId!=nextId)throw new InvalidOperationException("Micro pending binding.");
             pending=plan;pendingId=nextId++;pendingGeneration=generation;
-            foreach(var id in plan.Action.EntityIds)clients[id]=new Client{Phase=plan.Phase,Started=tick,Army=plan.Army,Tower=plan.Action.ParentId,Goal=plan.Action.Target};
+            foreach(var id in plan.Action.EntityIds)
+            {
+                long started=tick,quiet=-1;
+                if(clients.TryGetValue(id,out var withdrawal)&&withdrawal.Phase==AiCombatMicroPhase.Withdraw&&withdrawal.Sequence>0)
+                {
+                    if(plan.Phase==AiCombatMicroPhase.Withdraw)started=withdrawal.Started;
+                    if(plan.Phase==AiCombatMicroPhase.Resume||plan.Phase==AiCombatMicroPhase.Return)
+                        quiet=withdrawal.SafeSince;
+                    // Keep the accepted withdrawal's clock while a Follow is
+                    // pending. A Follow after tower repair has its own clock.
+                    if(plan.Phase==AiCombatMicroPhase.Return&&certificates.TryGetValue(id,out var applied))
+                        started=applied.Tick;
+                }
+                if(plan.Phase==AiCombatMicroPhase.Resume&&withdrawal?.Phase==AiCombatMicroPhase.Return&&JoinedReturn(id,withdrawal))
+                {
+                    started=withdrawal.Started;
+                    quiet=withdrawal.SafeSince;
+                }
+                clients[id]=new Client{Phase=plan.Phase,Started=started,SafeSince=quiet,Army=plan.Army,Tower=plan.Action.ParentId,Goal=plan.Action.Target};
+            }
         }
-        internal void Applied(PlayableAiAction action,long sequence,long tick,AiReceiptIdentity receipt)
+        internal void Applied(PlayableAiAction action,long sequence,long tick,AiReceiptIdentity receipt,NavLocation? repairOrigin=null)
         {
             if(pending==null)return;
             if(receipt==null||receipt.OwnerId!=action.PlayerId||receipt.Generation!=action.Generation||receipt.DecisionOrdinal<=0||receipt.ActionOrdinal<=0)throw new InvalidOperationException("Micro applied receipt binding.");
             foreach(var id in action.EntityIds)if(clients.TryGetValue(id,out var c))
             {
                 c.Sequence=sequence;c.ActionId=action.ActionId;
+                if(c.Phase==AiCombatMicroPhase.Repair)
+                {
+                    c.RepairOrigin=repairOrigin?.SurfaceId==null?null:repairOrigin;
+                    repairRetries.Remove((id,c.Tower));
+                }
+                if(c.Phase==AiCombatMicroPhase.Return)c.SafeSince=-1;
                 certificates[id]=new Certificate{Unit=id,Army=c.Army,Owner=action.PlayerId,Generation=action.Generation,Sequence=sequence,ActionId=action.ActionId,Tick=tick,Decision=receipt.DecisionOrdinal,Ordinal=receipt.ActionOrdinal,Source=action.SourceIdentity,Kind=action.Kind,Target=action.TargetId,Goal=action.Target};
             }
         }
         internal void Receipt(PlayableAiTraceRecord r)
         {
             if(r==null||r.ActionId!=pendingId||r.OwnerId!=pending?.Action.PlayerId||r.SourceIdentity!=pending?.Action.SourceIdentity||!AiStateWire.CallbackGenerationMatches(r,pendingGeneration)||r.Status==PlayableAiDeliveryStatus.Scheduled||r.Status==PlayableAiDeliveryStatus.Accepted)return;
-            if(r.Status!=PlayableAiDeliveryStatus.Applied)foreach(var id in pending.Action.EntityIds)clients.Remove(id);
+            if(r.Status!=PlayableAiDeliveryStatus.Applied)foreach(var id in pending.Action.EntityIds)
+            {
+                clients.TryGetValue(id,out var prior);
+                certificates.TryGetValue(id,out var old);
+                if(prior!=null&&old!=null&&
+                    old.Kind==PlayableCommandKind.Move&&old.Army==prior.Army&&
+                    (pending.Phase==AiCombatMicroPhase.Withdraw&&prior.Started<=old.Tick||pending.Phase==AiCombatMicroPhase.Resume||
+                     pending.Phase==AiCombatMicroPhase.Return&&prior.Started==old.Tick))
+                {
+                    prior.Phase=AiCombatMicroPhase.Withdraw;
+                    if(pending.Phase!=AiCombatMicroPhase.Withdraw)prior.Started=old.Tick;
+                    prior.Sequence=old.Sequence;prior.ActionId=old.ActionId;prior.Goal=old.Goal;
+                }
+                else if(prior!=null&&pending.Phase==AiCombatMicroPhase.Resume&&old?.Kind==PlayableCommandKind.Follow&&
+                    old.Army==prior.Army&&prior.SafeSince>=old.Tick)
+                {
+                    prior.Phase=AiCombatMicroPhase.Return;
+                    prior.Sequence=old.Sequence;prior.ActionId=old.ActionId;prior.Goal=old.Goal;
+                }
+                else clients.Remove(id);
+            }
             pendingId=pendingGeneration=0;pending=null;
         }
         static bool PhaseKind(AiCombatMicroPhase phase,PlayableCommandKind kind)=>
-            phase==AiCombatMicroPhase.Return?kind==PlayableCommandKind.Follow:phase==AiCombatMicroPhase.Focus?kind==PlayableCommandKind.Attack:phase==AiCombatMicroPhase.Regroup?kind==PlayableCommandKind.Stop:kind==PlayableCommandKind.Move;
+            phase==AiCombatMicroPhase.Resume?kind==PlayableCommandKind.AttackMove:phase==AiCombatMicroPhase.Return?kind==PlayableCommandKind.Follow:phase==AiCombatMicroPhase.Focus?kind==PlayableCommandKind.Attack:phase==AiCombatMicroPhase.Regroup?kind==PlayableCommandKind.Stop:kind==PlayableCommandKind.Move;
         internal void ValidateOwner(string owner)
         {
             AiStateWire.Require(certificates.Values.All(c=>c.Owner==owner)&&
@@ -300,42 +683,57 @@ namespace Spacewars.Runtime
             AiStateWire.Require(pending!=null&&pendingId==local&&
                 WorldWire.Pack(w=>AiStateWire.Write(w,pending.Action)).Skip(9).SequenceEqual(WorldWire.Pack(w=>AiStateWire.Write(w,global)).Skip(9)),"micro saved pending signature");
         }
-        internal void Stop(){clients.Clear();certificates.Clear();pending=null;pendingId=pendingGeneration=0;}
+        internal void Stop(){clients.Clear();certificates.Clear();repairRetries.Clear();pending=null;pendingId=pendingGeneration=0;}
         internal void Write(BinaryWriter w)
         {
             WorldWire.Array(w,certificates.OrderBy(x=>x.Key).Select(x=>x.Value).ToArray(),c=>{w.Write(c.Unit);w.Write(c.Army);WorldWire.String(w,c.Owner);w.Write(c.Generation);w.Write(c.Sequence);w.Write(c.ActionId);w.Write(c.Tick);w.Write(c.Decision);w.Write(c.Ordinal);WorldWire.String(w,c.Source);w.Write((int)c.Kind);w.Write(c.Target);WorldWire.Write(w,c.Goal);});
             WorldWire.Array(w,fire.OrderBy(f=>f.Victim).ThenBy(f=>f.Source).ToArray(),f=>{w.Write(f.Source);w.Write(f.Victim);w.Write(f.Tick);});
-            w.Write(nextId);w.Write(pendingId);w.Write(pendingGeneration);
+            // Older component state starts with a positive action id.
+            w.Write(-2L);w.Write(nextId);w.Write(pendingId);w.Write(pendingGeneration);
             w.Write(pending!=null);if(pending!=null){AiStateWire.Write(w,pending.Action);w.Write((int)pending.Phase);w.Write(pending.Army);w.Write(pending.Survival);}
-            WorldWire.Array(w,samples.OrderBy(x=>x.Key).ToArray(),x=>{w.Write(x.Key);w.Write(x.Value.Tick);w.Write(x.Value.DamageTick);WorldWire.Number(w,x.Value.Health);WorldWire.Number(w,x.Value.Loss);});
-            WorldWire.Array(w,clients.OrderBy(x=>x.Key).ToArray(),x=>{w.Write(x.Key);var c=x.Value;w.Write((int)c.Phase);w.Write(c.Started);w.Write(c.SafeSince);w.Write(c.Sequence);w.Write(c.ActionId);w.Write(c.Army);w.Write(c.Tower);WorldWire.Write(w,c.Goal);});
+            WorldWire.Array(w,samples.OrderBy(x=>x.Key).ToArray(),x=>{w.Write(x.Key);w.Write(x.Value.Tick);w.Write(x.Value.DamageTick);WorldWire.Number(w,x.Value.Health);WorldWire.Number(w,x.Value.Loss);w.Write(x.Value.FirstDamageTick);WorldWire.Number(w,x.Value.ContactHealth);});
+            WorldWire.Array(w,clients.OrderBy(x=>x.Key).ToArray(),x=>{w.Write(x.Key);var c=x.Value;w.Write((int)c.Phase);w.Write(c.Started);w.Write(c.SafeSince);w.Write(c.Sequence);w.Write(c.ActionId);w.Write(c.Army);w.Write(c.Tower);WorldWire.Write(w,c.Goal);GroupOrderWire.WriteLocation(w,c.RepairOrigin);});
             WorldWire.Array(w,cooldowns.OrderBy(x=>x.Key).ToArray(),x=>{w.Write(x.Key);w.Write(x.Value);});
+            WriteRepairRetries(w);
+        }
+        private static NavLocation? ReadRepairOrigin(BinaryReader reader)
+        {
+            if(!WorldWire.Boolean(reader))return null;
+            var point=WorldWire.ReadPoint(reader);
+            var surface=WorldWire.String(reader);
+            // Aircraft repair could write a default NavLocation wrapped in a nullable.
+            return surface==null&&point.Equals(default(NavPoint))?null:new NavLocation(point,surface);
         }
         internal static AiCombatMicroPolicy Read(BinaryReader r,long tick,long generation)
         {
             var savedCertificates=WorldWire.Array(r,()=>new Certificate{Unit=r.ReadInt32(),Army=r.ReadInt64(),Owner=WorldWire.String(r),Generation=r.ReadInt64(),Sequence=r.ReadInt64(),ActionId=r.ReadInt64(),Tick=r.ReadInt64(),Decision=r.ReadInt64(),Ordinal=r.ReadInt64(),Source=WorldWire.String(r),Kind=WorldWire.EnumValue<PlayableCommandKind>(r),Target=r.ReadInt32(),Goal=WorldWire.ReadPoint(r)});
-            AiStateWire.Require(savedCertificates.All(c=>c.Unit>0&&c.Army>=0&&!string.IsNullOrWhiteSpace(c.Owner)&&c.Generation==generation&&c.Sequence>0&&c.ActionId>0&&c.Tick>=0&&c.Tick<=tick&&c.Decision>0&&c.Ordinal>0&&c.Source==PlayableAiOpeningComposition.SourceIdentity&&(c.Kind==PlayableCommandKind.Move||c.Kind==PlayableCommandKind.Follow||c.Kind==PlayableCommandKind.Attack||c.Kind==PlayableCommandKind.Stop))&&savedCertificates.Select(c=>c.Unit).Distinct().Count()==savedCertificates.Length,"micro current certificates");
+            AiStateWire.Require(savedCertificates.All(c=>c.Unit>0&&c.Army>=0&&!string.IsNullOrWhiteSpace(c.Owner)&&c.Generation==generation&&c.Sequence>0&&c.ActionId>0&&c.Tick>=0&&c.Tick<=tick&&c.Decision>0&&c.Ordinal>0&&c.Source==PlayableAiOpeningComposition.SourceIdentity&&(c.Kind==PlayableCommandKind.Move||c.Kind==PlayableCommandKind.Follow||c.Kind==PlayableCommandKind.Attack||c.Kind==PlayableCommandKind.Stop||c.Kind==PlayableCommandKind.AttackMove))&&savedCertificates.Select(c=>c.Unit).Distinct().Count()==savedCertificates.Length,"micro current certificates");
             var facts=WorldWire.Array(r,()=>new Fire{Source=r.ReadInt32(),Victim=r.ReadInt32(),Tick=r.ReadInt64()});
             AiStateWire.Require(facts.All(f=>f.Source>0&&f.Victim>0&&f.Source!=f.Victim&&f.Tick>=0&&f.Tick<=tick)&&facts.Select(f=>f.Source+":"+f.Victim).Distinct().Count()==facts.Length,"micro observed fire");
-            var m=new AiCombatMicroPolicy{nextId=r.ReadInt64(),pendingId=r.ReadInt64(),pendingGeneration=r.ReadInt64()};
+            long first=r.ReadInt64();
+            AiStateWire.Require(first>=-2,"micro state version");
+            bool repairRetryState=first==-2,contactSamples=first<0;
+            var m=new AiCombatMicroPolicy{nextId=contactSamples?r.ReadInt64():first,pendingId=r.ReadInt64(),pendingGeneration=r.ReadInt64()};
             foreach(var c in savedCertificates)m.certificates.Add(c.Unit,c);
             m.fire.AddRange(facts);
             if(WorldWire.Boolean(r))m.pending=new AiCombatMicroPlan{Action=AiStateWire.ReadPlayableAiAction(r),Phase=WorldWire.EnumValue<AiCombatMicroPhase>(r),Army=r.ReadInt64(),Survival=WorldWire.Boolean(r)};
             AiStateWire.Require(m.nextId>m.pendingId&&m.pendingId>=0&&(m.pendingId==0?m.pendingGeneration==0&&m.pending==null:m.pendingGeneration==generation&&m.pending?.Action.ActionId==m.pendingId),"micro pending state");
-            foreach(var pair in WorldWire.Array(r,()=>new KeyValuePair<int,Sample>(r.ReadInt32(),new Sample{Tick=r.ReadInt64(),DamageTick=r.ReadInt64(),Health=WorldWire.Number(r),Loss=WorldWire.Number(r)})))
-            {AiStateWire.Require(pair.Key>0&&pair.Value.Tick>=0&&pair.Value.Tick<=tick&&pair.Value.DamageTick>=-1&&pair.Value.DamageTick<=tick&&pair.Value.Health>=0&&pair.Value.Loss>=0&&!m.samples.ContainsKey(pair.Key),"micro damage sample");m.samples.Add(pair.Key,pair.Value);}
-            foreach(var pair in WorldWire.Array(r,()=>new KeyValuePair<int,Client>(r.ReadInt32(),new Client{Phase=WorldWire.EnumValue<AiCombatMicroPhase>(r),Started=r.ReadInt64(),SafeSince=r.ReadInt64(),Sequence=r.ReadInt64(),ActionId=r.ReadInt64(),Army=r.ReadInt64(),Tower=r.ReadInt32(),Goal=WorldWire.ReadPoint(r)})))
+            foreach(var pair in WorldWire.Array(r,()=>new KeyValuePair<int,Sample>(r.ReadInt32(),new Sample{Tick=r.ReadInt64(),DamageTick=r.ReadInt64(),Health=WorldWire.Number(r),Loss=WorldWire.Number(r),FirstDamageTick=contactSamples?r.ReadInt64():-1,ContactHealth=contactSamples?WorldWire.Number(r):0})))
+            {AiStateWire.Require(pair.Key>0&&pair.Value.Tick>=0&&pair.Value.Tick<=tick&&pair.Value.DamageTick>=-1&&pair.Value.DamageTick<=tick&&pair.Value.Health>=0&&pair.Value.Loss>=0&&pair.Value.FirstDamageTick>=-1&&pair.Value.FirstDamageTick<=pair.Value.DamageTick&&pair.Value.ContactHealth>=0&&!m.samples.ContainsKey(pair.Key),"micro damage sample");m.samples.Add(pair.Key,pair.Value);}
+            foreach(var pair in WorldWire.Array(r,()=>new KeyValuePair<int,Client>(r.ReadInt32(),new Client{Phase=WorldWire.EnumValue<AiCombatMicroPhase>(r),Started=r.ReadInt64(),SafeSince=r.ReadInt64(),Sequence=r.ReadInt64(),ActionId=r.ReadInt64(),Army=r.ReadInt64(),Tower=r.ReadInt32(),Goal=WorldWire.ReadPoint(r),RepairOrigin=repairRetryState?ReadRepairOrigin(r):null})))
             {var c=pair.Value;AiStateWire.Require(pair.Key>0&&c.Started>=0&&c.Started<=tick&&c.SafeSince>=-1&&c.SafeSince<=tick&&c.Sequence>=0&&c.ActionId>=0&&c.Army>=0&&c.Tower>=0&&!m.clients.ContainsKey(pair.Key),"micro client");m.clients.Add(pair.Key,c);}
             foreach(var pair in WorldWire.Array(r,()=>new KeyValuePair<int,long>(r.ReadInt32(),r.ReadInt64())))
             {AiStateWire.Require(pair.Key>0&&pair.Value>=0&&!m.cooldowns.ContainsKey(pair.Key),"micro cooldown");m.cooldowns.Add(pair.Key,pair.Value);}
+            if(repairRetryState)m.ReadRepairRetries(r,tick);
             foreach(var pair in m.clients)
             {
                 var c=pair.Value;
+                AiStateWire.Require(!c.RepairOrigin.HasValue||c.Phase==AiCombatMicroPhase.Repair&&c.Sequence>0,"micro repair origin");
                 AiStateWire.Require((c.Sequence==0)==(c.ActionId==0)&&(c.Phase==AiCombatMicroPhase.Repair?c.Tower>0:c.Tower==0),"micro client phase binding");
                 if(c.Sequence==0)AiStateWire.Require(m.pending!=null&&m.pending.Action.EntityIds.Contains(pair.Key)&&c.Phase==m.pending.Phase&&c.Army==m.pending.Army&&c.Tower==m.pending.Action.ParentId&&c.Goal.Equals(m.pending.Action.Target),"micro pending client binding");
                 else AiStateWire.Require(m.certificates.TryGetValue(pair.Key,out var cert)&&cert.Sequence==c.Sequence&&cert.ActionId==c.ActionId&&cert.Army==c.Army&&cert.Goal.Equals(c.Goal)&&PhaseKind(c.Phase,cert.Kind),"micro applied client binding");
             }
-            AiStateWire.Require(m.pending==null||m.pending.Army>=0&&m.pending.Action.Generation==generation&&m.pending.Action.SourceIdentity==PlayableAiOpeningComposition.SourceIdentity&&m.pending.Action.EntityIds.Count>0&&m.pending.Action.EntityIds.Distinct().Count()==m.pending.Action.EntityIds.Count&&PhaseKind(m.pending.Phase,m.pending.Action.Kind)&&m.pending.Action.EntityIds.All(id=>m.clients.TryGetValue(id,out var c)&&c.Sequence==0&&c.Phase==m.pending.Phase),"micro pending recipients");
+            AiStateWire.Require(m.pending==null||m.pending.Army>=0&&m.pending.Action.Generation==generation&&m.pending.Action.SourceIdentity==PlayableAiOpeningComposition.SourceIdentity&&m.pending.Action.EntityIds.Count>0&&m.pending.Action.EntityIds.Distinct().Count()==m.pending.Action.EntityIds.Count&&PhaseKind(m.pending.Phase,m.pending.Action.Kind)&&m.HasPendingRecipients,"micro pending recipients");
             return m;
         }
     }

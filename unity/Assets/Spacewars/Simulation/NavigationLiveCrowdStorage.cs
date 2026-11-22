@@ -63,14 +63,15 @@ namespace Spacewars.Simulation
         private NavNameReference terminalName;
         private NavPoint position,goal;private NavLocation location;private long incarnation,mobility;private bool applied;
         private NavPreparedUnitRoute():base(Layout){Retain();}
-        internal static NavPreparedUnitRoute PrepareOwned(NavCrowd crowd,NavUnit actor,NavPoint goal,IReadOnlyList<NavPoint> points,NavLocation? assigned,INavStorageReservation reservation,NavTypedRoute physical=null)
+        internal static NavPreparedUnitRoute PrepareOwned(NavCrowd crowd,NavUnit actor,NavPoint goal,IReadOnlyList<NavPoint> points,NavLocation? assigned,INavStorageReservation reservation,NavTypedRoute physical=null,NavRetainedArray<NavPoint> executionPoints=null,bool qualifiedEntry=false)
         {
             if(actor?.StorageOwner==null)throw new ArgumentException("Ready actor has no admitted header.");NavStorageAdmission.RequireOwned(reservation,actor.StorageOwner);
             var actorRoot=actor.StorageOwner;actorRoot.Retain();var oldGlobal=actorRoot.Global;oldGlobal?.Retain();var oldLocal=actorRoot.Local;oldLocal?.Retain();NavNameReference terminalName=default;
             try{
                 var position=actor.Position;var start=actor.Location;
                 NavLocation terminal;
-                if(physical!=null){if(!crowd.ValidatePhysicalTypedRoute(actor,start,goal,physical,assigned))return null;terminal=assigned.Value;}
+                if(qualifiedEntry) terminal=assigned.Value;
+                else if(physical!=null){if(!crowd.ValidatePhysicalTypedRoute(actor,start,goal,physical,assigned))return null;terminal=assigned.Value;}
                 else if(!crowd.ValidateRoute(actor,position,start,goal,points,assigned,out terminal))return null;
                 var location=assigned??terminal;var name=location.NameReference;
                 if(name.Owner!=null){NavStorageAdmission.RequireOwned(reservation,name.Owner);name.Owner.Retain();terminalName=name;}
@@ -79,7 +80,14 @@ namespace Spacewars.Simulation
                     try{
                         value.Actor=actorRoot;actorRoot.Retain();value.position=position;value.location=location;value.terminalName=terminalName;terminalName.Owner?.Retain();value.goal=goal;value.incarnation=actor.Incarnation;value.mobility=actor.MobilityRevision;
                         value.expectedGlobal=oldGlobal;oldGlobal?.Retain();value.expectedLocal=oldLocal;oldLocal?.Retain();
-                        value.Route=NavRetainedArray<NavPoint>.CopyAppending(points,goal,reservation.TryReserve);return value;
+                        if (executionPoints == null) value.Route=NavRetainedArray<NavPoint>.CopyAppending(points,goal,reservation.TryReserve);
+                        else
+                        {
+                            NavStorageAdmission.RequireOwned(reservation, executionPoints);
+                            executionPoints.Retain();
+                            value.Route=executionPoints;
+                        }
+                        return value;
                     }catch{value.Dispose();throw;}
                 }
             }finally{actorRoot.Release();oldGlobal?.Release();oldLocal?.Release();terminalName.Owner?.Release();}

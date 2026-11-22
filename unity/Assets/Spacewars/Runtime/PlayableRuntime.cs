@@ -98,6 +98,19 @@ namespace Spacewars.Runtime
         private readonly int seed;
         public int MatchSeed=>seed;
         private PlayableSnapshot latest;
+        private int requestedWrecksEnabled=1,appliedWrecksEnabled=1;
+        public bool UnitWrecksEnabled=>Volatile.Read(ref appliedWrecksEnabled)!=0;
+        public void RequestUnitWrecksEnabled(bool enabled)
+        {
+            if(IsStopRequested)return;
+            if(Interlocked.Exchange(ref requestedWrecksEnabled,enabled?1:0)!=(enabled?1:0))Signal();
+        }
+        private void ApplyRequestedWreckRule()
+        {
+            int desired=Volatile.Read(ref requestedWrecksEnabled);
+            if(desired==Volatile.Read(ref appliedWrecksEnabled)||!domain.TrySetUnitWrecksEnabled(desired!=0))return;
+            Volatile.Write(ref appliedWrecksEnabled,desired);PresentationChanged();
+        }
         private PlayableProfile requestedBalance;
         private AiProfile requestedAiProfile;
         private int requestedBalanceBase;
@@ -136,6 +149,18 @@ namespace Spacewars.Runtime
         private void PublishNavigationBinding(){Volatile.Write(ref navigationBinding,authorityTick.NavigationBinding);Volatile.Write(ref navigationGeometry,domain.Geometry);}
         private int stopping,stopped,paused,menuPaused,campaignTutorialPauseHeld,outstanding,errors;
         private int finishRequested,provingGroundStart;
+        private readonly Queue<string> requestedSurrenders=new();
+        public bool RequestSurrender(string ownerId)
+        {
+            lock(gate)
+            {
+                if(stopping!=0||stopped!=0||latest?.Outcome!=PlayableMatchOutcome.Playing||
+                    offlineConfiguration?.Roster.Any(p=>p.Id==ownerId&&p.Control==OfflineControl.Human)!=true)return false;
+                if(!requestedSurrenders.Contains(ownerId))requestedSurrenders.Enqueue(ownerId);
+            }
+            Signal();
+            return true;
+        }
         public bool StartProvingGroundBattle()
         {
             lock(gate){if(offlineConfiguration?.ProvingGround==null||stopping!=0||stopped!=0||provingGroundStart!=0)return false;
@@ -145,6 +170,7 @@ namespace Spacewars.Runtime
         private readonly Dictionary<string,int> humanActions=new Dictionary<string,int>();
         private MatchResult matchResult;
         public MatchResult Result=>Volatile.Read(ref matchResult);
+        public IReadOnlyList<AiDefeat> AiDefeats=>domain.AiDefeats;
         public void RecordHumanAction(string ownerId){lock(gate){if(stopping==0&&stopped==0&&paused==0&&latest?.Outcome==PlayableMatchOutcome.Playing&&(offlineConfiguration==null?ownerId==PlayableDomain.PlayerId:offlineConfiguration.Roster.Any(p=>p.Id==ownerId&&p.Control==OfflineControl.Human)))humanActions[ownerId]=checked((humanActions.TryGetValue(ownerId,out var count)?count:0)+1);}Signal();}
         public void RequestFinish(){lock(gate){if(stopping==0&&stopped==0)finishRequested=1;}Signal();}
         private void ApplyMatchActions(bool isPaused)
@@ -156,6 +182,15 @@ namespace Spacewars.Runtime
             lock(gate){actions=humanActions.OrderBy(x=>x.Key,StringComparer.Ordinal).ToArray();humanActions.Clear();finish=finishRequested!=0;finishRequested=0;}
             if(actions.Length!=0||finish)PresentationChanged();
             foreach(var row in actions)for(int i=0;i<row.Value;i++)domain.RecordHumanAction(row.Key);
+            if(!authorityTick.AwaitingRoutes)
+            {
+                string[] exits;
+                lock(gate){exits=requestedSurrenders.ToArray();requestedSurrenders.Clear();}
+                foreach(var owner in exits)
+                    if(!domain.Surrender(owner))
+                        lock(gate){if(!requestedSurrenders.Contains(owner))requestedSurrenders.Enqueue(owner);}
+                if(exits.Length!=0)PresentationChanged();
+            }
             if(finish)domain.FinishManually();
             Volatile.Write(ref matchResult,domain.Result);
         }
@@ -180,21 +215,33 @@ namespace Spacewars.Runtime
         private NativeLobbyConfiguration lobbyConfiguration;
         public NativeLobbyConfiguration LobbyConfiguration => lobbyConfiguration?.Copy();
         public static PlayableRuntime CreateLobbyMatch(PlayableProfile profile,long generation,NativeLobbyConfiguration setup,bool startPaused=false,AiProfile aiProfile=null)
+            =>CreateLobbyMatch(profile,generation,setup,startPaused,aiProfile,null);
+
+        internal static PlayableRuntime CreateLobbyMatch(PlayableProfile profile,long generation,NativeLobbyConfiguration setup,bool startPaused,AiProfile aiProfile,PlayableAiOpening? forcedAiOpening,IReadOnlyList<PlayableAiOpening> seatOpenings=null)
         {
             if(setup==null)throw new ArgumentNullException(nameof(setup));setup=setup.Copy();
-            if(profile.AuthoredMap is AntennaCityMap||profile.AuthoredMap is CrimsonGroveMap||profile.AuthoredMap is WhiteMeridianMap||profile.AuthoredMap is BasaltCrownMap||profile.AuthoredMap is MossHighlandMap)setup.InitializeParticipants();
+            if(profile.AuthoredMap is DeafMirrorMap||profile.AuthoredMap is AntennaCityMap||profile.AuthoredMap is CrimsonGroveMap||profile.AuthoredMap is WhiteMeridianMap||profile.AuthoredMap is BasaltCrownMap||profile.AuthoredMap is MossHighlandMap)setup.InitializeParticipants();
             var error=setup.Validate(profile,true,true);
             if(error!=null)throw new ArgumentException(error,nameof(setup));
             if(profile.AuthoredMap is ThreeCrossingsMap){
                 setup.InitializeParticipants();
                 int matchSeed=setup.ResolveSeed();setup.HasExplicitSeed=true;setup.ExplicitSeed=matchSeed;
             }
+            if (seatOpenings != null && (forcedAiOpening.HasValue || !setup.Spectator ||
+                seatOpenings.Count != setup.Participants.Count ||
+                seatOpenings.Any(opening => !PlayableAiOpeningComposition.Supported.Contains(opening))))
+                throw new ArgumentException("Provide one supported opening per seat in an all-bot lobby.", nameof(seatOpenings));
             setup.PrepareMatchNames();
             PlayableRuntime runtime;
             if(setup.Participants!=null)
             {
-                runtime=new PlayableRuntime(NativeLobbyMatch.Create(profile,setup),generation,startPaused,setup.Difficulty,setup.Participants.Where(p=>!p.Human).Select(p=>p.Difficulty).ToArray(),spectator:setup.Spectator,aiProfile:aiProfile);
+                var difficulties=setup.Participants.Where(p=>!p.Human).Select(p=>p.Difficulty).ToArray();
+                var openings=seatOpenings?.Select(opening=>(PlayableAiOpening?)opening).ToArray();
+                if(openings==null&&forcedAiOpening.HasValue)
+                    openings=Enumerable.Repeat(forcedAiOpening,difficulties.Length).ToArray();
+                runtime=new PlayableRuntime(NativeLobbyMatch.Create(profile,setup),generation,startPaused,setup.Difficulty,difficulties,setup.Spectator,aiProfile,openings);
             }
+            else if(forcedAiOpening.HasValue)throw new ArgumentException("A forced opening requires explicit lobby participants.",nameof(setup));
             else if(profile.AuthoredMap is FoundryMap foundry)
             {
                 runtime=new PlayableRuntime(foundry.Configuration(profile,setup.ResolveSeed(),humanId:"player-1"),generation,startPaused,setup.Difficulty,aiProfile:aiProfile);
@@ -214,9 +261,9 @@ namespace Spacewars.Runtime
             this.seed=seed;Generation=generation;paused=menuPaused=startPaused?1:0;
             bool runEnemyAi=autonomousOwnerAi&&autonomousEnemyAi;
             domain=TwoOwnerDiagnosticAdapter.Create(profile,generation,patrol:!runEnemyAi);
-            openingCompositionAuthority=new PlayableAiOpeningCompositionAuthority();OpeningComposition=openingCompositionAuthority.Initialize(seed,PlayableDomain.PlayerId,aiProfile:NativeAiProfile);
+            openingCompositionAuthority=new PlayableAiOpeningCompositionAuthority();OpeningComposition=openingCompositionAuthority.Initialize(seed,PlayableDomain.PlayerId,aiProfile:NativeAiProfile,difficulty:firstAiDifficulty??aiDifficulty);
             if(autonomousOwnerAi&&!humanControlledPlayer){ownerAi=new PlayableAiOwnerLoop(profile,OpeningComposition,generation,audit:null,aiProfile:NativeAiProfile,aiDifficulty:firstAiDifficulty??aiDifficulty);aiCheckpoint=ownerAi.Checkpoint;}
-            if(runEnemyAi){enemyAi=new PlayableAiOwnerLoop(profile,PlayableAiOpeningComposition.Initialize(seed,"enemy-1",aiProfile:NativeAiProfile),generation,audit:null,aiProfile:NativeAiProfile,aiDifficulty:aiDifficulty);enemyAiCheckpoint=enemyAi.Checkpoint;}
+            if(runEnemyAi){enemyAi=new PlayableAiOwnerLoop(profile,PlayableAiOpeningComposition.Initialize(seed,"enemy-1",aiProfile:NativeAiProfile,difficulty:aiDifficulty),generation,audit:null,aiProfile:NativeAiProfile,aiDifficulty:aiDifficulty);enemyAiCheckpoint=enemyAi.Checkpoint;}
             aiScheduler=new AiAuthorityScheduler(new[]{ownerAi,enemyAi});
             authorityTick=new PlayableAuthorityTick(domain,aiScheduler,seed);
             PublishNavigationBinding();
@@ -225,34 +272,53 @@ namespace Spacewars.Runtime
             InitializeJournal(profile);worker=new Thread(Loop){IsBackground=true,Name="Spacewars.Playable.MatchRuntime"};worker.Start();
         }
         private readonly OfflineMatchConfiguration offlineConfiguration;
-        private OfflinePresentationFrame offlineFrame;
+        private PresentationFrames publishedViews;
+        private PresentationWorker presentationWorker;
         private long receiptOrdinal;
         private readonly List<OfflineReceipt> offlineReceipts=new List<OfflineReceipt>();
-        public OfflinePresentationFrame OfflineFrame=>Volatile.Read(ref offlineFrame)??throw new InvalidOperationException("Not a configured offline runtime.");
+        public OfflinePresentationFrame OfflineFrame=>Volatile.Read(ref publishedViews)?.Offline??throw new InvalidOperationException("Not a configured offline runtime.");
         private readonly Dictionary<string,long> acceptedByOwner=new Dictionary<string,long>();
         public PlayableRuntime(OfflineMatchConfiguration configuration,long generation,bool startPaused=false,AiDifficulty aiDifficulty=AiDifficulty.Fighter,AiDifficulty[] participantDifficulties=null,bool spectator=false,AiProfile aiProfile=null)
+            :this(configuration,generation,startPaused,aiDifficulty,participantDifficulties,spectator,aiProfile,null){}
+
+#if UNITY_INCLUDE_TESTS
+        internal static PlayableRuntime CreateWithOpeningForTests(OfflineMatchConfiguration configuration,
+            long generation, AiDifficulty difficulty, AiProfile profile, PlayableAiOpening opening)
+        {
+            var openings = configuration.Roster.Where(p => p.Control == OfflineControl.Ai)
+                .Select(_ => (PlayableAiOpening?)opening).ToArray();
+            return new PlayableRuntime(configuration, generation, startPaused: true, difficulty, null,
+                spectator: false, profile, openings);
+        }
+#endif
+        private PlayableRuntime(OfflineMatchConfiguration configuration,long generation,bool startPaused,AiDifficulty aiDifficulty,AiDifficulty[] participantDifficulties,bool spectator,AiProfile aiProfile,PlayableAiOpening?[] forcedOpenings)
         {
             localSpectator=spectator;offlineConfiguration=configuration??throw new ArgumentNullException(nameof(configuration));if(generation<1)throw new ArgumentOutOfRangeException(nameof(generation));
             seed=configuration.Seed;Generation=generation;paused=menuPaused=startPaused?1:0;domain=new PlayableDomain(configuration.Profile,generation,configuration);
             NativeAiProfile=aiProfile??AiProfile.Initial;NativeAiCatalog=AiRosterCatalog.Initial;EnemyAiConfig=new AiOwnerConfig(configuration.Roster.FirstOrDefault(p=>p.Control==OfflineControl.Ai)?.Id??"enemy-1",aiDifficulty,seed,NativeAiProfile);
-            aiScheduler=new AiAuthorityScheduler(configuration.Roster.Where(p=>p.Control==OfflineControl.Ai).Select((p,i)=>new PlayableAiOwnerLoop(configuration.Profile,PlayableAiOpeningComposition.Initialize(seed,p.Id,aiProfile:NativeAiProfile),generation,null,NativeAiProfile,participantDifficulties==null?aiDifficulty:participantDifficulties[i])));
+            aiScheduler=new AiAuthorityScheduler(configuration.Roster.Where(p=>p.Control==OfflineControl.Ai).Select((p,i)=>{
+                var difficulty=participantDifficulties==null?aiDifficulty:participantDifficulties[i];
+                return new PlayableAiOwnerLoop(configuration.Profile,PlayableAiOpeningComposition.Initialize(seed,p.Id,aiProfile:NativeAiProfile,forcedOpening:forcedOpenings?[i],difficulty:difficulty),generation,null,NativeAiProfile,difficulty);
+            }));
             authorityTick=new PlayableAuthorityTick(domain,aiScheduler,seed,configuration,asynchronousRoutes:true);authorityTick.EnableAccruedCredits();
             PublishNavigationBinding();latest=domain.PlayerSnapshot(0,RuntimeStatus.Starting,false,Metrics(0,0),null,seed);PublishParticipantViews(RuntimeStatus.Starting,null);
             InitializeJournal(configuration.Profile);worker=new Thread(Loop){IsBackground=true,Name="Spacewars.Offline.SharedAuthority"};worker.Start();
         }
         public PlayableSnapshot ParticipantView(string ownerId)
         {
-            var views=Volatile.Read(ref offlineFrame)?.Views;if(views==null||!views.TryGetValue(ownerId,out var view))throw new ArgumentException("No gameplay perspective for this participant.");return view;
+            var views=Volatile.Read(ref publishedViews)?.Offline?.Views;if(views==null||!views.TryGetValue(ownerId,out var view))throw new ArgumentException("No gameplay perspective for this participant.");return view;
         }
-        private void PublishParticipantViews(RuntimeStatus status,string failure,bool? publicationPaused=null)
+        private bool HasSpectator => localSpectator || offlineConfiguration?.Spectators.Count > 0;
+        private bool CanReusePrimaryView => aiScheduler.Owners.Count == 0 && matchJournal == null;
+        private void PublishParticipantViews(RuntimeStatus status,string failure,bool? publicationPaused=null,PlayableSnapshot currentPlayer=null,PlayableDomain.ProjectionScope projection=null)
         {
             using var publicationTiming=PerformanceProfile.Measure(ProfileStage.RuntimePublish);
             long began=Stopwatch.GetTimestamp();
             Volatile.Write(ref diagnosticUnits,domain.DiagnosticUnitCount);Volatile.Write(ref diagnosticBuildings,domain.DiagnosticBuildingCount);
-            try{PublishParticipantViewsCore(status,failure,publicationPaused);}
+            try{PublishParticipantViewsCore(status,failure,publicationPaused,currentPlayer,projection);}
             finally{Interlocked.Add(ref payloadBuildTicks,Stopwatch.GetTimestamp()-began);}
         }
-        private void PublishParticipantViewsCore(RuntimeStatus status,string failure,bool? publicationPaused)
+        private void PublishParticipantViewsCore(RuntimeStatus status,string failure,bool? publicationPaused,PlayableSnapshot currentPlayer,PlayableDomain.ProjectionScope projection)
         {
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             PublishPerformanceQueues();
@@ -260,9 +326,40 @@ namespace Spacewars.Runtime
             PublishProvingGroundCosts();
             Volatile.Write(ref botCameraActivities,domain.BotCameraActivities);
             bool framePaused=publicationPaused??(Volatile.Read(ref paused)!=0);
-            PublishSpectatorFrame(status,failure,framePaused);
-            using var participantTiming=PerformanceProfile.Measure(ProfileStage.ParticipantViews);
-            if(offlineConfiguration==null)return;var frameMetrics=Metrics(lastCpu,0);var views=new Dictionary<string,PlayableSnapshot>();foreach(var p in offlineConfiguration.Roster)views.Add(p.Id,spectatorFrame!=null?spectatorFrame.Perspective(domain.OwnerFor(p.Id)).WithTeamSignals(domain.ProjectTeamSignals(domain.OwnerFor(p.Id))):domain.PlayerSnapshot(snapshotSequence,status,framePaused,frameMetrics,failure,seed,domain.OwnerFor(p.Id)));OfflineReceipt[] history;long ordinal;lock(gate){history=offlineReceipts.ToArray();ordinal=receiptOrdinal;}Volatile.Write(ref offlineFrame,new OfflinePresentationFrame(views,history,ordinal,offlineFrame));
+            bool spectator = HasSpectator;
+            if (!spectator && offlineConfiguration == null) {
+                if (currentPlayer != null && presentationWorker != null)
+                    presentationWorker.Submit(new PresentationInput(Array.Empty<PlayableSnapshot>(),null,
+                        Array.Empty<PlayableGroundTrail>(),null,null,0,currentPlayer));
+                return;
+            }
+            using var participantTiming = PerformanceProfile.Measure(ProfileStage.ParticipantViews);
+            var metrics = Metrics(lastCpu,0);
+            // Without an AI review or journal callback there was no intervening world writer.
+            // Only reuse the ordinary owner's exact publication, never the observer overview.
+            bool reusePlayer = (!spectator || projection != null) && currentPlayer != null && CanReusePrimaryView &&
+                currentPlayer.Sequence == snapshotSequence && currentPlayer.Tick == domain.Tick &&
+                currentPlayer.Status == status && currentPlayer.Paused == framePaused;
+            int ownerCount = offlineConfiguration?.Roster.Count ?? 2;
+            var views = new PlayableSnapshot[ownerCount];
+            PlayableSnapshot overview = null;
+            using (spectator ? (reusePlayer && projection != null ? projection.Enter() : domain.BeginProjectionBatch(includesOverview:true)) : null) {
+                for (int i = 0; i < ownerCount; i++)
+                    views[i] = reusePlayer && (PlayableOwner)i == PlayableOwner.Player
+                        ? currentPlayer.WithFrameMetrics(metrics)
+                        : domain.CapturePresentationView(snapshotSequence,status,framePaused,metrics,failure,seed,(PlayableOwner)i);
+                if (spectator) overview = domain.CapturePresentationView(snapshotSequence,status,framePaused,metrics,failure,seed,PlayableOwner.Player,true);
+            }
+            OfflineReceipt[] history = null;
+            long ordinal = 0;
+            if (offlineConfiguration != null) lock (gate) {
+                history = offlineReceipts.ToArray();
+                ordinal = receiptOrdinal;
+            }
+            var input = new PresentationInput(views, overview, domain.CapturePresentationTrails(),
+                reusePlayer ? currentPlayer.Owner : (PlayableOwner?)null, history, ordinal,currentPlayer);
+            if (presentationWorker == null) CompletePresentation(input);
+            else presentationWorker.Submit(input);
         }
         // Trusted local route service only; never a map/HUD or network view.
         public NavGeometry NavigationGeometry=>Volatile.Read(ref navigationGeometry);
@@ -329,6 +426,18 @@ namespace Spacewars.Runtime
             }
             JournalCommand(command);PresentationChanged();Signal();return new PlayableCommandSubmitResult(PlayableCommandStatus.Accepted);
         }
+        // Offline receipts and the transport queue are appended under the same lock.
+        // An older visual frame may acknowledge only its prefix of that queue.
+        internal void AcknowledgeOfflineReceipts(long throughOrdinal)
+        {
+            lock (gate) {
+                long drained = receiptOrdinal - receipts.Count;
+                while (drained < throughOrdinal && receipts.Count > 0) {
+                    if (receipts.Dequeue().Status != PlayableCommandStatus.Accepted) outstanding--;
+                    drained++;
+                }
+            }
+        }
         public IReadOnlyList<PlayableCommandReceipt> DrainReceipts(){lock(gate){var result=receipts.ToArray();receipts.Clear();outstanding-=result.Count(r=>r.Status!=PlayableCommandStatus.Accepted);return result;}}
         // Non-destructive diagnostic read: adapter consumers must not steal presentation receipts.
         public IReadOnlyList<PlayableCommandReceipt> ReceiptsAfter(long sequence){lock(gate)return receiptHistory.Where(r=>r.Sequence>sequence).ToArray();}
@@ -340,6 +449,7 @@ namespace Spacewars.Runtime
             string failure=null;Exception primaryFailure=null;
             try
             {
+                presentationWorker = new PresentationWorker(CompletePresentation);
                 domain.PrepareStartingCombatGeometry(()=>IsStopRequested);
                 // Crossings' first public route raster is pure derived work. Prepare it
                 // before the match clock and keep the lobby loading until it is ready.
@@ -348,7 +458,11 @@ namespace Spacewars.Runtime
                     authorityTick.PrepareNavigationViews(()=>IsStopRequested);
                 }
                 if(domain.RoutingProfile.UsesRecastGroundRoutes)NavigationBinding.RoutePort.PrepareRecastStartup(domain.RoutingProfile,()=>IsStopRequested);
-                if(domain.NonblockingNavigationPreparation&&aiScheduler.Owners.Count>0){domain.EnableAsyncObservedPaths();aiScheduler.EnableBackgroundReviews();}
+                domain.BackgroundDecisionProjections=true;
+                if(aiScheduler.Owners.Count>0){
+                    domain.EnableAsyncObservedPaths();
+                    aiScheduler.EnableBackgroundReviews();
+                }
                 bool parallelMotion=domain.NonblockingNavigationPreparation&&Environment.ProcessorCount>1;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 parallelMotion&=Environment.GetEnvironmentVariable("SPACEWARS_SERIAL_CROWD_SELECT")!="1";
@@ -383,21 +497,26 @@ namespace Spacewars.Runtime
                     earlyScoutProbe?.BeginTick();
                     long probeAllocated=earlyScoutProbe!=null?GC.GetAllocatedBytesForCurrentThread():0;
 #endif
+                    // Pause may park a fixed route barrier. The geometry transaction
+                    // still validates its own physical-host boundary and can safely retry.
+                    if(isPaused||!authorityTick.AwaitingRoutes)ApplyRequestedWreckRule();
                     if(!authorityTick.AwaitingRoutes){ApplyProvingGroundEdits(isPaused);ApplyRequestedBalance(isPaused);domain.SetRallyPaused(isPaused);ApplyCommands(isPaused);}
                     ApplyMatchActions(isPaused);isPaused=Volatile.Read(ref paused)!=0;
                     // Publish command-generated geometry before main-thread service admission.
                     PublishNavigationBinding();
                     long revision=Volatile.Read(ref presentationRevision);
                     bool publishWaiting=!authorityTick.AwaitingRoutes||revision!=lastPublishedRevision||isPaused!=lastPublishedPause;
+                    var primaryProjection = publishWaiting && HasSpectator && CanReusePrimaryView
+                        ? new PlayableDomain.ProjectionScope(domain,includesOverview:true) : null;
                     if(!authorityTick.TryAdvance(isPaused,snapshotSequence+1,LastHumanSequenceFor,
-                        ()=>Metrics(lastCpu,lastAt==0?0:(now-lastAt)*1000),out var snapshot,publishWaiting))
+                        ()=>Metrics(lastCpu,lastAt==0?0:(now-lastAt)*1000),out var snapshot,publishWaiting,deferRows:presentationWorker!=null,projection:primaryProjection))
                     {
                         PublishNavigationBinding();
                         Interlocked.Increment(ref barrierPolls);
                         if(snapshot!=null){
                             if(ownerAi!=null)Volatile.Write(ref aiCheckpoint,aiScheduler.CheckpointFor(ownerAi.OwnerId));
                             if(enemyAi!=null)Volatile.Write(ref enemyAiCheckpoint,aiScheduler.CheckpointFor(enemyAi.OwnerId));
-                            JournalCapture(isPaused);snapshotSequence++;PublishParticipantViews(RuntimeStatus.Running,null,isPaused);Volatile.Write(ref latest,snapshot);
+                            JournalCapture(isPaused);snapshotSequence++;PublishParticipantViews(RuntimeStatus.Running,null,isPaused,snapshot,primaryProjection);Volatile.Write(ref latest,snapshot);
                             lastPublishedRevision=revision;lastPublishedPause=isPaused;Interlocked.Increment(ref barrierPublications);
                         }else Interlocked.Increment(ref barrierReuses);
                         MaintainCampaignCheckpoint();CompleteCapture();
@@ -408,10 +527,10 @@ namespace Spacewars.Runtime
                     }
                     JournalCapture(isPaused);snapshotSequence++;
                     Volatile.Write(ref matchResult,domain.Result);
-                    foreach(var receipt in domain.DrainRallyReceipts())RecordReceipt(receipt);
+                    PublishRallyReceipts();
                     if(ownerAi!=null)Volatile.Write(ref aiCheckpoint,aiScheduler.CheckpointFor(ownerAi.OwnerId));
                     if(enemyAi!=null)Volatile.Write(ref enemyAiCheckpoint,aiScheduler.CheckpointFor(enemyAi.OwnerId));
-                    PublishParticipantViews(snapshot.Status,null,isPaused);lastPublishedRevision=revision;lastPublishedPause=isPaused;PublishNavigationBinding();Volatile.Write(ref latest,snapshot);if(completedBalanceStatus!=null){lock(gate){balanceApplyStatus=completedBalanceStatus;requestedBalance=null;requestedAiProfile=null;completedBalanceStatus=null;}}lastCpu=timer.Elapsed.TotalMilliseconds;maxCpu=Math.Max(maxCpu,lastCpu);if(lastCpu>TickSeconds*1000)missedDeadlines++;lastAt=now;MaintainCampaignCheckpoint();CompleteCapture();
+                    PublishParticipantViews(snapshot.Status,null,isPaused,snapshot,primaryProjection);lastPublishedRevision=revision;lastPublishedPause=isPaused;PublishNavigationBinding();Volatile.Write(ref latest,snapshot);if(completedBalanceStatus!=null){lock(gate){balanceApplyStatus=completedBalanceStatus;requestedBalance=null;requestedAiProfile=null;completedBalanceStatus=null;}}lastCpu=timer.Elapsed.TotalMilliseconds;maxCpu=Math.Max(maxCpu,lastCpu);if(lastCpu>TickSeconds*1000)missedDeadlines++;lastAt=now;MaintainCampaignCheckpoint();CompleteCapture();
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     PerformanceProfile.EndBattleTick(Generation,snapshot.Tick,DiagnosticGlobalUnits);
 #endif
@@ -430,11 +549,15 @@ namespace Spacewars.Runtime
                     failure=PlayableDomain.TacticalFailureText(primaryFailure);
                 }}
                 try{
+                    var publisher = presentationWorker;
+                    presentationWorker = null;
+                    TerminalAttempt(()=>publisher?.Dispose());
                     NavMotionExecutor.Current=null;TerminalAttempt(()=>motionExecutor?.Dispose());
                     TerminalAttempt(domain.StopCombatMotionAuthority);
                     TerminalAttempt(domain.StopObservedPaths);
                     TerminalAttempt(()=>NavigationBinding?.RoutePort?.CancelCommandPreparation());
-                    TerminalAttempt(domain.CancelAllRally);TerminalAttempt(()=>{foreach(var receipt in domain.DrainRallyReceipts())RecordReceipt(receipt);});
+                    TerminalAttempt(()=>NavigationBinding?.RoutePort?.CancelCommandPreparation(scheduledAi:true));
+                    TerminalAttempt(domain.CancelAllRally);TerminalAttempt(PublishRallyReceipts);
                     TerminalAttempt(()=>{aiScheduler.Stop(domain.Tick);if(ownerAi!=null)Volatile.Write(ref aiCheckpoint,aiScheduler.CheckpointFor(ownerAi.OwnerId));});
                     TerminalAttempt(()=>{if(enemyAi!=null)Volatile.Write(ref enemyAiCheckpoint,aiScheduler.CheckpointFor(enemyAi.OwnerId));});
                     TerminalAttempt(()=>{lock(gate){
@@ -466,6 +589,19 @@ namespace Spacewars.Runtime
                 catch {RecordReceipt(new PlayableCommandReceipt(p.Command.Sequence,domain.Tick,PlayableCommandStatus.Rejected,"Command failed.",latency,p.Command.PlayerId));throw;}
                 try{OnCampaignCommandApplied(p.Command,status);}catch{RecordReceipt(new PlayableCommandReceipt(p.Command.Sequence,domain.Tick,status,message,latency,p.Command.PlayerId));throw;}
                 RecordReceipt(new PlayableCommandReceipt(p.Command.Sequence,domain.Tick,status,message,latency,p.Command.PlayerId));
+            }
+        }
+        private void PublishRallyReceipts()
+        {
+            foreach (var receipt in domain.DrainRallyReceipts())
+            {
+                // Producer rallies scheduled by the owner AI never entered
+                // the external inbox. Their terminal result belongs in the
+                // match journal without consuming an outstanding command.
+                if (offlineConfiguration?.Roster.Any(p => p.Id == receipt.OwnerId && p.Control == OfflineControl.Ai) == true)
+                    JournalReceipt(receipt);
+                else
+                    RecordReceipt(receipt);
             }
         }
         private void RecordReceipt(PlayableCommandReceipt receipt){JournalReceipt(receipt);OriginalGroupDiagnostics.Receipt(receipt,domain.Navigation.OriginalDiagnosticOperation,domain.Navigation.OriginalDiagnosticQuantum);PresentationChanged();lock(gate){receipts.Enqueue(receipt);

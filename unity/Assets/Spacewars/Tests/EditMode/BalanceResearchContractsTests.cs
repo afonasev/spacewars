@@ -48,14 +48,18 @@ namespace Spacewars.Tests.EditMode
             Assert.True(Order(PlayableResearchKind.ExplorerAssaultGuns).Active);Assert.AreEqual(10,Order(PlayableResearchKind.ShkvalGuidance).Elapsed);
             Call("AdvanceResearch",20d);Assert.True(Order(PlayableResearchKind.ShkvalGuidance).Complete);Assert.AreEqual(20,Order(PlayableResearchKind.ExplorerAssaultGuns).Elapsed);
         }
-        [Test] public void CenterDestructionCancelsPaidJobAndPreservesUnpaidOrdersWithoutStallingOtherCenter()
+        [Test] public void CenterDestructionRefundsPaidJobAndCancelsUnpaidOrdersWithoutStallingOtherCenter()
         {
             Centers(out int a,out int b);Queue(a,PlayableResearchKind.TankChassis);Queue(a,PlayableResearchKind.ExplorerAssaultGuns);Queue(b,PlayableResearchKind.ShkvalGuidance);Call("AdvanceResearch",10d);double before=Balance;
             Call("Damage",a,100000);Call("AdvanceResearch",0d);
-            Assert.AreEqual(before,Balance);Assert.AreEqual(2,View.OwnerResearch.Count);Assert.AreEqual(b,Order(PlayableResearchKind.ShkvalGuidance).CenterId);
-            Assert.AreEqual(b,Order(PlayableResearchKind.ExplorerAssaultGuns).CenterId);Assert.False(Order(PlayableResearchKind.ExplorerAssaultGuns).Active);Assert.Zero(Order(PlayableResearchKind.ExplorerAssaultGuns).PaidCost);
-            Assert.AreEqual(10,Order(PlayableResearchKind.ShkvalGuidance).Elapsed);Assert.AreEqual(PlayableCommandStatus.Applied,Queue(b,PlayableResearchKind.TankChassis));
-            Call("AdvanceResearch",20d);Assert.True(Order(PlayableResearchKind.ShkvalGuidance).Complete);Assert.True(Order(PlayableResearchKind.ExplorerAssaultGuns).Active);Assert.False(Order(PlayableResearchKind.TankChassis).Active);
+            Assert.AreEqual(before+p.TankChassisCost,Balance);
+            Assert.AreEqual(1,View.OwnerResearch.Count);
+            Assert.AreEqual(b,Order(PlayableResearchKind.ShkvalGuidance).CenterId);
+            Assert.AreEqual(10,Order(PlayableResearchKind.ShkvalGuidance).Elapsed);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Queue(b,PlayableResearchKind.TankChassis));
+            Call("AdvanceResearch",20d);
+            Assert.True(Order(PlayableResearchKind.ShkvalGuidance).Complete);
+            Assert.True(Order(PlayableResearchKind.TankChassis).Active);
         }
         [Test] public void ScarceCreditsCannotStartTwoWaitingJobsOrStallTheOtherCenter()
         {
@@ -83,7 +87,7 @@ namespace Spacewars.Tests.EditMode
                 CollectionAssert.AreEqual(PlayableMenuDescriptions.DefenseStats(p,kind,null),PlayableMenuDescriptions.DefenseStats(changed,kind,null));
             }
             Assert.AreEqual(300,changed.TurretHealth);Assert.AreEqual(450,TerritoryRules.Health(changed,PlayableBuildingKind.GaussTower));Assert.AreEqual(50,changed.GaussDamage);Assert.AreEqual(11.5,changed.GaussRange);Assert.AreEqual(10,changed.TurretRange);
-            Assert.AreEqual(6,changed.TurretBurstSize);Assert.AreEqual(5,changed.TurretSpreadDeg);Assert.AreEqual(32,changed.TurretProjectileSpeed);
+            Assert.AreEqual(8,changed.TurretBurstSize);Assert.AreEqual(5,changed.TurretSpreadDeg);Assert.AreEqual(32,changed.TurretProjectileSpeed);
             foreach(var field in PlayableProfileMetadata.Fields.Where(f=>f.Group.Contains("independent-defense-v1")))
             {
                 Assert.IsNotEmpty(field.Description);Assert.IsNotEmpty(field.Unit);Assert.Greater(field.Step,0);Assert.True(NativeBalanceFields.Editable(field));

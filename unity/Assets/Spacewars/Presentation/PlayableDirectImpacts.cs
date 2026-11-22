@@ -28,13 +28,14 @@ namespace Spacewars.Presentation
                 double lifetime=e.Weapon==PlayableEntityKind.Tank?tankImpactArt.impactSeconds:profile.DirectImpactSeconds;
                 if(seconds>=lifetime)continue;
                 visible.Add(e.Id);
+                bool rocket=e.Weapon==PlayableEntityKind.Hawk||e.Contact.Rocket;
                 if(!directContacts.TryGetValue(e.Id,out var hit))
                 {
                     Vector3 from=new Vector3((float)e.Contact.From.X,(float)e.Contact.From.Y,(float)e.Contact.From.Z);
                     if(shells.TryGetValue(e.Contact.ProjectileId,out var last))from=last.transform.position;
                     world.Actors.TryGetValue(e.Contact.TargetId,out var actor);
                     var fallback=e.Contact.Impact.HasValue?new Vector3((float)e.Contact.Impact.Value.X,(float)e.Contact.Impact.Value.Y,(float)e.Contact.Impact.Value.Z):world.Point(e.Position);
-                    Vector3 point=e.Building&&e.Contact.Impact.HasValue?fallback:e.Weapon==PlayableEntityKind.Hawk
+                    Vector3 point=e.Building&&e.Contact.Impact.HasValue?fallback:rocket
                         ?(actor!=null?directContactSurface.ResolveRocket(actor.Hull,from,fallback):directContactSurface.ResolveObstacle(world.GraphicsRoot,world.Actors.Values.Select(a=>a.Root),from,fallback,(float)profile.HawkMissileLength))
                         :directContactSurface.Resolve(actor?.Hull,from,fallback);
                     hit=new DirectContactVisual{Root=projectileVisuals.DirectImpact(transform,e.Contact.ProjectileId,e.Weapon==PlayableEntityKind.Tank),Point=point,Tick=e.Tick,PresentedTick=view.Tick,
@@ -47,10 +48,10 @@ namespace Spacewars.Presentation
                     if(length>Mathf.Epsilon)
                     {
                         var direction=(point-from).normalized;
-                        if(e.Weapon==PlayableEntityKind.Hawk)
+                        if(rocket)
                         {
                             hit.Trail=projectileVisuals.HawkRocket(transform,(float)profile.HawkMissileRadius,(float)profile.HawkMissileLength,Color.gray);
-                            hit.Trail.name="Terminal Hawk missile";
+                            hit.Trail.name=e.Weapon==PlayableEntityKind.Hawk?"Terminal Hawk missile":"Terminal Explorer missile";
                             hit.Trail.transform.localScale=Vector3.one*(float)profile.HawkMissileVisualScale;
                             // The missile has already struck; do not leave Rocket's unconfigured exhaust cone visible.
                             hit.Trail.transform.Find("rocket-exhaust").gameObject.SetActive(false);
@@ -67,7 +68,7 @@ namespace Spacewars.Presentation
                     world.Layer(hit.Root);directContacts.Add(e.Id,hit);
                 }
                 if(hit.Target)hit.Point=hit.Target.TransformPoint(hit.LocalPoint);
-                if(e.Weapon==PlayableEntityKind.Hawk&&hit.Trail)
+                if(rocket&&hit.Trail)
                     hit.Trail.transform.position=hit.Point-hit.Trail.transform.right*WebProjectileVisuals.RocketTipOffset((float)profile.HawkMissileLength)*(float)profile.HawkMissileVisualScale;
                 hit.Root.transform.position=hit.Point;
                 float age=Mathf.Clamp01((float)(seconds/lifetime));

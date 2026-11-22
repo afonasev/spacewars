@@ -65,8 +65,10 @@ namespace Spacewars.Runtime
             var c=catalog??AiRosterCatalog.Initial;
             return units.Where(u=>c.For(u.Kind).targetTags.Contains("ground")).Sum(u=>
                 (u.Kind==PlayableEntityKind.Tank?p.TankWeaponDamage*1000d/p.TankWeaponReloadMilliseconds:
+                 u.RocketLauncher?PlayableUnitRules.ExplorerRocketDamagePerSecond(p,false):
                  u.Kind==PlayableEntityKind.Explorer?p.ExplorerDamage*p.ExplorerBurstSize*1000d/(p.ExplorerBurstPauseMs+p.ExplorerBurstSize*p.ExplorerBurstShotIntervalMs):
-                 p.ShkvalDamage*1000d/p.ShkvalFireIntervalMs)*ai.Value("utility.forceHorizonSeconds")*Math.Min(1,PlayableUnitRules.HealthRatio(p,u)));
+                 u.Kind==PlayableEntityKind.Igla?p.IglaDamage/p.IglaReload:
+                 p.ShkvalDamage/PlayableUnitRules.ShkvalFireInterval(p,u.Kind==PlayableEntityKind.Shkval&&u.Upgraded))*ai.Value("utility.forceHorizonSeconds")*Math.Min(1,PlayableUnitRules.HealthRatio(p,u)));
         }
         public bool Observe(PlayableAiObservation o,AiArmyRegistry registry,PlayableProfile p)
         {
@@ -214,9 +216,40 @@ namespace Spacewars.Runtime
             return o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&AppliedDefenseOrder(o,u,targetId,records)).OrderBy(u=>u.Id)
                 .Select(u=>new PlayableRouteRequest(u.Id,PlayableRouteTargetKind.VisibleEnemy,target.Id,o.Generation,o.Tick,u.Position,PlayableUnitRules.Radius(p,u.Kind),target.Position)).ToArray();
         }
+        private PlayableAiAction ProposeLocalReserve(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiArmyRegistry registry)
+        {
+            if(!Active)return null;
+            var headquarters=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Headquarters&&
+                b.Health>0&&b.Phase!=ConstructionPhase.Pending).ToArray();
+            if(headquarters.Length!=1)return null;
+            var home=headquarters[0];
+            bool Near(PlayableEntitySnapshot u)=>Distance(u.Position,home.Position)<=p.HeadquartersVisionRange;
+            var attackers=o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&Near(e)&&
+                o.Vision?.IsVisible(e.Position)==true).ToArray();
+            if(attackers.Length==0)return null;
+            var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Id!=ProtectedUnit&&
+                AiReinforcementPolicy.Available(u)&&Near(u)).ToArray();
+            var groups=registry.Capture().Armies;
+            var guards=groups.Where(g=>AiArmyRegistry.HeadquartersGuard(g,home.Id)).ToArray();
+            var front=own.Where(u=>registry.ArmyFor(u.Id)==armyId).ToArray();
+            if(guards.Length==0||Force(front,p,ai)>=Force(attackers,p,ai))return null;
+            foreach(var enemy in attackers.OrderByDescending(e=>e.Id==targetId).ThenBy(e=>Distance(e.Position,home.Position)).ThenBy(e=>e.Id))
+            {
+                var reachable=own.Where(u=>Route(o,u,enemy)!=null).Select(u=>u.Id).ToHashSet();
+                var reserves=guards.Where(g=>g.Members.All(reachable.Contains)).SelectMany(g=>g.Members).ToArray();
+                if(reserves.Length==0)continue;
+                var ids=front.Select(u=>u.Id).Where(reachable.Contains).Concat(reserves).OrderBy(id=>id).ToArray();
+                if(!ids.Any(id=>registry.ArmyFor(id)==armyId)||!registry.CanAdmitDefense(ids))continue;
+                return new PlayableAiAction(nextId,owner,o.ProfileId,o.ProfileRevision,generation,o.SnapshotSequence,
+                    PlayableCommandKind.Attack,ids,enemy.Position,targetId:enemy.Id,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            }
+            return null;
+        }
         public PlayableAiAction Propose(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiArmyRegistry registry)
         {
             Bind(o);if(registry==null||registry.OwnerId!=owner||registry.Generation!=generation)throw new ArgumentException("Defense registry binding");if(pendingId!=0)return null;
+            var reserve=ProposeLocalReserve(o,p,ai,registry);
+            if(reserve!=null)return reserve;
             var survival=LastHeadquartersAttackers(o);
             if(survival.Length>0)return ProposeSurvival(o,p,registry,survival);
             var threats=Threats(o,p);if(threats.Length==0)return null;
@@ -242,7 +275,8 @@ namespace Spacewars.Runtime
                 }
                 reachable=reachable.Concat(own.Where(u=>LocalScout(o,p,registry,u,t)&&Route(o,u,t)!=null))
                     .GroupBy(u=>u.Id).Select(g=>g.First()).OrderBy(u=>u.Id).ToArray();
-                if(reachable.Length==0||Force(reachable,p,ai)<Force(LocalThreats(o,p,t),p,ai))return null;
+                if(reachable.Length==0||!registry.CanAdmitDefense(reachable.Select(u=>u.Id))||
+                    Force(reachable,p,ai)<Force(LocalThreats(o,p,t),p,ai))return null;
                 return new Choice{ArmyId=g.Id,Units=reachable,Target=t,Distance=reachable.Average(u=>RouteDistance(Route(o,u,t)))};
             })).Where(c=>c!=null).OrderBy(c=>c.Distance).ThenBy(c=>c.ArmyId).ThenBy(c=>c.Target.Id).ToArray();
             var choice=choices.FirstOrDefault();if(choice==null)return null;
@@ -270,7 +304,8 @@ namespace Spacewars.Runtime
                     var reachable=members.Where(u=>Route(o,u,target)!=null).ToArray();
                     if(!Active&&reachable.Length!=group.Members.Length)continue;
                     var units=reachable.Concat(Active?available:scouts).GroupBy(u=>u.Id).Select(g=>g.First()).OrderBy(u=>u.Id).ToArray();
-                    if(!units.Any(u=>AiRosterCatalog.Initial.For(u.Kind).lineWeight>0))continue;
+                    if(!units.Any(u=>AiRosterCatalog.Initial.For(u.Kind).lineWeight>0)||
+                        !registry.CanAdmitDefense(units.Select(u=>u.Id)))continue;
                     choices.Add(new Choice{ArmyId=group.Id,Units=units,Target=target,Distance=units.Average(u=>RouteDistance(Route(o,u,target)))});
                 }
                 if(!Active&&groups.Length<registry.MajorCap&&available.Length>0)
@@ -315,8 +350,17 @@ namespace Spacewars.Runtime
             var yielded=action.EntityIds.Where(registry.CanYieldScoutToDefense).ToArray();
             if(yielded.Any(id=>!LocalScout(o,profile??PlayableProfile.Default,registry,o.Entities.Single(u=>u.Id==id),o.Entities.Single(u=>u.Id==action.TargetId))))throw new InvalidOperationException("Defense scout is not local or protected");
             var assigned=action.EntityIds.Where(id=>!yielded.Contains(id)).Select(registry.ArmyFor).Where(assignedArmy=>assignedArmy!=0).Distinct().ToArray();
-            if(assigned.Length>1||Active&&assigned.Any(assignedArmy=>assignedArmy!=armyId))throw new InvalidOperationException("Defense crosses army ownership");
+            var donors=Active?assigned.Where(group=>group!=armyId).ToArray():Array.Empty<long>();
+            if(donors.Length>0)
+            {
+                var homes=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&b.Kind==PlayableBuildingKind.Headquarters&&b.Phase!=ConstructionPhase.Pending).ToArray();
+                if(!assigned.Contains(armyId)||homes.Length!=1||donors.Any(group=>
+                    !AiArmyRegistry.HeadquartersGuard(registry.CaptureArmy(group).Single(),homes[0].Id)))
+                    throw new InvalidOperationException("Defense reserve ownership");
+            }
+            else if(assigned.Length>1)throw new InvalidOperationException("Defense crosses army ownership");
             var id=Active?armyId:assigned.FirstOrDefault();
+            foreach(var donor in donors)registry.Disband(donor);
             foreach(var scout in yielded)registry.Disband(registry.ArmyFor(scout));
             if(id==0){if(!registry.TryCreate(o,AiArmyRole.MobileDefense,Policy,action.EntityIds,out id))throw new InvalidOperationException("Defense slot admission");}
             else

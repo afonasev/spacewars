@@ -74,11 +74,26 @@ namespace Spacewars.Runtime
             RouteRequests(o.Entities,o.Sites,o.PublicScoutObjectives,o.Owner,o.Generation,o.Tick,profile);
         // Both entrypoints accept only already fog-filtered detached data. No domain or hidden occupancy.
         internal static PlayableRouteRequest[] RouteRequests(IEnumerable<PlayableEntitySnapshot> entities,IEnumerable<TerritorySiteSnapshot> sites,
-            IEnumerable<PlayablePublicScoutObjective> objectives,PlayableOwner owner,long generation,long tick,PlayableProfile profile)=>
-            entities.Where(u=>u.Owner==owner&&u.Kind==PlayableEntityKind.Explorer&&u.Health>0).OrderBy(u=>u.Id)
-            .SelectMany(u=>objectives.Where(g=>g.Role!=PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&g.Reachable&&
-                sites.Any(s=>s.Site.Id==g.SiteId&&s.CenterId==0&&!s.Contested&&(s.Site.Kind==PlayableBuildingKind.RelayTower?s.Owner!=owner:(!s.Owner.HasValue||s.Owner==owner)&&(!s.Claimant.HasValue||s.Claimant==owner))))
-                .OrderBy(g=>g.SiteId).Select(g=>new PlayableRouteRequest(u.Id,PlayableRouteTargetKind.PublicObjective,g.SiteId,generation,tick,u.Position,PlayableUnitRules.Radius(profile,u.Kind),g.Approach))).ToArray();
+            IEnumerable<PlayablePublicScoutObjective> objectives,PlayableOwner owner,long generation,long tick,PlayableProfile profile)
+        {
+            var scouts=entities.Where(u=>u.Owner==owner&&u.Kind==PlayableEntityKind.Explorer&&u.Health>0).OrderBy(u=>u.Id).ToArray();
+            if(scouts.Length==0)return Array.Empty<PlayableRouteRequest>();
+            var freeSites=new HashSet<int>();
+            foreach(var site in sites)
+                if(site.CenterId==0&&!site.Contested&&(site.Site.Kind==PlayableBuildingKind.RelayTower?site.Owner!=owner:
+                    (!site.Owner.HasValue||site.Owner==owner)&&(!site.Claimant.HasValue||site.Claimant==owner)))
+                    freeSites.Add(site.Site.Id);
+            var targets=objectives.Where(g=>g.Role!=PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&g.Reachable&&freeSites.Contains(g.SiteId))
+                .OrderBy(g=>g.SiteId).ToArray();
+            if(targets.Length==0)return Array.Empty<PlayableRouteRequest>();
+            var requests=new PlayableRouteRequest[checked(scouts.Length*targets.Length)];
+            double radius=PlayableUnitRules.Radius(profile,PlayableEntityKind.Explorer);
+            int next=0;
+            foreach(var scout in scouts)
+                foreach(var target in targets)
+                    requests[next++]=new PlayableRouteRequest(scout.Id,PlayableRouteTargetKind.PublicObjective,target.SiteId,generation,tick,scout.Position,radius,target.Approach);
+            return requests;
+        }
         internal static bool Safe(PlayableAiObservation o,PlayableProfile p,AiProfile ai,TerritorySiteSnapshot s,PlayableEntitySnapshot actor,PlayableRouteProof route,AiKnowledgeState knowledge=null)
         {
             var points=route==null?new[]{s.Site.Position,actor.Position}:route.Path.Concat(new[]{s.Site.Position,actor.Position}).ToArray();
@@ -158,7 +173,7 @@ namespace Spacewars.Runtime
         }
         internal bool Suppressed(TerritorySiteSnapshot site,PlayableEntitySnapshot actor,PlayableAiObservation o,PlayableProfile p,AiProfile ai)=>failed.TryGetValue(site.Site.Id,out var f)&&f==Condition(site,actor,o,p,ai,Knowledge);
         public PlayableAiAction TryPlan(PlayableAiObservation o,PlayableProfile p,AiProfile ai)=>TryPlan(o,p,ai,0,null);
-        internal PlayableAiAction TryPlan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,int financialSite,Func<int,bool> admissibleActor,Func<int,bool> admissibleSite=null)
+        internal PlayableAiAction TryPlan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,int financialSite,Func<int,bool> admissibleActor,Func<int,bool> admissibleSite=null,bool earlyMine=false)
         {
             if(o.OwnerId!=ownerId)throw new ArgumentException("Foreign expansion observation.");
             if(pendingId!=0){Guard(ownerId,o.Tick,siteId,actorId,"pending-expansion-action",false);return null;}
@@ -168,6 +183,7 @@ namespace Spacewars.Runtime
             if(siteId==0)
             {
                 var choices=from s in o.Sites
+                    where !earlyMine||s.Site.Kind==PlayableBuildingKind.Mine
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"financial-site-filter",financialSite==0||s.Site.Id==financialSite)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-admissibility",admissibleSite==null||admissibleSite(s.Site.Id))
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"known-main-territory",AiIncomeSiteSelection.TerritoryAllowed(o,p,ai,Knowledge,s))
@@ -193,11 +209,12 @@ namespace Spacewars.Runtime
                     let suppressed=failed.TryGetValue(s.Site.Id,out var f)&&f==Condition(s,u,o,p,ai,Knowledge)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"failed-site-suppression",!suppressed)
                     let length=RouteLength(route)
+                    where !earlyMine||!u.Held&&u.OrderStamp?.Origin!=PlayableOrderOrigin.Human&&EarlyMinePays(o,p,ai,s,u,length)
                     orderby length,s.Site.Id,u.Id
                     select new{s,u,g};
                 var available=choices.ToArray();
                 var selected=financialSite!=0?available.Select(x=>x.s).FirstOrDefault():
-                    AiIncomeSiteSelection.Select(o,p,ai,Knowledge,available.Select(x=>x.s),PreferRemote,LocalSiteId);
+                    AiIncomeSiteSelection.Select(o,p,ai,Knowledge,available.Select(x=>x.s),!earlyMine&&PreferRemote,earlyMine?0:LocalSiteId);
                 var best=available.FirstOrDefault(x=>x.s.Site.Id==selected?.Site.Id);if(best==null)return null;
                 site=best.s;actor=best.u;objective=best.g;
                 siteId=site.Site.Id;actorId=actor.Id;pendingActionBuildingKind=site.Site.Kind;created=progress=o.Tick;
@@ -228,6 +245,27 @@ namespace Spacewars.Runtime
 #else
         private static bool Guard(string owner,long tick,int site,int actor,string stage,bool result)=>result;
 #endif
+        internal static bool EarlyMinePays(PlayableAiObservation o,PlayableProfile p,AiProfile ai,
+            TerritorySiteSnapshot site,PlayableEntitySnapshot actor,double distance)
+        {
+            var mine=PlayableBuildingKind.Mine;
+            var refinery=PlayableBuildingKind.Refinery;
+            double captureProgress=site.Claimant==o.Owner?site.Progress:0;
+            double speed=PlayableUnitRules.Speed(p,actor.Kind);
+            if(speed<=0)return false;
+            double ready=distance/speed+Math.Max(0,1-captureProgress)*TerritoryRules.CaptureSeconds(p,mine)+TerritoryRules.Duration(p,mine);
+            double settlement=p.IncomeSettlementSeconds;
+            if(ready+settlement>ai.Value("economy.reservationExpirySeconds"))return false;
+            double horizon=ai.Value("economy.earlyMinePaybackSeconds");
+            double Return(PlayableBuildingKind kind,double buildTime)
+            {
+                double fundedSeconds=Math.Floor(Math.Max(0,horizon-buildTime)/settlement)*settlement;
+                double gross=kind==mine?TerritoryRules.MineIncome(p,site.MineReserve,fundedSeconds):
+                    fundedSeconds*TerritoryRules.Income(p,kind)/p.IncomePeriodSeconds;
+                return gross-TerritoryRules.Cost(p,kind);
+            }
+            return Return(mine,ready)>Return(refinery,TerritoryRules.Duration(p,refinery));
+        }
         internal static double RouteLength(PlayableRouteProof r){double total=0;var from=r.Origin;foreach(var point in r.Path){total+=Distance(from,point);from=point;}return total;}
         public void ObserveReceipt(PlayableAiTraceRecord r)
         {

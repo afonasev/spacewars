@@ -135,6 +135,37 @@ namespace Spacewars.Tests.EditMode
             finally{domain=original;restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
             Assert.AreEqual(PlayableEntityKind.Explorer,Factory.PrivateState.Orders.Single().Kind);
         }
+        [TestCase(PlayableEntityKind.Tank)][TestCase(PlayableEntityKind.Explorer)][TestCase(PlayableEntityKind.Shkval)]
+        public void RefusedRallyIntentSurvivesSaveAndExplicitHoldCancelsIt(PlayableEntityKind kind)
+        {
+            var exit=FactoryReleaseRules.Exit(profile,Factory.Position,Factory.Heading,kind);
+            int id=(int)Call("SpawnUnit",exit,PlayableOwner.Player,kind);
+            var rally=new NavPoint(-10,15);
+            PlayableTacticalOrderSnapshot Order(){
+                var all=(IDictionary)typeof(PlayableDomain).GetField("units",Hidden).GetValue(domain);
+                return (PlayableTacticalOrderSnapshot)all[id].GetType().GetField("CurrentOrder").GetValue(all[id]);
+            }
+            domain.Navigation.PhysicalHostBudget.AllocationAdmission=_=>false;
+            try{Call("CompleteProduced",id,(NavPoint?)rally,PlayableOwner.Player,kind);}
+            finally{domain.Navigation.PhysicalHostBudget.AllocationAdmission=null;}
+            var order=Order();
+            Assert.AreEqual(PlayableTacticalOrderKind.AttackMove,order?.Kind);
+            Assert.AreEqual(rally,order.Destination);Assert.False(domain.Navigation.IsPending(id));
+            var bytes=domain.CaptureWorldBytes(7,"refused-rally");
+            var restored=PlayableDomain.RestoreWorldBytes(bytes,profile,7,"refused-rally");var original=domain;
+            try
+            {
+                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"refused-rally"));
+                domain=restored;
+                Assert.AreEqual(PlayableTacticalOrderKind.AttackMove,Order()?.Kind);
+                Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.Hold,id));
+                for(int i=0;i<10;i++)domain.Step(1d/30);
+                var held=View.Entities.Single(e=>e.Id==id);
+                Assert.True(held.Held);Assert.IsNull(Order());Assert.AreEqual(exit,held.Position);
+                Assert.False(domain.Navigation.IsPending(id),"An explicit Hold must prevent automatic rally retries");
+            }
+            finally{domain=original;restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
+        }
         [Test] public void NextOrderRemainsInactiveDuringGateClosure()
         {
             Send(PlayableCommandKind.QueueTank,factory);Send(PlayableCommandKind.QueueExplorer,factory);Until(FactoryReleaseRules.Closing);

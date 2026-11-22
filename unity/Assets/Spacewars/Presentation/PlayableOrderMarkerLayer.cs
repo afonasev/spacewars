@@ -10,6 +10,8 @@ namespace Spacewars.Presentation
     public sealed class PlayableOrderMarkerLayer : VisualElement
     {
         IReadOnlyList<PlayableQueueMarker> markers=Array.Empty<PlayableQueueMarker>();
+        private IReadOnlyList<NavLocation> inputPulse=Array.Empty<NavLocation>();
+        private float inputProgress=1;
         readonly Func<NavLocation,Vector2?> project;readonly bool compact;readonly EnvironmentArtProfile art;
         public int VisibleCount=>markers.Count;
         public PlayableOrderMarkerLayer(Func<NavLocation,Vector2?> project,bool compact=false,EnvironmentArtProfile art=null)
@@ -17,11 +19,19 @@ namespace Spacewars.Presentation
             this.project=project;this.compact=compact;this.art=art??EnvironmentArtProfile.Load();this.art.Validate();pickingMode=PickingMode.Ignore;name="tactical-order-markers";
             style.position=Position.Absolute;style.left=0;style.right=0;style.top=0;style.bottom=0;generateVisualContent+=Draw;
         }
-        public void Set(IReadOnlyList<PlayableQueueMarker> next){markers=next??Array.Empty<PlayableQueueMarker>();MarkDirtyRepaint();}
+        public void Set(IReadOnlyList<PlayableQueueMarker> next,IReadOnlyList<NavLocation> pulse=null,double progress=1)
+        {markers=next??Array.Empty<PlayableQueueMarker>();inputPulse=pulse??Array.Empty<NavLocation>();inputProgress=(float)progress;MarkDirtyRepaint();}
         void Draw(MeshGenerationContext ctx)
         {
             var p=ctx.painter2D;// Preserve the established map-to-field proportions while tuning the shared visual profile.
             float radius=art.orderMarkerRadius*(compact?.5f:1),font=art.orderMarkerFontSize*(compact?.625f:1);
+            foreach(var location in inputPulse){
+                var projected=project(location);
+                if(!projected.HasValue||!contentRect.Contains(projected.Value))continue;
+                p.lineWidth=art.orderMarkerWidth;
+                p.strokeColor=new Color(.88f,.95f,1,(1-inputProgress)*.75f);
+                p.BeginPath();p.Arc(projected.Value,radius*Mathf.Lerp(.6f,1.25f,inputProgress),0,360);p.Stroke();
+            }
             foreach(var marker in markers)
             {
                 if(!marker.Location.HasValue)continue;var point=project(marker.Location.Value);if(!point.HasValue)continue;

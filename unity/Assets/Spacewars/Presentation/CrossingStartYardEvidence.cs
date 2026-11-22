@@ -70,7 +70,7 @@ namespace Spacewars.Presentation
             yield return Wait(()=>Get<NativeMainMenu>("nativeMainMenu")?.ScreenRoot!=null,10,"native main menu ready");
             Get<NativeMainMenu>("nativeMainMenu").ScreenRoot.Q<Button>("main-play").Focus();Get<NativeMenuNavigation>("menuNavigation").Activate();
             yield return Wait(()=>Get<VisualElement>("lobbyScreen").style.display.value==DisplayStyle.Flex,10,"play button enters lobby");
-            var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Переправа (4)";
+            var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Переправа (2)";
             var setup=Get<NativeLobbyConfiguration>("lobbySetup");setup.HasExplicitSeed=true;setup.ExplicitSeed=7;
             Set("battleHudUnattended",true);Call("LaunchLobbyMatch");
             yield return Wait(()=>!Get<bool>("inLobby")&&!Get<bool>("preparing"),120,"ordinary match launched");

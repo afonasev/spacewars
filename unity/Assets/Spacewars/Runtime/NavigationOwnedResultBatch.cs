@@ -138,12 +138,25 @@ namespace Spacewars.Runtime
                 }
                 actors=Crowd.Units.Count;attempts=liveArrivalTables.Count;groupCount=groups.Count;leases=liveArrivalLeaseTable?.Count??0;publication=admissionPublicationIdentity;
             }
-            if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope))return ResultBatchFalse(100,"admission-scope-refused");
+            bool admitted=allowComposedMovement&&!resultOnly
+                ?TryOpenMotionScope(publication,out var scope)
+                :physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out scope);
+            if(!admitted)return ResultBatchFalse(100,"admission-scope-refused");
             using(scope){PreparedResultBatch c=null;MotionPublication publicationRecord=null;NavigationMotionAdoption adoption=null;try{
                 if(resultOnly||names.Answers.Length>0)using(NavStorageScratch.Reserve(scope.OwnedReservation(),RebindStagingScratchBound(actors,retainedGoals.Count,navigationGeometry.Obstacles.Count)))using(EnterTransport()){
                     if(!AnswerNamesSourceCurrent(names))return ResultBatchFalse(102,"held-scan-answer-names");
                     foreach(var pair in retainedGoals)if(!allocating.ContainsKey(pair.Key)&&Crowd.TryGet(pair.Key,out _)&&movementIdentities.TryGetValue(pair.Key,out var identity)&&!CurrentHeldBinding(identity,pair.Key)){heldPrefix=true;break;}
                     if(heldPrefix)heldGoals=retainedGoals.Count;
+                    else if(names.Answers.Length==1){
+                        var answer=names.Answers[0];var request=answer.Request;
+                        bool boundMotion=requireTrafficFrame&&motionAuthority!=null&&!resultOnly;
+                        if(request.Entity<0||names.SingleCapacityExceeded&&!boundMotion)return null;
+                        // A bound frame resolves lone failures and obsolete Stale
+                        // in its owned FIFO prefix, including Ready over capacity.
+                        if(answer.Status!=NavSolveStatus.Ready&&
+                            (!boundMotion||answer.Status==NavSolveStatus.Pending||
+                            answer.Status==NavSolveStatus.Stale&&pending.TryGetValue(request.Entity,out var current)&&ReferenceEquals(current,request)))return null;
+                    }
                 }
                 // A current Ready for an actor that moved can require a route reissue.
                 // Keep that replacement owned without changing ordinary/discard publication.
@@ -154,7 +167,6 @@ namespace Spacewars.Runtime
                         !Crowd.TryGet(request.Entity,out var actor)||
                         Math.Abs(actor.Position.X-request.Start.X)<=1e-4&&Math.Abs(actor.Position.Z-request.Start.Z)<=1e-4)return null;
                 }
-                if(!heldPrefix&&names.Answers.Length==1&&(names.Answers[0].Status!=NavSolveStatus.Ready||names.Answers[0].Request.Entity<0||names.SingleCapacityExceeded))return null;
                 c=PreparedResultBatch.Create(names.Answers.Length,actors,attempts,names.Single?(names.BarrierCount>0?0:1):names.SourceAnswerCount,groupCount,scope.OwnedReservation(),heldGoals,leases);c.ResultOnly=resultOnly;c.HasHeldPrefix=heldPrefix;c.Names=NavPhysicalMacro.Acquire(c,names);
                 using(EnterTransport()){
                     if(!AnswerNamesSourceCurrent(names)||actors!=Crowd.Units.Count||attempts!=liveArrivalTables.Count||groupCount!=groups.Count||leases!=(liveArrivalLeaseTable?.Count??0))return ResultBatchFalse(103,"capture-counts-or-answer-names");
@@ -177,7 +189,9 @@ namespace Spacewars.Runtime
                     if(!pending.TryGetValue(request.Entity,out var expected)||!ReferenceEquals(expected,request)||!ResultHeldRequestCurrent(c,request)){
                         c.Operations[i].Kind=ResultOperationKind.Discard;c.RejectedCount++;c.DiscardCount++;if(c.Operations[i].Tracked)c.AnswerBytes-=names.Answers[i].Corridor.EstimatedRetainedBytes;continue;
                     }
-                    var effective=names.Answers[i].Status;if(effective==NavSolveStatus.Ready&&ResultBatchCapacityExceeded(c,i))effective=NavSolveStatus.CapacityExceeded;
+                    var effective=names.Answers[i].Status;
+                    if(effective==NavSolveStatus.Ready&&(names.SingleCapacityExceeded||ResultBatchCapacityExceeded(c,i)))
+                        effective=NavSolveStatus.CapacityExceeded;
                     bool prepared=effective!=NavSolveStatus.Ready?PrepareFailureIntoResultBatch(c,i,scope,effective):PrepareReadyIntoResultBatch(c,i,scope);
                     if(!prepared){using(EnterTransport())if(!ResultBatchSourceCurrent(c))return ResultBatchFalse(107,"operation-source-after-prepare");return null;}
                 }
@@ -240,8 +254,26 @@ namespace Spacewars.Runtime
                 try{using(EnterTransport()){
                     bool moved=false;try{if(!c.ComposedMovement&&!c.ResultOnly)ValidateCompatibilityMotion(motionWorkspace);scope.Publish(c,publish);if(!c.ComposedMovement&&!c.ResultOnly){StepMovementLocked(dt,motionWorkspace);moved=true;}}
                     finally{if(c.Published&&!c.ComposedMovement&&!c.ResultOnly){admissionBatchDepth--;if(moved)PublishAdmission();}}
-                }}finally{if(c.Published){scope.ResolveCommitted();ThrowMotionPublicationFailure();if(c.ComposedMovement&&c.Frame!=null)CaptureRecastMovementReceipt(c.Frame);if(c.ComposedMovement)motionWorkspace?.Dispose();try{foreach(var row in c.HeldRows)if(row.Changed){if(row.Eligible)RouteRequested?.Invoke(row.Replacement.Replacement.Request);else MovementCancelled?.Invoke(row.Replacement.FailureSource.Id);}for(int i=0;i<c.Operations.Length;i++){var op=c.Operations[i];if(op.Kind==ResultOperationKind.Ready)RouteActivated?.Invoke(names.Answers[i].Request);else if(op.Kind==ResultOperationKind.Reissue)RouteRequested?.Invoke(op.Replacement.Request);else if(op.Kind==ResultOperationKind.Failure){RouteFailed?.Invoke(names.Answers[i].Request,op.FailureOutcome);MovementCancelled?.Invoke(names.Answers[i].Request.Entity);}}}finally{if(names.Answers.Length>0||!c.ComposedMovement||c.MovementAdmissionChanged)SignalHost();}}}return true;
-            }catch(InvalidOperationException error){LastResultBatchFailure=error.Message;if(c?.Published==true)throw;return ResultBatchFalse(111,"invalid-operation");}finally{try{EndMotionPreparation(publicationRecord,adoption);}finally{c?.Dispose();}}}
+                }}finally{if(c.Published){scope.ResolveCommitted();ThrowMotionPublicationFailure();if(c.ComposedMovement&&c.Frame!=null)CaptureRecastMovementReceipt(c.Frame);if(c.ComposedMovement)motionWorkspace?.Dispose();try{foreach(var row in c.HeldRows)if(row.Changed){if(row.Eligible)RouteRequested?.Invoke(row.Replacement.Replacement.Request);else MovementCancelled?.Invoke(row.Replacement.FailureSource.Id);}for(int i=0;i<c.Operations.Length;i++){var op=c.Operations[i];if(op.Kind==ResultOperationKind.Ready){
+                    var answer=names.Answers[i];
+                    RouteActivated?.Invoke(answer.Request);
+                    ReadyRouteAccepted?.Invoke(answer);
+                }else if(op.Kind==ResultOperationKind.Reissue){
+                    ReadyRouteReissued?.Invoke(names.Answers[i]);
+                    RouteRequested?.Invoke(op.Replacement.Request);
+                }else if(op.Kind==ResultOperationKind.Failure){
+                    var answer=names.Answers[i];
+                    RouteFailed?.Invoke(answer.Request,op.FailureOutcome);
+                    MovementCancelled?.Invoke(answer.Request.Entity);
+                    GroundRouteFailed?.Invoke(answer,op.FailureOutcome);
+                }}}finally{if(names.Answers.Length>0||!c.ComposedMovement||c.MovementAdmissionChanged)SignalHost();}}}return true;
+            }catch(InvalidOperationException error){
+                LastResultBatchFailure=error.Message;
+                if(c?.Published==true)throw;
+                if(error.InnerException is GroundMotionRefusal receiver)refusedGroundReceiver=receiver.Entity;
+                if(error is StaleAdmissionProjection)MotionSourceContended=true;
+                return ResultBatchFalse(111,"invalid-operation");
+            }finally{try{EndMotionPreparation(publicationRecord,adoption);}finally{c?.Dispose();}}}
         }
         private bool PrepareReadyIntoResultBatch(PreparedResultBatch c,int at,NavigationRetentionBudget.Scope scope)
         {
@@ -252,13 +284,15 @@ namespace Spacewars.Runtime
             using(EnterTransport())if(!ResultBatchSourceCurrent(c)||request.Session!=Generation||request.ProfileId!=profile.ProfileId||request.ProfileRevision!=profile.Revision||!(ReferenceEquals(request.BaseGeometry,navigationGeometry)||IsCurrentPhysicalAuthorityGeometry(request))||!CurrentMember(request)||!CurrentHeldBinding(request.HeldIdentity,request.Entity))return false;
             int actor=-1;for(int i=0;i<c.Actors.Length;i++)if(c.Actors[i].Id==request.Entity){actor=i;break;}if(actor<0||c.Actors[actor].Held)return false;
             for(int i=0;i<at;i++)if(c.Operations[i].Kind==ResultOperationKind.Ready&&c.Operations[i].Actor==actor)return false;
-            bool valid=c.Names.Qualified[at];var actual=c.ActorPins[actor] as NavLiveUnitStorage;var unit=actual.Unit;
-            if(valid){var previous=c.Actors[actor].Position;for(int i=0;i<answer.RouteLength;i++){var point=answer.ReadOnlyRouteBacking[i];if(!request.Geometry.SegmentFree(previous,point,request.Profile.Radius)){valid=false;break;}previous=point;}}
-            if(valid)valid=terrain is IRecastPhysicalTerrain
+            var actual=c.ActorPins[actor] as NavLiveUnitStorage;var unit=actual.Unit;bool valid=c.Names.Qualified[at]&&ReadyPhysicalOriginCurrent(answer,unit);
+            bool certifiedEntry = valid && answer.StorageOwner?.CanInstallFrom(Crowd,unit,terrain)==true;
+            if (valid && !certifiedEntry && answer.StorageOwner?.HasBoundedEntryFor(terrain) == true) valid = false;
+            if(valid && !certifiedEntry){var previous=c.Actors[actor].Position;for(int i=0;i<answer.RouteLength;i++){var point=answer.ReadOnlyRouteBacking[i];if(!request.Geometry.SegmentFree(previous,point,request.Profile.Radius)){valid=false;break;}previous=point;}}
+            if(valid && !certifiedEntry)valid=terrain is IRecastPhysicalTerrain
                 ?Crowd.ValidatePhysicalTypedRoute(unit,unit.Location,request.Goal,answer.StorageOwner?.CorridorOwner?.TypedRoute,request.GoalLocation)
                 :Crowd.ValidateRoute(unit,c.Actors[actor].Position,unit.Location,request.Goal,answer.ReadOnlyRouteBacking,request.GoalLocation,out _);
             if(!valid){
-                if(Math.Abs(c.Actors[actor].Position.X-request.Start.X)>1e-4||Math.Abs(c.Actors[actor].Position.Z-request.Start.Z)>1e-4)return PrepareMovedRejectedReady(c,at,scope);
+                if(ReadySourceMoved(request,unit))return PrepareMovedRejectedReady(c,at,scope);
                 return PrepareFailureIntoResultBatch(c,at,scope,NavSolveStatus.Ready,true);
             }
             if(!PrepareAnswerInstallDestination(c.Names,at,scope))return false;

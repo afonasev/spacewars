@@ -109,7 +109,9 @@ namespace Spacewars.Presentation
                 FinalProceduralMesh.IndexOwned(mesh);terrainMeshes.Add(mesh);
                 var obj=new GameObject(name);obj.transform.SetParent(root,false);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
                 var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=mossTerrainMaterial;
-                var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",Color.white);properties.SetFloat("_SurfaceRole",4);properties.SetFloat("_RoadSurface",ridge?0:1);renderer.SetPropertyBlock(properties);
+                var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",Color.white);properties.SetFloat("_SurfaceRole",4);properties.SetFloat("_RoadSurface",ridge?0:1);
+                if(name=="plateau")properties.SetFloat("_PlateauSurface",1);
+                renderer.SetPropertyBlock(properties);
             }
         }
         private Texture2D mossPaintMask,mossAccentMask,mossTransitionMask;
@@ -142,10 +144,7 @@ namespace Spacewars.Presentation
             var fields=new float[MossHighlandArtProfile.Roles.Length][];for(int i=0;i<fields.Length;i++)fields[i]=new float[length];
             for(int i=0;i<length;i++)fields[4][i]=1;
             foreach(var patch in map.Materials){
-                int role=MossHighlandArtProfile.Role(patch.Material);var b=patch.Bounds;
-                // Current complete sites are the only authority for construction paint.
-                // Remove retained source decks, including vacated side-outpost positions.
-                if(role==2)role=4;
+                int role=MossHighlandArtProfile.Role(MossHighlandArtProfile.GroundMaterial(patch.Material));var b=patch.Bounds;
                 int x0=Mathf.Clamp(Mathf.CeilToInt((float)(b.MinX+map.HalfExtent)/step-.5f),0,size),x1=Mathf.Clamp(Mathf.CeilToInt((float)(b.MaxX+map.HalfExtent)/step-.5f),0,size);
                 int z0=Mathf.Clamp(Mathf.CeilToInt((float)(b.MinZ+map.HalfExtent)/step-.5f),0,size),z1=Mathf.Clamp(Mathf.CeilToInt((float)(b.MaxZ+map.HalfExtent)/step-.5f),0,size);
                 for(int z=z0;z<z1;z++)for(int x=x0;x<x1;x++){int i=z*size+x;fields[4][i]=0;fields[role][i]=1;}
@@ -196,14 +195,29 @@ namespace Spacewars.Presentation
                 transitions[i]=new Color(rock>0?1-Mathf.SmoothStep(0,1,rock/art.screeReach):0,
                     rock>0?1-Mathf.SmoothStep(0,1,apron/art.apronEdgeReach):0,rampPaint,siteRole);
             }
+            // Movement blockers that are neither rock solids nor rivers are the exposed
+            // plateau faces. They already exclude internal seams and the four ramp mouths.
+            var cliffs=map.MovementBlockers.Except(map.Solids).Except(map.BorderRivers);
             var a=new Color[length];var c=new Color[length];
+            float reach=art.plateauRimWidth;
+            foreach(var cliff in cliffs){
+                int x0=Mathf.Clamp(Mathf.FloorToInt((float)(cliff.MinX+map.HalfExtent-reach)/step),0,size);
+                int x1=Mathf.Clamp(Mathf.CeilToInt((float)(cliff.MaxX+map.HalfExtent+reach)/step),0,size);
+                int z0=Mathf.Clamp(Mathf.FloorToInt((float)(cliff.MinZ+map.HalfExtent-reach)/step),0,size);
+                int z1=Mathf.Clamp(Mathf.CeilToInt((float)(cliff.MaxZ+map.HalfExtent+reach)/step),0,size);
+                for(int z=z0;z<z1;z++)for(int x=x0;x<x1;x++){
+                    float distance=Distance(cliff,(x+.5)*step-map.HalfExtent,(z+.5)*step-map.HalfExtent);
+                    int i=z*size+x;
+                    c[i].a=Mathf.Max(c[i].a,1-Mathf.SmoothStep(0,1,distance/reach));
+                }
+            }
             for(int i=0;i<length;i++){
                 // Authored construction has precedence over feathered natural roles.
                 // Prevent soft natural weights from blurring flush engineered edges.
                 if(fields[2][i]>.5f){a[i]=new Color(0,0,1,0);c[i]=Color.clear;continue;}
                 float total=0;foreach(var f in fields)total+=f[i];total=Mathf.Max(total,.00001f);
                 a[i]=new Color(fields[0][i]/total,fields[1][i]/total,fields[2][i]/total,fields[3][i]/total);
-                c[i]=new Color(fields[4][i]/total,fields[5][i]/total,fields[6][i]/total,0);
+                c[i]=new Color(fields[4][i]/total,fields[5][i]/total,fields[6][i]/total,c[i].a);
             }
             Texture2D Mask(string name,Color[] pixels){var t=new Texture2D(size,size,TextureFormat.RGBA32,false,true){name=name,wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};t.SetPixels(pixels);t.Apply(false,false);return t;}
             ready(new[]{Mask("Moss Highland ground role weights",a),Mask("Moss Highland accent role weights",c),Mask("Moss Highland transition distances",transitions)});

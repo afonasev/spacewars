@@ -36,7 +36,7 @@ namespace Spacewars.Tests.PlayMode
         {
             string output=Environment.GetEnvironmentVariable("SPACEWARS_MATERIAL_BATCH_OUTPUT");Assert.IsNotEmpty(output);Directory.CreateDirectory(output);
             var baseline=PlayableProfile.Create(Newtonsoft.Json.JsonConvert.DeserializeObject<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text),new AiTestMap());
-            var store=new NativeBalanceStore(baseline,Path.Combine(output,"isolated-native-balance.json"),false);store.Select(NativeBalanceStore.NewMatchProfileId,NativeBalanceStore.NewMatchProfileVersion);
+            var store=new NativeBalanceStore(baseline,Path.Combine(output,"isolated-native-balance.json"),false);store.Select(NativeBalanceStore.CorridorExperimentId,NativeBalanceStore.CorridorExperimentVersion);
             var profile=store.Active;Assert.AreEqual(2,profile.Revision);var priorDetail=ModelDetailProfile.Current;ModelDetailProfile.UseSession(store.ActiveModelDetail);
             var root=new GameObject("Cycle62 readonly actor bindings");var world=new PlayableWorld(root.transform,profile);
             var camera=new GameObject("Inventory projection only").AddComponent<Camera>();camera.transform.SetParent(root.transform);camera.enabled=false;camera.orthographic=true;camera.aspect=3456f/2160;camera.transform.position=new Vector3(0,7,-10);camera.transform.LookAt(Vector3.zero);

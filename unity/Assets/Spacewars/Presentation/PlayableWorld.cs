@@ -11,19 +11,22 @@ namespace Spacewars.Presentation
     {
         public sealed class Actor
         {
+            public CerberusPresentation Cerberus;
+            public IglaPresentation Igla;
             public Transform Root, Hull, Turret, Turbine, Launcher; public ShkvalMechanismPresentation ShkvalMechanism;
             public Transform[] LoadedRockets;
             public TankMechanismPresentation TankMechanism;
             public TankDistantLod TankLod;
             public ModelDetailLod DetailLod;
             public Mesh AirProjection;public Vector3[] AirProjectionVertices;
+            public Transform RepairEmitter;
             public ActorMaterialProfile MaterialFinish;
             public FactoryModelPresentation Factory;
             public double FactoryHeading=TerritoryRules.BuildingHeading;
             public ArmoredMinePresentation Mine;
             public HawkModelPresentation Hawk;
             public GaussTowerPresentation Gauss;public RepairTowerPresentation Healing;public SentryTurretPresentation Sentry;public Transform FactoryStaged;public ModelDetailLod FactoryStagedLod;public TankDistantLod FactoryStagedTankLod;public TankMechanismPresentation FactoryStagedMechanism;public PlayableEntityKind FactoryStagedKind;public bool FactoryStagedUpgraded;
-            public bool RefineryUpgraded,UnitUpgraded;public Color? PresentationPaint;
+            public bool RefineryUpgraded,UnitUpgraded,ExplorerRocketLauncher; internal MeshFilter[] ExplorerRocketMeshes; internal int ExplorerRocketDetailLevel; internal PlayableOwner ExplorerRocketOwner;public Color? PresentationPaint;
             public GameObject Selection;
             public bool UnitSelection;
             public Transform Health;
@@ -31,9 +34,47 @@ namespace Spacewars.Presentation
             internal Transform HealthOutline,HealthBackground;
             internal Transform[] HealthDividers;
             internal HealthDividerBatch HealthDividerBatch;
+            internal float HealthPixelsPerUnit;
+            internal int HealthWidthPixels,HealthHeightPixels;
             internal Transform HealthModel;
             internal Renderer[] HealthModelRenderers;
+            internal PlayableDisplayPose? AppliedTankPose;
+            internal Dictionary<Renderer, Material[]> ReinforcementOriginalMaterials;
+            internal MeshRenderer ReinforcementCylinder,StasisCylinder;
         }
+        private static readonly int MatchAnimationTime=Shader.PropertyToID("_MatchAnimationTime");
+        private AntennaCityWindowLights windowLights;
+        private double matchAnimationSeconds;
+        private long matchAnimationGeneration=-1,matchAnimationTick=-1;
+
+        public void UpdateMatchAnimation(PlayableSnapshot view,double? snapshotAge=null,double rate=1,bool overview=false)
+        {
+            const double ticksPerSecond=30;
+            double tick=view.Tick;
+            if(snapshotAge.HasValue&&tick>0&&!view.Paused&&view.Status==RuntimeStatus.Running&&view.Outcome==PlayableMatchOutcome.Playing)
+            {
+                // Interpolate the last published step; never extrapolate while the host is stalled.
+                tick=tick-1+System.Math.Clamp(snapshotAge.Value*rate*ticksPerSecond,0,1);
+            }
+            double seconds=tick/ticksPerSecond;
+            if(matchAnimationGeneration==view.Generation&&matchAnimationTick==view.Tick)
+                seconds=System.Math.Max(seconds,matchAnimationSeconds);
+
+            matchAnimationGeneration=view.Generation;
+            matchAnimationTick=view.Tick;
+            matchAnimationSeconds=seconds;
+            material.SetFloat(MatchAnimationTime,(float)seconds);
+            if(cityMaterial&&profile.AuthoredMap is AntennaCityMap city){
+                windowLights??=new AntennaCityWindowLights(cityMaterial,city.HalfExtent,AntennaCityWindowProfile.Load());
+                windowLights.Update(view,overview,seconds);
+            }
+            if (terrainCacheYardMaterial) terrainCacheYardMaterial.SetFloat(MatchAnimationTime, (float)seconds);
+            if(mossTerrainMaterial)mossTerrainMaterial.SetFloat(MatchAnimationTime,(float)seconds);
+        }
+
+        private double AnimationSeconds(PlayableSnapshot view)=>
+            matchAnimationGeneration==view.Generation&&matchAnimationTick==view.Tick?matchAnimationSeconds:view.Tick/30d;
+
         private readonly Material material;
         private GameObject campaignGateVisual;
         public void SetCampaignGate(bool closed){if(campaignGateVisual!=null)campaignGateVisual.SetActive(closed);}
@@ -44,10 +85,41 @@ namespace Spacewars.Presentation
         private PlayableProfile profile;
         public ActorMaterialProfile MaterialFinish {get;set;}=ActorMaterialProfile.Load();
         public Transform GraphicsRoot=>root;
+        internal Material TerrainCacheMaterial => material;
+        internal int TerrainCacheRevision { get; private set; }
+        private Material terrainCacheYardMaterial;
+        private Renderer[] terrainCacheYardRenderers;
+
+        internal Material PrepareTerrainCacheYardMaterial(out Renderer[] yardRenderers)
+        {
+            if (!terrainCacheYardMaterial)
+            {
+                terrainCacheYardMaterial = new Material(material);
+                terrainCacheYardMaterial.EnableKeyword("SPACEWARS_QA_STOCK_YARD");
+                var properties = new MaterialPropertyBlock();
+                var renderers = new List<Renderer>();
+                foreach (var renderer in root.GetComponentsInChildren<MeshRenderer>(true))
+                {
+                    if (renderer.sharedMaterial != material) continue;
+                    renderer.GetPropertyBlock(properties);
+                    if (properties.GetFloat("_YardObject") > .5f)
+                        renderers.Add(renderer);
+                }
+                terrainCacheYardRenderers = renderers.ToArray();
+            }
+            yardRenderers = terrainCacheYardRenderers;
+            return terrainCacheYardMaterial;
+        }
+
+        private void DisposeTerrainCacheMaterial()
+        {
+            if (terrainCacheYardMaterial) ReleaseWorldObject(terrainCacheYardMaterial);
+        }
         public bool HybridTanks {get;set;}=true;
         public void ApplyGraphics(ActorMaterialProfile finish,IndustrialLightingProfile lighting)
         {
             finish.Validate();lighting.Validate();MaterialFinish=finish;wreckKeyColor=Color.HSVToRGB(lighting.sunHue,lighting.sunSaturation,1);
+            TerrainCacheRevision++;
             var industrial=new Vector4(lighting.steelHighlight,lighting.steelExponent,lighting.concreteHighlight,lighting.concreteExponent);
             foreach(var renderer in root.GetComponentsInChildren<Renderer>(true))
             {
@@ -76,7 +148,7 @@ namespace Spacewars.Presentation
             }
             foreach(var wreck in unitWrecks.Values)if(wreck.State.HasGround&&wreck.Model)foreach(var renderer in wreck.Model.GetComponentsInChildren<MeshRenderer>())finish.ApplyWreck(renderer,WreckKeyColor);
         }
-        public void Rebind(PlayableProfile next){ClearMines();ClearAbilityEffects();ClearTowerRange();ClearGroundTrails();ClearUnitWrecks();ClearBuildingDestructions();ClearPads();ClearRallyFlags();profile=next;wreckKeyColor=null;WreckProfile.lifetimeSeconds=(float)next.UnitWreckLifetimeSeconds;foreach(var id in new List<int>(actors.Keys))Remove(id);ReleaseWorldObject(selectionMaterial);selectionMaterial=null;ReleaseWorldObject(selectionQuad);selectionQuad=null;}
+        public void Rebind(PlayableProfile next){windowLights?.Reset();ClearReinforcementPreviewModels();ClearMines();ClearAbilityEffects();ClearTowerRange();ClearGroundTrails();ClearUnitWrecks();ClearBuildingDestructions();ClearPads();ClearRallyFlags();profile=next;ApplyDockRelayCaptureRadius();PrepareRelayGround();wreckKeyColor=null;WreckProfile.lifetimeSeconds=(float)next.UnitWreckLifetimeSeconds;foreach(var id in new List<int>(actors.Keys))Remove(id);ReleaseWorldObject(selectionMaterial);selectionMaterial=null;ReleaseWorldObject(selectionQuad);selectionQuad=null;}
         private readonly Transform root;
         private int presentationLayer;
         public void SetPresentationLayer(int layer){presentationLayer=layer;Layer(root.gameObject);}
@@ -99,6 +171,7 @@ namespace Spacewars.Presentation
         private System.Collections.IEnumerator PrepareTerrain(MossHighlandArtProfile mossArt,NullDockArtProfile dockArt)
         {
             double extent=profile.ArenaHalfExtent;
+            if(profile.AuthoredMap is DeafMirrorMap mirror){CreateDeafMirror(mirror);yield break;}
             if(profile.AuthoredMap is AntennaCityMap city){yield return CreateAntennaCity(city);yield break;}
             if(profile.AuthoredMap is NullDockMap dock){yield return CreateNullDock(dock,dockArt);yield break;}
             if(profile.AuthoredMap is CrimsonGroveMap grove){yield return CreateCrimsonGrove(grove);yield break;}
@@ -170,18 +243,22 @@ namespace Spacewars.Presentation
                 Part("Pad paint",t,new Vector3(0,.07f,side*2),new Vector3(4,.03f,.12f),Ally);
             }
         }
-        private string UnitModelKey(PlayableEntityKind kind,bool upgraded=false)=>kind==PlayableEntityKind.Hawk?"hawk":
+        private string UnitModelKey(PlayableEntityKind kind,bool upgraded=false)=>kind==PlayableEntityKind.Igla?"Igla/close":kind==PlayableEntityKind.Cerberus?"Cerberus/cerberus0":kind==PlayableEntityKind.Skat?"skat":kind==PlayableEntityKind.Hawk?"hawk":
             kind==PlayableEntityKind.Tank?(HybridTanks?(upgraded?"tankHybridUpgraded":"tankHybrid"):(upgraded?"tankUpgraded":"tank")):
             kind==PlayableEntityKind.Explorer?(upgraded?"explorerUpgraded":"explorer"):(upgraded?"shkval-guidance-3":"shkval");
-        private float UnitModelScale(PlayableEntityKind kind)=>(float)(kind==PlayableEntityKind.Hawk?profile.HawkModelScale:kind==PlayableEntityKind.Shkval?profile.ShkvalModelRadius*profile.ShkvalModelScale/2.05:kind==PlayableEntityKind.Explorer?profile.ExplorerModelRadius*profile.ExplorerModelScale/1.0773:profile.TankModelRadius*profile.TankModelScale/1.585);
+        private float UnitModelScale(PlayableEntityKind kind)=>(float)(kind==PlayableEntityKind.Igla?PlayableUnitRules.IglaModelScale:kind==PlayableEntityKind.Cerberus?PlayableUnitRules.CerberusModelScale(profile):kind==PlayableEntityKind.Skat?PlayableUnitRules.SkatModelScale:kind==PlayableEntityKind.Hawk?profile.HawkModelScale:kind==PlayableEntityKind.Shkval?profile.ShkvalModelRadius*profile.ShkvalModelScale/2.05:kind==PlayableEntityKind.Explorer?profile.ExplorerModelRadius*profile.ExplorerModelScale/1.0773:profile.TankModelRadius*profile.TankModelScale/1.585);
         public Actor Tank(int id,bool friendly,PlayableEntityKind kind=PlayableEntityKind.Tank)
         {
             var a=Base(id,friendly,true,kind);
             a.Hull=Model(UnitModelKey(kind),a.Root,friendly);
             // Manifest geometry radius, not a tuning value; model radius/scale are profile-owned.
             a.Hull.localScale=Vector3.one*UnitModelScale(kind);
-            a.Turret=kind==PlayableEntityKind.Hawk?new GameObject("airAim").transform:a.Hull.GetComponentsInChildren<Transform>(true).Single(t=>t.name=="turretYaw");if(kind==PlayableEntityKind.Hawk)a.Turret.SetParent(a.Hull,false);
+            if (kind == PlayableEntityKind.Skat)
+                a.RepairEmitter = a.Hull.GetComponentsInChildren<Transform>(true).Single(t => t.name == "repairEmitter");
+            a.Turret=kind==PlayableEntityKind.Igla||kind==PlayableEntityKind.Cerberus||PlayableUnitRules.Aircraft(kind)?new GameObject("airAim").transform:a.Hull.GetComponentsInChildren<Transform>(true).Single(t=>t.name=="turretYaw");if(kind==PlayableEntityKind.Igla||kind==PlayableEntityKind.Cerberus||PlayableUnitRules.Aircraft(kind))a.Turret.SetParent(a.Hull,false);
             a.Launcher=a.Hull.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="launcherPitch");if(kind==PlayableEntityKind.Explorer)BindExplorerPitch(a);
+            if(kind==PlayableEntityKind.Igla)a.Igla=a.Hull.GetComponent<IglaPresentation>();
+            if(kind==PlayableEntityKind.Cerberus)a.Cerberus=a.Hull.GetComponent<CerberusPresentation>();
             BindTankMechanism(a,kind);
             return a;
         }
@@ -191,11 +268,55 @@ namespace Spacewars.Presentation
             var children=actor.Turret.Cast<Transform>().ToArray();var pitch=new GameObject("weaponPitch").transform;pitch.SetParent(actor.Turret,false);
             foreach(var child in children)child.SetParent(pitch,false);actor.Launcher=pitch;
         }
+        public Vector3 DirectMuzzle(Actor actor,PlayableEntityKind kind,int barrel)
+        {
+            if(kind==PlayableEntityKind.Explorer)
+            {
+                string socket=actor.UnitUpgraded?(barrel==0?"muzzleLeft":"muzzleRight"):"muzzle";
+                return actor.Launcher.Find(socket).position;
+            }
+            if(HybridTanks)return actor.Turret.Find("barrelRecoil/muzzle").position;
+            // The legacy tank mesh has no socket. Both variants share this barrel tip.
+            return actor.Turret.TransformPoint(new Vector3(0,.18f,1.935f));
+        }
         public void AimExplorer(Actor actor,PlayableEntitySnapshot entity)
-        {if(entity.Kind==PlayableEntityKind.Shkval&&actor.ShkvalMechanism)actor.ShkvalMechanism.Aim(entity.WeaponPitch);else if(entity.Kind==PlayableEntityKind.Explorer&&actor.Launcher)actor.Launcher.localRotation=Quaternion.Euler(-(float)entity.WeaponPitch*Mathf.Rad2Deg,0,0);}
+        {if(actor.Igla)actor.Igla.Display(entity,matchAnimationSeconds);else if(actor.Cerberus)actor.Cerberus.Display(entity,profile.CerberusAngle,OwnerPaint?.Invoke(entity.Owner)??(entity.Owner==PlayableOwner.Player?Ally:Enemy),matchAnimationSeconds);else if(entity.Kind==PlayableEntityKind.Shkval&&actor.ShkvalMechanism)actor.ShkvalMechanism.Aim(entity.WeaponPitch);else if(entity.Kind==PlayableEntityKind.Explorer&&actor.Launcher)actor.Launcher.localRotation=Quaternion.Euler(-(float)entity.WeaponPitch*Mathf.Rad2Deg,0,0);}
+        public void ApplyUnitPose(Actor actor,PlayableEntityKind kind,PlayableDisplayPose pose)
+        {
+            // Writing an unchanged parent transform dirties the tank's skinned hierarchy.
+            var previous=kind==PlayableEntityKind.Tank?actor.AppliedTankPose:null;
+            if(!previous.HasValue||!previous.Value.Position.Equals(pose.Position))
+            {
+                var point = pose.Position;
+                Vector3 position;
+                NavPoint slope = default;
+                if (PlayableUnitRules.Aircraft(kind))
+                    position = AirGroundPoint(point);
+                else if (profile.AuthoredMap is ThreeCrossingsMap crossings)
+                {
+                    var surface = crossings.SamplePresentationSurface(point);
+                    position = new Vector3((float)point.X, (float)surface.Height, (float)point.Z);
+                    slope = surface.Gradient;
+                }
+                else
+                {
+                    position = Point(point);
+                    slope = profile.AuthoredMap?.SurfaceGradient(point) ?? default;
+                }
+                var rotation=Quaternion.FromToRotation(Vector3.up,new Vector3((float)-slope.X,1,(float)-slope.Z).normalized);
+                actor.Root.SetPositionAndRotation(position,rotation);
+            }
+            if(!previous.HasValue||previous.Value.Hull!=pose.Hull)
+                actor.Hull.localRotation=Quaternion.Euler(0,90-(float)pose.Hull*Mathf.Rad2Deg,0);
+            double aim=pose.Hull-pose.Turret;
+            if(!previous.HasValue||previous.Value.Hull-previous.Value.Turret!=aim)
+                actor.Turret.localRotation=Quaternion.Euler(0,(float)aim*Mathf.Rad2Deg,0);
+            if(kind==PlayableEntityKind.Tank)actor.AppliedTankPose=pose;
+        }
         public void UpdateResearchModel(Actor a,PlayableEntitySnapshot e)
         {
-            if(e.Kind==PlayableEntityKind.Hawk||a.UnitUpgraded==e.Upgraded)return;
+            if(PlayableUnitRules.Aircraft(e.Kind)||a.UnitUpgraded==e.Upgraded&&a.ExplorerRocketLauncher==e.RocketLauncher)return;
+            a.AppliedTankPose=null;
             Object.Destroy(a.Hull.gameObject);
             string key=UnitModelKey(e.Kind,e.Upgraded);
             a.Hull=Model(key,a.Root,e.Owner==PlayableOwner.Player);
@@ -203,6 +324,10 @@ namespace Spacewars.Presentation
             a.Hull.localScale=Vector3.one*UnitModelScale(e.Kind);
             a.Turret=a.Hull.GetComponentsInChildren<Transform>(true).Single(t=>t.name=="turretYaw");
             a.Launcher=a.Hull.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="launcherPitch");if(e.Kind==PlayableEntityKind.Explorer)BindExplorerPitch(a);a.UnitUpgraded=e.Upgraded;a.PresentationPaint=null;BindTankMechanism(a,e.Kind);
+            a.ExplorerRocketLauncher=e.RocketLauncher;
+            a.ExplorerRocketMeshes=null;
+            a.ExplorerRocketOwner=e.Owner;
+            if(e.RocketLauncher)BuildExplorerRocketLauncher(a);
             if(e.Kind==PlayableEntityKind.Tank&&e.Upgraded)ApplyTankUpgradeGlow(a.Hull);
         }
         private void ApplyTankUpgradeGlow(Transform model)
@@ -230,16 +355,25 @@ namespace Spacewars.Presentation
         public void UpdateFactoryModel(Actor actor,PlayableBuildingSnapshot building,PlayableSnapshot snapshot)
         {
             UpdateRefineryModel(actor,building,snapshot.Tick);
-            if(actor.Mine)actor.Mine.Drive(building,snapshot.Tick,building.Id,actor.MaterialFinish);
-            if(actor.Factory){actor.FactoryHeading=building.LaunchPhase>FactoryReleaseRules.Closed?building.Heading:TerritoryRules.BuildingHeading;actor.Factory.Drive(building,snapshot.Tick,profile);UpdateFactoryVehicle(actor,building,snapshot);}
+            if(actor.Mine)actor.Mine.Drive(building,snapshot.Tick,building.Id,actor.MaterialFinish,
+                snapshot.Sites.Any(s=>s.CenterId==building.Id&&s.MineDepleted),AnimationSeconds(snapshot));
+            if(actor.Factory){actor.FactoryHeading=building.LaunchPhase>FactoryReleaseRules.Closed?building.Heading:TerritoryRules.BuildingHeading;actor.Factory.Drive(building,snapshot.Tick,profile,AnimationSeconds(snapshot));UpdateFactoryVehicle(actor,building,snapshot);}
         }
         public void FaceBuilding(Actor actor,Camera camera=null)
         {
-            if(actor.Factory)actor.Hull.rotation=Quaternion.Euler(0,90-(float)actor.FactoryHeading*Mathf.Rad2Deg,0);else actor.Hull.rotation=Facing(camera,actor.Mine!=null);
+            if(actor.Factory)actor.Hull.rotation=Quaternion.Euler(0,90-(float)actor.FactoryHeading*Mathf.Rad2Deg,0);else actor.Hull.rotation=SiteFacing(actor.Root.position,camera,actor.Mine!=null);
             var p=actor.Root.position;actor.Root.position=Point(new NavPoint(p.x,p.z))+Vector3.up*ApronArt.apronHeight;
         }
+        private Quaternion SiteFacing(Vector3 position,Camera camera,bool mine)
+            => SiteFacing(new NavPoint(position.x,position.z),camera,mine);
+        private Quaternion SiteFacing(NavPoint position,Camera camera,bool mine)
+        {
+            EnsureSiteFrames();
+            if(siteFrames.TryGetValue(SiteFrameKey(position),out var frame))return frame;
+            return Facing(camera,mine);
+        }
         private ArmoredMineProfile mineArt;
-        private Quaternion Facing(Camera camera,bool mine=false)=>mine
+        private Quaternion Facing(Camera camera,bool mine=false)=>mine&&!(profile.AuthoredMap is DeafMirrorMap)
             ?BuildingFacing*Quaternion.Euler(0,(mineArt??(mineArt=ArmoredMineProfile.Load())).facingYawDegrees,0):BuildingFacing;
         // Authored fronts are +Z; mines add their approved visual offset to world south, independent of camera orbit.
         private Quaternion BuildingFacing=>Quaternion.LookRotation(Vector3.back,Vector3.up);
@@ -282,14 +416,48 @@ namespace Spacewars.Presentation
             string asset=ModelAssetKey(key);
             return Resources.Load<GameObject>("StyleA/Lod/"+asset)??Resources.Load<GameObject>("StyleA/"+asset);
         }
+        public static Material[] BindSkatMaterials(Renderer renderer)
+        {
+            var materials=renderer.sharedMaterials;
+            for (int slot = 0; slot < materials.Length; slot++)
+            {
+                string role = materials[slot].name;
+                if (role == "skat-emitter") continue;
+                string sharedRole = role switch
+                {
+                    "skat-team-primary" => "team-primary",
+                    "skat-trim" => "neutral-metal",
+                    "skat-structure" => "structure",
+                    "skat-warning" => "warning",
+                    _ => throw new System.InvalidOperationException("Unexpected Skat material: " + role)
+                };
+                materials[slot] = Resources.Load<Material>("StyleA/hawk-" + sharedRole);
+                if (!materials[slot])
+                    throw new System.InvalidOperationException("Missing shared Skat material: " + sharedRole);
+            }
+            renderer.sharedMaterials=materials;
+            return materials;
+        }
+
         private Transform Model(string key,Transform parent,bool friendly)
         {
-            var prefab=ModelPrefab(key);
+            var prefab=key=="skat"?Resources.Load<GameObject>("StyleA/Skat/close"):ModelPrefab(key);
             if(!prefab)throw new System.InvalidOperationException("Missing approved Style A model: "+key);
-            var model=Object.Instantiate(prefab,parent,false);Layer(model);var owner=friendly?Ally:Enemy;
+            var model=key=="Igla/close"?IglaPresentation.Create(parent):key=="Cerberus/cerberus0"?CerberusPresentation.Create(parent,false):Object.Instantiate(prefab,parent,false);Layer(model);var owner=friendly?Ally:Enemy;
             foreach(var renderer in model.GetComponentsInChildren<Renderer>(true))
             {
                 var materials=renderer.sharedMaterials;
+                if(key=="Cerberus/cerberus0")
+                {
+                    for(int i=0;i<materials.Length;i++)
+                    {
+                        string role=materials[i].name;
+                        if(role=="team-primary"||role=="neutral-metal"||role=="structure"||role=="system-emissive")
+                            materials[i]=Resources.Load<Material>("StyleA/tankHybrid-"+role);
+                    }
+                    renderer.sharedMaterials=materials;
+                }
+                if(key=="skat") materials=BindSkatMaterials(renderer);
                 for(int slot=0;slot<materials.Length;slot++)
                 {
                     var role=materials[slot].name;
@@ -300,6 +468,15 @@ namespace Spacewars.Presentation
                     if(role.EndsWith("team-emissive")){ActorMaterialProfile.RecordColorInput(renderer,slot,"_EmissionColor",owner*(MaterialFinish?.TeamEmissionFor(role)??2.2f));properties.SetColor("_EmissionColor",owner*(MaterialFinish?.TeamEmissionFor(role)??2.2f));}
                     renderer.SetPropertyBlock(properties,slot);
                 }
+            }
+            if (key == "skat")
+            {
+                var filter = model.GetComponentInChildren<MeshFilter>();
+                var normal = Resources.Load<GameObject>("StyleA/Skat/normal").GetComponentInChildren<MeshFilter>().sharedMesh;
+                var far = Resources.Load<GameObject>("StyleA/Skat/far").GetComponentInChildren<MeshFilter>().sharedMesh;
+                var close = filter.sharedMesh;
+                model.AddComponent<ModelDetailLod>().Configure(new Renderer[] { filter.GetComponent<Renderer>() },
+                    new[] { close }, new[] { normal }, new[] { far }, close.bounds);
             }
             return model.transform;
         }
@@ -318,7 +495,7 @@ namespace Spacewars.Presentation
                 selectionQuad.uv=new[]{new Vector2(0,0),new Vector2(0,1),new Vector2(1,1),new Vector2(1,0)};
                 selectionQuad.triangles=new[]{0,1,2,0,2,3};selectionQuad.RecalculateBounds();
             }
-            double modelRadius=kind==PlayableEntityKind.Hawk?profile.HawkSelectionRadius:kind==PlayableEntityKind.Explorer?profile.ExplorerModelRadius*profile.ExplorerModelScale:
+            double modelRadius=PlayableUnitRules.Aircraft(kind)?profile.HawkSelectionRadius:kind==PlayableEntityKind.Explorer?profile.ExplorerModelRadius*profile.ExplorerModelScale:
                 kind==PlayableEntityKind.Shkval?profile.ShkvalModelRadius*profile.ShkvalModelScale:profile.TankModelRadius*profile.TankModelScale;
             float radius=(float)(modelRadius+profile.SelectionRingPadding+profile.SelectionRingWidth);
             var g=new GameObject("Selection");g.layer=presentationLayer;g.transform.SetParent(parent,false);
@@ -328,7 +505,7 @@ namespace Spacewars.Presentation
             var renderer=g.AddComponent<MeshRenderer>();renderer.sharedMaterial=selectionMaterial;
             renderer.shadowCastingMode=UnityEngine.Rendering.ShadowCastingMode.Off;renderer.receiveShadows=false;
             var block=new MaterialPropertyBlock();block.SetFloat("_RingWidth",(float)profile.SelectionRingWidth/radius);renderer.SetPropertyBlock(block);
-            if(kind==PlayableEntityKind.Hawk)g.SetActive(false);
+            if(PlayableUnitRules.Aircraft(kind))g.SetActive(false);
             return g;
         }
         private void UpdateBuildingSelection(Actor actor,string key)
@@ -359,76 +536,119 @@ namespace Spacewars.Presentation
             a.HealthDividerBatch=new HealthDividerBatch(healthRoot,a.HealthDividers);
             actors[id]=a;return a;
         }
-        public static void UpdateHealth(Actor actor,Camera camera,float ratio,bool? selected=null)
+        internal readonly struct HealthBarView
         {
-            if(actor.DetailLod)actor.DetailLod.Select(camera);else if(actor.TankLod)actor.TankLod.Select(camera);
-            if(actor.FactoryStaged&&actor.FactoryStaged.gameObject.activeSelf){if(actor.FactoryStagedLod)actor.FactoryStagedLod.Select(camera);else if(actor.FactoryStagedTankLod)actor.FactoryStagedTankLod.Select(camera);}
-            var profile=actor.HealthProfile;
-            var healthRoot=actor.Health.parent;
-            float viewHalfHeight=camera.orthographic?camera.orthographicSize:
-                Mathf.Max(0,Vector3.Dot(actor.Root.position-camera.transform.position,camera.transform.forward))*Mathf.Tan(camera.fieldOfView*Mathf.Deg2Rad*.5f);
-            bool distant=NativeUserSettings.HideDistantHealth&&viewHalfHeight>=ModelDetailProfile.Current.healthHideZoom;
-            bool visible=!distant&&(NativeUserSettings.AlwaysHealth||ratio<.999f||(selected??actor.Selection.activeSelf));
-            healthRoot.gameObject.SetActive(visible);
-            // Hidden bars have no visible geometry to lay out. LOD selection above
-            // still runs, and reveal rebuilds bounds and every transform below in
-            // this same call, including after a model replacement while hidden.
-            if(!visible)return;
-            // Cache renderer membership, not bounds: construction, aiming and animation
-            // can change bounds. Replacing an upgraded model invalidates membership.
-            if(actor.HealthModel!=actor.Hull)
+            internal readonly ActorCameraProjection Projection;
+            internal readonly ModelDetailProfile DetailProfile;
+            internal readonly Vector3 Up, AbsoluteUp, Right;
+            internal readonly Quaternion Rotation;
+            internal readonly float OrthographicPixelsPerUnit;
+            internal readonly bool HideDistant, AlwaysShow;
+
+            internal HealthBarView(Camera camera)
             {
-                actor.HealthModel=actor.Hull;
-                actor.HealthModelRenderers=actor.Hull?actor.Hull.GetComponentsInChildren<MeshRenderer>(true):System.Array.Empty<Renderer>();
+                Projection = new ActorCameraProjection(camera);
+                DetailProfile = ModelDetailProfile.Current;
+                var cameraTransform = camera.transform;
+                Up = cameraTransform.up;
+                AbsoluteUp = new Vector3(Mathf.Abs(Up.x), Mathf.Abs(Up.y), Mathf.Abs(Up.z));
+                Right = Projection.Orthographic ? default : cameraTransform.right;
+                Rotation = cameraTransform.rotation;
+                OrthographicPixelsPerUnit = Projection.Orthographic ? camera.pixelHeight / (2 * Projection.OrthographicSize) : 0;
+                HideDistant = NativeUserSettings.HideDistantHealth;
+                AlwaysShow = NativeUserSettings.AlwaysHealth;
             }
-            // The screen-space silhouette includes forward-pointing barrels. Ignore
-            // disabled geometry and particle/trail bounds (e.g. factory smoke).
-            var up=camera.transform.up;var absoluteUp=new Vector3(Mathf.Abs(up.x),Mathf.Abs(up.y),Mathf.Abs(up.z));
-            float top=0;
-            foreach(var renderer in actor.HealthModelRenderers)if(renderer&&renderer.enabled&&renderer.gameObject.activeInHierarchy)
-            {
-                var bounds=renderer.bounds;
-                top=Mathf.Max(top,Vector3.Dot(up,bounds.center-actor.Root.position)+Vector3.Dot(absoluteUp,bounds.extents));
-            }
-            float height=(float)profile.HealthBarHeight,fullWidth=(float)profile.HealthBarWidth;
-            healthRoot.position=actor.Root.position+up*(top+(float)profile.HealthBarModelGap+height/2+(float)profile.HealthBarOutlineWidth);
-            healthRoot.rotation=camera.transform.rotation;
-            LayoutHealthCells(actor,camera,out fullWidth,out height);
-            actor.HealthDividerBatch?.RefreshIfChanged();
-            float width=fullWidth*Mathf.Clamp01(ratio);
-            actor.Health.localScale=new Vector3(width,height,.01f);
-            actor.Health.localPosition=new Vector3((width-fullWidth)*.5f,0,-.02f);
-            actor.Health.gameObject.SetActive(width>0);
         }
-        private static void LayoutHealthCells(Actor actor,Camera camera,out float width,out float height)
+
+        internal static void UpdateHealth(Actor actor, in HealthBarView view, float ratio, bool? selected = null)
+        {
+            if (actor.DetailLod) actor.DetailLod.Select(view.Projection, view.DetailProfile);
+            else if (actor.TankLod) actor.TankLod.Select(view.Projection);
+            if (actor.FactoryStaged && actor.FactoryStaged.gameObject.activeSelf)
+            {
+                if (actor.FactoryStagedLod) actor.FactoryStagedLod.Select(view.Projection, view.DetailProfile);
+                else if (actor.FactoryStagedTankLod) actor.FactoryStagedTankLod.Select(view.Projection);
+            }
+            var profile = actor.HealthProfile;
+            var healthRoot = actor.Health.parent;
+            Vector3 position = actor.Root.position;
+            float viewHalfHeight = view.Projection.Orthographic ? view.Projection.OrthographicSize :
+                Mathf.Max(0, view.Projection.Depth(position)) * view.Projection.HalfFieldTangent;
+            bool distant = view.HideDistant && viewHalfHeight >= view.DetailProfile.healthHideZoom;
+            bool visible = !distant && (view.AlwaysShow || ratio < .999f || (selected ?? actor.Selection.activeSelf));
+            healthRoot.gameObject.SetActive(visible);
+            // Reveal lays out the bar from the live model, including a replacement while hidden.
+            if (!visible) return;
+            if (actor.HealthModel != actor.Hull)
+            {
+                actor.HealthModel = actor.Hull;
+                actor.HealthModelRenderers = actor.Hull ? actor.Hull.GetComponentsInChildren<MeshRenderer>(true) : System.Array.Empty<Renderer>();
+            }
+            // The silhouette includes moving barrels and excludes inactive meshes and effects.
+            float top = 0;
+            foreach (var renderer in actor.HealthModelRenderers)
+            {
+                if (!renderer || !renderer.enabled || !renderer.gameObject.activeInHierarchy) continue;
+                var bounds = renderer.bounds;
+                top = Mathf.Max(top, Vector3.Dot(view.Up, bounds.center - position) + Vector3.Dot(view.AbsoluteUp, bounds.extents));
+            }
+            float height = (float)profile.HealthBarHeight;
+            healthRoot.position = position + view.Up * (top + (float)profile.HealthBarModelGap + height / 2 + (float)profile.HealthBarOutlineWidth);
+            healthRoot.rotation = view.Rotation;
+            var camera = view.Projection.Camera;
+            var healthPosition = healthRoot.position;
+            float pixelsPerUnit = view.Projection.Orthographic ? view.OrthographicPixelsPerUnit :
+                Mathf.Abs(camera.WorldToScreenPoint(healthPosition + view.Right).x - camera.WorldToScreenPoint(healthPosition).x);
+            LayoutHealthCells(actor, camera, pixelsPerUnit, out float fullWidth, out height);
+            float width = fullWidth * Mathf.Clamp01(ratio);
+            actor.Health.localScale = new Vector3(width, height, .01f);
+            actor.Health.localPosition = new Vector3((width - fullWidth) * .5f, 0, -.02f);
+            actor.Health.gameObject.SetActive(width > 0);
+        }
+
+        public static void UpdateHealth(Actor actor, Camera camera, float ratio, bool? selected = null)
+            => UpdateHealth(actor, new HealthBarView(camera), ratio, selected);
+
+        private static void LayoutHealthCells(Actor actor, Camera camera, float pixelsPerUnit, out float width, out float height)
         {
             var profile=actor.HealthProfile;var root=actor.Health.parent;
-            float pixelsPerUnit=camera.orthographic?camera.pixelHeight/(2*camera.orthographicSize):Mathf.Abs(camera.WorldToScreenPoint(root.position+camera.transform.right).x-camera.WorldToScreenPoint(root.position).x);
             // One pixel is the raster's smallest visible cell/gap/edge, not a design
             // tuning value. Quantize each shared dimension once, never each boundary.
             pixelsPerUnit=Mathf.Max(Mathf.Epsilon,pixelsPerUnit);
-            int gapPixels=Mathf.Max(1,Mathf.RoundToInt((float)profile.HealthBarCellGap*pixelsPerUnit));
-            int cellPixels=Mathf.Max(1,Mathf.RoundToInt(((float)profile.HealthBarWidth*pixelsPerUnit-(profile.HealthBarCells-1)*gapPixels)/profile.HealthBarCells));
-            int widthPixels=profile.HealthBarCells*cellPixels+(profile.HealthBarCells-1)*gapPixels;
-            int heightPixels=Mathf.Max(1,Mathf.RoundToInt((float)profile.HealthBarHeight*pixelsPerUnit));
-            int outlinePixels=Mathf.Max(1,Mathf.RoundToInt((float)profile.HealthBarOutlineWidth*pixelsPerUnit));
-            width=widthPixels/pixelsPerUnit;height=heightPixels/pixelsPerUnit;
-            actor.HealthBackground.localScale=new Vector3(width,height,.01f);
-            actor.HealthOutline.localScale=new Vector3((widthPixels+2*outlinePixels)/pixelsPerUnit,(heightPixels+2*outlinePixels)/pixelsPerUnit,.01f);
-            for(int cell=1;cell<profile.HealthBarCells;cell++)
+            bool layoutChanged=actor.HealthPixelsPerUnit!=pixelsPerUnit;
+            if(layoutChanged)
             {
-                var divider=actor.HealthDividers[cell-1];
-                divider.localPosition=new Vector3((-widthPixels*.5f+cell*cellPixels+(cell-.5f)*gapPixels)/pixelsPerUnit,0,-.04f);
-                divider.localScale=new Vector3(gapPixels/pixelsPerUnit,height,.01f);
+                int gapPixels=Mathf.Max(1,Mathf.RoundToInt((float)profile.HealthBarCellGap*pixelsPerUnit));
+                int cellPixels=Mathf.Max(1,Mathf.RoundToInt(((float)profile.HealthBarWidth*pixelsPerUnit-(profile.HealthBarCells-1)*gapPixels)/profile.HealthBarCells));
+                actor.HealthWidthPixels=profile.HealthBarCells*cellPixels+(profile.HealthBarCells-1)*gapPixels;
+                actor.HealthHeightPixels=Mathf.Max(1,Mathf.RoundToInt((float)profile.HealthBarHeight*pixelsPerUnit));
+                actor.HealthPixelsPerUnit=pixelsPerUnit;
+                int outlinePixels=Mathf.Max(1,Mathf.RoundToInt((float)profile.HealthBarOutlineWidth*pixelsPerUnit));
+                actor.HealthBackground.localScale=new Vector3(actor.HealthWidthPixels/pixelsPerUnit,actor.HealthHeightPixels/pixelsPerUnit,.01f);
+                actor.HealthOutline.localScale=new Vector3((actor.HealthWidthPixels+2*outlinePixels)/pixelsPerUnit,(actor.HealthHeightPixels+2*outlinePixels)/pixelsPerUnit,.01f);
+                float dividerWidth=gapPixels/pixelsPerUnit,dividerHeight=actor.HealthHeightPixels/pixelsPerUnit;
+                for(int cell=1;cell<profile.HealthBarCells;cell++)
+                {
+                    var divider=actor.HealthDividers[cell-1];
+                    divider.localPosition=new Vector3((-actor.HealthWidthPixels*.5f+cell*cellPixels+(cell-.5f)*gapPixels)/pixelsPerUnit,0,-.04f);
+                    divider.localScale=new Vector3(dividerWidth,dividerHeight,.01f);
+                }
+                actor.HealthDividerBatch?.RefreshIfChanged();
             }
+            width=actor.HealthWidthPixels/pixelsPerUnit;height=actor.HealthHeightPixels/pixelsPerUnit;
+            // Position remains camera- and actor-dependent even when cell geometry is reused.
             var screen=camera.WorldToScreenPoint(root.position);
-            screen.x=Mathf.Round(screen.x-widthPixels*.5f)+widthPixels*.5f;
-            screen.y=Mathf.Round(screen.y-heightPixels*.5f)+heightPixels*.5f;
+            screen.x=Mathf.Round(screen.x-actor.HealthWidthPixels*.5f)+actor.HealthWidthPixels*.5f;
+            screen.y=Mathf.Round(screen.y-actor.HealthHeightPixels*.5f)+actor.HealthHeightPixels*.5f;
             root.position=camera.ScreenToWorldPoint(screen);
         }
         public void Remove(int id){RemoveRallyFlag(id);if(actors.TryGetValue(id,out var a)){a.HealthDividerBatch?.Dispose();a.HealthDividerBatch=null;if(a.AirProjection)ReleaseWorldObject(a.AirProjection);ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);actors.Remove(id);}}
-        public void Clear(){ClearMines();ClearAbilityEffects();ClearTowerRange();ResetEnvironmentDetail();ClearGroundTrails();ClearUnitWrecks();ClearBuildingDestructions();ClearRallyFlags();Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){a.HealthDividerBatch?.Dispose();a.HealthDividerBatch=null;if(a.AirProjection)ReleaseWorldObject(a.AirProjection);ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
-        public void Dispose(){foreach(string name in PreparedTextures)PreparedMapCache.ForgetPixels(PreparedField(name).GetValue(this) as Texture2D);Clear();if(preparedScene!=null){preparedScene.Dispose();ForgetPreparedFields();}if(dockMaterial)ReleaseWorldObject(dockMaterial);if(dockSpaceMaterial)ReleaseWorldObject(dockSpaceMaterial);if(groveMaterial)ReleaseWorldObject(groveMaterial);if(groveSurfaceMask)ReleaseWorldObject(groveSurfaceMask);if(meridianMaterial)ReleaseWorldObject(meridianMaterial);if(meridianRoadMask)ReleaseWorldObject(meridianRoadMask);wreckFlashVisuals.Dispose();collapseVisuals.Dispose();Fog.Dispose();if(mossPaintMask)ReleaseWorldObject(mossPaintMask);if(mossAccentMask)ReleaseWorldObject(mossAccentMask);if(mossTransitionMask)ReleaseWorldObject(mossTransitionMask);if(mossTerrainMaterial)ReleaseWorldObject(mossTerrainMaterial);if(basaltPaintMask)ReleaseWorldObject(basaltPaintMask);if(basaltAccentMask)ReleaseWorldObject(basaltAccentMask);if(basaltTerrainMaterial)ReleaseWorldObject(basaltTerrainMaterial);surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);if(foundryRouteMask)ReleaseWorldObject(foundryRouteMask);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();if(apronMaterial)ReleaseWorldObject(apronMaterial);if(capturePadMaterial)ReleaseWorldObject(capturePadMaterial);ReleaseWorldObject(selectionMaterial);ReleaseWorldObject(selectionQuad);ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
+        public void Clear(){ClearReinforcementPreviewModels();ClearMines();ClearAbilityEffects();ClearTowerRange();ResetEnvironmentDetail();ClearGroundTrails();ClearUnitWrecks();ClearBuildingDestructions();ClearRallyFlags();Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){a.HealthDividerBatch?.Dispose();a.HealthDividerBatch=null;if(a.AirProjection)ReleaseWorldObject(a.AirProjection);ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
+        public void Dispose(){
+            windowLights?.Dispose();windowLights=null;
+            ClearRelayGround();
+            DisposeTerrainCacheMaterial();DisposeExplorerRocketMeshes();
+            foreach(string name in PreparedTextures)PreparedMapCache.ForgetPixels(PreparedField(name).GetValue(this) as Texture2D);Clear();DisposeReinforcementMaterials();if(stasisMaterial)ReleaseWorldObject(stasisMaterial);if(preparedScene!=null){preparedScene.Dispose();ForgetPreparedFields();}if(cityMaterial)ReleaseWorldObject(cityMaterial);if(dockMaterial)ReleaseWorldObject(dockMaterial);if(dockSpaceMaterial)ReleaseWorldObject(dockSpaceMaterial);if(groveMaterial)ReleaseWorldObject(groveMaterial);if(groveSurfaceMask)ReleaseWorldObject(groveSurfaceMask);if(meridianMaterial)ReleaseWorldObject(meridianMaterial);if(meridianRoadMask)ReleaseWorldObject(meridianRoadMask);wreckFlashVisuals.Dispose();collapseVisuals.Dispose();Fog.Dispose();if(mossPaintMask)ReleaseWorldObject(mossPaintMask);if(mossAccentMask)ReleaseWorldObject(mossAccentMask);if(mossTransitionMask)ReleaseWorldObject(mossTransitionMask);if(mossTerrainMaterial)ReleaseWorldObject(mossTerrainMaterial);if(basaltPaintMask)ReleaseWorldObject(basaltPaintMask);if(basaltAccentMask)ReleaseWorldObject(basaltAccentMask);if(basaltTerrainMaterial)ReleaseWorldObject(basaltTerrainMaterial);surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);if(foundryRouteMask)ReleaseWorldObject(foundryRouteMask);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();if(apronMaterial)ReleaseWorldObject(apronMaterial);if(capturePadMaterial)ReleaseWorldObject(capturePadMaterial);ReleaseWorldObject(selectionMaterial);ReleaseWorldObject(selectionQuad);ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
         public GameObject Part(string name,Transform parent,Vector3 position,Vector3 scale,Color color,PrimitiveType shape=PrimitiveType.Cube)
         {
             var g=GameObject.CreatePrimitive(shape);g.name=name;g.layer=presentationLayer;g.transform.SetParent(parent,false);g.transform.localPosition=position;g.transform.localScale=scale;
@@ -436,6 +656,12 @@ namespace Spacewars.Presentation
             var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",color);g.GetComponent<Renderer>().SetPropertyBlock(properties);return g;
         }
         private static void ReleaseWorldObject(Object value){if(Application.isPlaying)Object.Destroy(value);else Object.DestroyImmediate(value);}
-        public Vector3 Point(NavPoint p)=>new Vector3((float)p.X,(float)(profile.AuthoredMap?.SurfaceHeight(p)??0),(float)p.Z);
+        public Vector3 Point(NavPoint p)
+        {
+            double height = profile.AuthoredMap is ThreeCrossingsMap crossings
+                ? crossings.SamplePresentationSurface(p).Height
+                : profile.AuthoredMap?.SurfaceHeight(p) ?? 0;
+            return new Vector3((float)p.X, (float)height, (float)p.Z);
+        }
     }
 }

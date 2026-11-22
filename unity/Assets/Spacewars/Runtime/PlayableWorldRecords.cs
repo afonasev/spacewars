@@ -17,6 +17,7 @@ namespace Spacewars.Runtime
             w.Write((int)v.Kind);w.Write(v.ScenarioIndex);w.Write(v.AuthoredUpgrade.HasValue);if(v.AuthoredUpgrade.HasValue)w.Write(v.AuthoredUpgrade.Value);
             w.Write(v.BurstRemaining);
             w.Write(v.BurstTarget);
+            if(v.Kind==PlayableEntityKind.Igla){w.Write(v.IglaBeamEnd.HasValue);if(v.IglaBeamEnd.HasValue)WorldWire.Write(w,v.IglaBeamEnd.Value);}
             w.Write(v.BurstSequence);
             w.Write(v.BurstSize);
             Number(w,v.BurstSpread);
@@ -36,12 +37,15 @@ namespace Spacewars.Runtime
             w.Write(v.HasAttackMove);
             w.Write(v.PatrolStarted);
             WorldWire.Write(w,v.CurrentOrder);WriteOrderStamp(w,v.LastOrder);WriteAir(w,v.Air);
+            if(v.Kind==PlayableEntityKind.Cerberus){v.FlameLeft.Write(w);v.FlameRight.Write(w);w.Write(v.FlameSync);}
+            if(v.Kind==PlayableEntityKind.Skat){w.Write(v.DroneRepair.Target);w.Write(v.DroneRepair.BeamTarget);w.Write(v.DroneRepair.Detour);w.Write(v.DroneRepair.Returning);WorldWire.Write(w,v.DroneRepair.Anchor);}
             }
         private static Unit ReadUnit(BinaryReader r) {if(!Boolean(r))return null;
             var v=Record(r,()=>new Unit());
             v.Kind=EnumValue<PlayableEntityKind>(r);v.ScenarioIndex=r.ReadInt32();v.AuthoredUpgrade=Boolean(r)?(bool?)Boolean(r):null;
             v.BurstRemaining=r.ReadInt32();
             v.BurstTarget=r.ReadInt32();
+            if(v.Kind==PlayableEntityKind.Igla&&Boolean(r))v.IglaBeamEnd=ReadBallisticPoint(r);
             v.BurstSequence=r.ReadInt32();
             v.BurstSize=r.ReadInt32();
             v.BurstSpread=Number(r);
@@ -61,6 +65,8 @@ namespace Spacewars.Runtime
             v.HasAttackMove=Boolean(r);
             v.PatrolStarted=Boolean(r);
             v.CurrentOrder=ReadPlayableTacticalOrderSnapshot(r);v.LastOrder=ReadOrderStamp(r);v.Air=ReadAir(r);
+            if(v.Kind==PlayableEntityKind.Cerberus){v.FlameLeft=FlameArm.Read(r);v.FlameRight=FlameArm.Read(r);v.FlameSync=Boolean(r);}
+            if(v.Kind==PlayableEntityKind.Skat)v.DroneRepair=new DroneRepairState{Target=r.ReadInt32(),BeamTarget=r.ReadInt32(),Detour=Boolean(r),Returning=Boolean(r),Anchor=ReadPoint(r)};
             return v;
             }
         private static void WriteRecord(BinaryWriter w,Building v) {w.Write(v!=null);
@@ -171,6 +177,51 @@ namespace Spacewars.Runtime
             v.Faction=EnumValue<PlayableOwner>(r);v.Spatial=Boolean(r);v.DirectionY=Number(r);if(Boolean(r))v.Hawk=HawkRocketFlight.Restore(r.ReadInt32(),ReadBallisticPoint(r),ReadBallisticPoint(r),Number(r),Number(r),Number(r));
             return v;
             }
+        private const int DirectProjectileLaunchMarker=0x444C5431;
+
+        private void WriteDirectProjectileLaunches(BinaryWriter writer)
+        {
+            int count=projectiles.Count(projectile=>projectile.DirectLaunchTick.HasValue);
+            if(count==0)return;
+            writer.Write(DirectProjectileLaunchMarker);
+            writer.Write(count);
+            foreach(var projectile in projectiles)
+            {
+                if(!projectile.DirectLaunchTick.HasValue)continue;
+                writer.Write(projectile.Id);
+                writer.Write(projectile.DirectLaunchTick.Value);
+                writer.Write(projectile.DirectBarrel);
+            }
+        }
+
+        private void ReadDirectProjectileLaunches(BinaryReader reader)
+        {
+            long start=reader.BaseStream.Position;
+            if(start==reader.BaseStream.Length)return;
+            if(reader.ReadInt32()!=DirectProjectileLaunchMarker)
+            {
+                reader.BaseStream.Position=start;
+                return;
+            }
+
+            int count=reader.ReadInt32();
+            if(count<=0||count>projectiles.Count)throw new ArgumentException("Invalid direct projectile launch count.");
+            int projectileIndex=0;
+            for(int i=0;i<count;i++)
+            {
+                int id=reader.ReadInt32();
+                long tick=reader.ReadInt64();
+                int barrel=reader.ReadInt32();
+                // The writer lists launches in the same order as the projectile records.
+                while(projectileIndex<projectiles.Count&&projectiles[projectileIndex]?.Id!=id)projectileIndex++;
+                if(projectileIndex==projectiles.Count||projectiles[projectileIndex].Rocket!=null||tick<0||tick>Tick||barrel<0||barrel>1)
+                    throw new ArgumentException("Invalid direct projectile launch binding.");
+                var projectile=projectiles[projectileIndex++];
+                projectile.DirectLaunchTick=tick;
+                projectile.DirectBarrel=barrel;
+            }
+        }
+
         private static void WriteRecord(BinaryWriter w,ProductionOrder v) {w.Write(v!=null);
             if(v==null)return;
             w.Write(v.TermsRevision);

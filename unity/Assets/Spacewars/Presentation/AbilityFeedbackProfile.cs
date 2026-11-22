@@ -19,6 +19,16 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Способности","Длина искры","Длина одной световой дорожки.","м",.05f,.5f,.01f)] public float sparkLength=.2f;
         [SurfaceSetting("Способности","Число искр","Количество дорожек одного эффекта.","шт",3,16,1)] public float sparkCount=8;
         [SurfaceSetting("Способности","Лимит эффектов","Предел одновременных визуальных импульсов одного локального экрана.","шт",1,24,1)] public float maxEffects=12;
+        [SurfaceSetting("Призыв подкрепления","Начальная непрозрачность","Непрозрачность корпусов в первый кадр материализации.","доля",.1f,.9f,.05f)] public float reinforcementStartOpacity=.35f;
+        [SurfaceSetting("Призыв подкрепления","Яркость цилиндра","Начальная интенсивность световой оболочки и кольца.","доля",.1f,1,.05f)] public float reinforcementCylinderOpacity=.62f;
+        [SurfaceSetting("Призыв подкрепления","Высота цилиндра","Высота световой оболочки над поверхностью.","м",.1f,2,.05f)] public float reinforcementCylinderHeight=1.2f;
+        [SurfaceSetting("Призыв подкрепления","Частота пульса","Число мягких пульсаций за полную материализацию.","циклы",1,5,.5f)] public float reinforcementPulseCount=2;
+        public float stasisCylinderRadiusScale=1.3f,stasisCylinderHeightScale=1.55f;
+        public Vector3 StasisDimensions(double footprint)
+        {
+            float radius=(float)footprint;
+            return new Vector3(radius*stasisCylinderRadiusScale,radius*stasisCylinderHeightScale,radius*stasisCylinderRadiusScale);
+        }
         public IEnumerable<SurfaceParameter> Parameters(){foreach(var f in GetType().GetFields()){var a=f.GetCustomAttribute<SurfaceSettingAttribute>();if(a!=null)yield return new SurfaceParameter("visual.abilityFeedback."+f.Name,a.Group,a.Label,a.Description,a.Unit,a.Minimum,a.Maximum,a.Step,()=> (float)f.GetValue(this),v=>f.SetValue(this,v));}}
         public void Validate(){if(id!="orbital-ability-feedback-v1"||revision<1)throw new ArgumentException("Invalid ability feedback identity");foreach(var p in Parameters()){float v=p.Read();if(float.IsNaN(v)||float.IsInfinity(v)||v<p.Minimum||v>p.Maximum)throw new ArgumentException(p.Path);}if(sparkCount!=Mathf.Round(sparkCount)||maxEffects!=Mathf.Round(maxEffects))throw new ArgumentException("Effect counts must be integers");}
         public static AbilityFeedbackProfile Load(){var p=JsonUtility.FromJson<AbilityFeedbackProfile>(Resources.Load<TextAsset>("AbilityFeedbackProfile").text);p.Validate();return p;}

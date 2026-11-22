@@ -36,8 +36,8 @@ namespace Spacewars.Presentation
         private bool OpenTeamSignal(Vector2 screen,bool pad)
         {
             if(!CanSignal||!cameraView.pixelRect.Contains(screen))return false;
-            int map=MapAt(screen);if(map==3||map==0&&!pad&&OverUi(screen))return false;
-            EnsureTeamSignalUi();signalPoint=map>0?MapGround(map,screen):Ground(screen);signalWheelPad=pad;signalStickReady=false;
+            int map=pad&&mapOpen?2:MapAt(screen);if(map==3||map==0&&!pad&&OverUi(screen))return false;
+            EnsureTeamSignalUi();signalPoint=pad&&mapOpen?padCursorGround:map>0?MapGround(map,screen):Ground(screen);signalWheelPad=pad;signalStickReady=false;
             float size=(float)profile.TeamSignalWheelPixels;var at=PanelPoint(screen);var bounds=root.contentRect;
             signalHints.Clear();signalHints.Add(new RadialControlHint(pad?"LS":"Мышь","Выбор",pad,SeatPad));signalHints.Add(new RadialControlHint(pad?"A":"ЛКМ","Сигнал",pad,SeatPad));signalHints.Add(new RadialControlHint(pad?"B":"Esc","Отмена",pad,SeatPad));
             float hintHeight=RadialCardProfile.Load().actionHeight+8,hintWidth=Mathf.Min(RadialCardProfile.Load().width+40,bounds.width-24);
@@ -77,7 +77,7 @@ namespace Spacewars.Presentation
                 if(pad.buttonEast.wasPressedThisFrame)CancelTeamSignal();else if(pad.buttonSouth.wasPressedThisFrame)SendTeamSignal();
                 return true;
             }
-            if(!pad.rightStickButton.wasPressedThisFrame||!CanSignal)return false;
+            if(!pad.dpad.down.wasPressedThisFrame||!CanSignal)return false;
             battleController=true;
             Vector2 at=padCursorInitialized?battleCursor:SeatScreenCenter;
             if(OpenTeamSignal(at,true))return true;return false;

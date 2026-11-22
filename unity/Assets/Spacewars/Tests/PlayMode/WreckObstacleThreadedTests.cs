@@ -11,6 +11,45 @@ namespace Spacewars.Tests.PlayMode
     public sealed class WreckObstacleThreadedTests
     {
         const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
+        [Test,Timeout(65000)] public void DisablingWrecksDuringOrdinaryMoveRemovesObstacleAndStillArrives()
+        {
+            var p=PlayableProfile.Default;var d=new PlayableDomain(p,81,false);CertifiedRouteWorker worker=null;
+            object Call(string name,params object[] args)=>typeof(PlayableDomain).GetMethod(name,F).Invoke(d,args);
+            PlayableSnapshot View()=>d.Snapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+            try{
+                int dead=(int)Call("SpawnUnit",default(NavPoint),PlayableOwner.Enemy,PlayableEntityKind.Tank);Call("Damage",dead,int.MaxValue);
+                Assert.False(d.Geometry.IsFree(default,0));
+                var start=new NavPoint(-10,0);int mover=(int)Call("SpawnUnit",start,PlayableOwner.Player,PlayableEntityKind.Tank);
+                var authority=new PlayableAuthorityTick(d,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),7);
+                worker=new CertifiedRouteWorker(authority.NavigationBinding,p.NavigationRequestsPerFrame);
+                Assert.True(SpinWait.SpinUntil(()=>worker.IsWaiting||worker.Publication.Failure!=null,5000));Assert.IsNull(worker.Publication.Failure);
+                Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(81,1,"player-1",PlayableCommandKind.Move,new[]{mover},new NavPoint(10,0))).Status);
+                bool motion=false,disabled=false,arrived=false;var clock=Stopwatch.StartNew();
+                while(d.Tick<900&&clock.Elapsed.TotalSeconds<55){
+                    if(!authority.TryAdvance()){Thread.Sleep(1);continue;}Assert.IsNull(worker.Publication.Failure);
+                    var actor=View().Entities.Single(e=>e.Id==mover);motion|=!actor.Position.Equals(start);
+                    if(motion&&!disabled&&!authority.AwaitingRoutes)disabled=d.TrySetUnitWrecksEnabled(false);
+                    if(disabled){Assert.True(d.Geometry.IsFree(default,0));Assert.IsEmpty(View().Wrecks);}
+                    arrived=actor.NavigationOutcome==NavigationOutcome.Arrived;if(disabled&&arrived)break;Thread.Sleep(1);
+                }
+                TestContext.WriteLine($"WRECK_SWITCH seed=7 tick={d.Tick} firstMotion={motion} disabled={disabled} arrived={arrived} pumps={worker.Publication.Pumps}");
+                Assert.True(motion&&disabled&&arrived,"Original command must continue through atomic wreck removal and arrive");Assert.Greater(worker.Publication.Pumps,0);Assert.IsNull(worker.Publication.Failure);
+            }finally{worker?.Dispose();if(worker!=null)Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000));d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();Assert.Zero(d.Navigation.PhysicalHostBudget.PhysicalBytes);Assert.Zero(d.Navigation.PhysicalHostBudget.HeldBytes);}
+        }
+        [TestCase(false),TestCase(true),Timeout(15000)] public void RuntimeAppliesAndCoalescesRuleWhilePausedWithoutAdvancingTick(bool parkedBarrier)
+        {
+            using var runtime=new PlayableRuntime(PlayableProfile.Default,82,7,autonomousOwnerAi:false,startPaused:true);
+            Assert.True(SpinWait.SpinUntil(()=>runtime.IsPrepared&&runtime.Latest.Paused||runtime.IsStopped,5000));Assert.False(runtime.IsStopped);long tick=runtime.Latest.Tick;
+            if(parkedBarrier){
+                // Branch-level paused-barrier setup, separate from the real threaded
+                // movement witness above. No route answer or tick is fabricated.
+                var authority=(PlayableAuthorityTick)typeof(PlayableRuntime).GetField("authorityTick",F).GetValue(runtime);
+                var phase=typeof(PlayableAuthorityTick).GetField("barrierPhase",F);phase.SetValue(authority,Enum.Parse(phase.FieldType,"MaintenancePending"));Assert.True(authority.AwaitingRoutes);
+            }
+            runtime.RequestUnitWrecksEnabled(false);Assert.True(SpinWait.SpinUntil(()=>!runtime.UnitWrecksEnabled||runtime.IsStopped,5000));Assert.False(runtime.IsStopped);Assert.AreEqual(tick,runtime.Latest.Tick);
+            runtime.RequestUnitWrecksEnabled(true);runtime.RequestUnitWrecksEnabled(false);runtime.RequestUnitWrecksEnabled(true);
+            Assert.True(SpinWait.SpinUntil(()=>runtime.UnitWrecksEnabled||runtime.IsStopped,5000));Assert.False(runtime.IsStopped);Assert.AreEqual(tick,runtime.Latest.Tick);Assert.IsNull(runtime.Latest.Failure);
+        }
         [Test,Timeout(120000)] public void NaturalExpiryDuringActiveMovePublishesGeometryAndStillArrives()
         {
             var data=PlayableProfile.Default.CopyData();data.unitWreckLifetimeSeconds=1;data.wreckSinkSeconds=.2;
@@ -28,7 +67,7 @@ namespace Spacewars.Tests.PlayMode
                 while(d.Tick<1200&&clock.Elapsed.TotalSeconds<110){
                     if(!authority.TryAdvance()){Thread.Sleep(1);continue;}Assert.IsNull(worker.Publication.Failure);
                     var actor=View().Entities.Single(e=>e.Id==mover);motion|=!actor.Position.Equals(start);
-                    if(motion&&!created){created=(bool)Call("TryDamageWithOwner",dead,(double)int.MaxValue,0,(PlayableOwner?)PlayableOwner.Enemy,null,default(NavPoint),null);if(created){expiry=View().Wrecks.Single(w=>w.Id==dead).ExpireTick;Assert.False(d.Geometry.IsFree(default,0));}}
+                    if(motion&&!created){created=(bool)Call("TryDamageWithOwner",dead,(double)int.MaxValue,0,(PlayableOwner?)PlayableOwner.Enemy,null,default(NavPoint),null,default(NavPoint));if(created){expiry=View().Wrecks.Single(w=>w.Id==dead).ExpireTick;Assert.False(d.Geometry.IsFree(default,0));}}
                     if(created){expired=!View().Wrecks.Any(w=>w.Id==dead);if(expired){Assert.GreaterOrEqual(d.Tick,expiry);Assert.True(d.Geometry.IsFree(default,0));}else if(d.Tick<expiry)Assert.Greater(Math.Sqrt(actor.Position.X*actor.Position.X+actor.Position.Z*actor.Position.Z),p.TankCollisionRadius+View().Wrecks.Single(w=>w.Id==dead).Radius);}
                     arrived=actor.NavigationOutcome==NavigationOutcome.Arrived;if(expired&&arrived)break;Thread.Sleep(1);
                 }

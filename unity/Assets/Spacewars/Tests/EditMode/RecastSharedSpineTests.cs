@@ -3,7 +3,6 @@ using System.Linq;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
-using Spacewars.Presentation;
 namespace Spacewars.Tests.EditMode
 {
     public sealed class RecastSharedSpineTests
@@ -17,10 +16,13 @@ namespace Spacewars.Tests.EditMode
             session.Crowd.Add(1,new NavPoint(-31,-46),.72,2,4.5,canYield:true);
             session.Crowd.Add(2,new NavPoint(-31,-43),.72,4,4.5,canYield:true);
             Assert.True(session.MoveGroup(new[]{1,2},new[]{new NavPoint(-46,-46),new NavPoint(-46,-43)}));
-            using(var host=new UnityHostRouteService()){
+            // Production runs independent comparison queries by default. This
+            // fixture exercises the separately configured shared-spine path.
+            var host=new CertifiedRouteKernel{ReuseCompatibleRoutes=true};
+            try{
                 var binding=new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort);
-                for(int i=0;i<200&&session.AppliedResults<2;i++){host.Service(binding,8);session.ApplyResults();}
-            }
+                for(int i=0;i<200&&session.AppliedResults<2;i++){host.Pump(binding,8);session.ApplyResults();}
+            }finally{host.Clear();}
             Assert.AreEqual(2,session.AppliedResults);return session;
         }
         private static void WithDonorFixture(bool terminal,bool blockedDonor,bool direct,bool knowledgeMismatch,int count,Action<RecastAttachmentPreparation,NavigationRequest[],RecastMemberRoute[],RecastSpineProposal,PartitionNavigationProvider,RecastAuthorityGeometry,INavStorageReservation> check)
@@ -71,6 +73,55 @@ namespace Spacewars.Tests.EditMode
                 Assert.Greater(p.Spine.References,1,"Shared immutable decision has real retained owning edges.");
             }finally{s.ReleaseCommittedHostRoot();}
         }
+        [Test] public void CommonSpinePacesOnlyMembersInsideTheirOverlappingSections()
+        {
+            var session=Ready(out _);
+            var budget=session.PhysicalHostBudget;
+            try
+            {
+                var spine=session.InstalledExecutionFor(1).Corridor.RecastPlan.Spine;
+                Assert.GreaterOrEqual(spine.Legs.Count,2);
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,81,1,out var scope));
+                using(scope)
+                {
+                    var reservation=scope.OwnedReservation();
+                    var later=NavRecastMemberPlan.Create(spine,1,spine.Legs.Count,1,spine.Legs.Count,
+                        spine.GraphBinding,spine.ProfileBinding,reservation);
+                    var earlier=NavRecastMemberPlan.Create(spine,0,spine.Legs.Count,2,spine.Legs.Count+2,
+                        spine.GraphBinding,spine.ProfileBinding,reservation);
+                    try
+                    {
+                        var atJoin=new RecastMemberProgress(1,RecastMovementPhase.Shared,1,spine.Station(1),spine.Station(1));
+                        var beforeJoin=new RecastMemberProgress(2,RecastMovementPhase.Shared,2,0,0);
+                        var insideOverlap=new RecastMemberProgress(2,RecastMovementPhase.Shared,3,spine.Station(1),spine.Station(1));
+                        var onConnector=new RecastMemberProgress(2,RecastMovementPhase.Origin,3,spine.Station(1),spine.Station(1));
+                        var afterExit=new RecastMemberProgress(2,RecastMovementPhase.Shared,earlier.TerminalLeg,
+                            spine.Station(earlier.Exit),spine.Station(earlier.Exit));
+                        Assert.False(GroupMarch.ShareMarchSection(later,atJoin,earlier,beforeJoin));
+                        Assert.False(GroupMarch.ShareMarchSection(earlier,beforeJoin,later,atJoin));
+                        Assert.True(GroupMarch.ShareMarchSection(later,atJoin,earlier,insideOverlap));
+                        Assert.True(GroupMarch.ShareMarchSection(earlier,insideOverlap,later,atJoin));
+                        Assert.False(GroupMarch.ShareMarchSection(later,atJoin,earlier,onConnector));
+                        Assert.False(GroupMarch.ShareMarchSection(later,atJoin,earlier,afterExit));
+                    }
+                    finally
+                    {
+                        earlier.Release();
+                        later.Release();
+                    }
+                    scope.Discard();
+                }
+            }
+            finally
+            {
+                session.ReleaseCommittedHostRoot();
+                session.DestroyNavigationAuthority();
+                Assert.Zero(budget.PhysicalBytes);
+                Assert.Zero(budget.HeldBytes);
+                Assert.Zero(budget.ActiveScopes);
+            }
+        }
+
         [Test] public void CommonStationIgnoresUnrelatedConnectorLengthsAndUsesExistingStretch()
         {
             Assert.AreEqual(2,GroupMarch.MaxSpeed(4,2,0,0,4,1d/30));

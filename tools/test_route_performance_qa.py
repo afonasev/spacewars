@@ -43,6 +43,16 @@ class PlayerCleanupTests(unittest.TestCase):
             self.assertEqual('NotRun',result['status'])
             self.assertEqual(terminal,result['terminal'])
 
+    def test_split_screen_average_fps_uses_elapsed_time_and_exposes_focus_loss(self):
+        from qa.split_screen_report import frame_rate
+        rows = [{'stopwatch_stamp': stamp, 'focused': focus}
+                for stamp, focus in [(1000, 1), (1010, 1), (1050, 0)]]
+        self.assertEqual({'average_fps': 40, 'elapsed_seconds': .05,
+                          'frame_intervals': 2, 'unfocused_samples': 1},
+                         frame_rate(rows, 1000))
+        self.assertIsNone(frame_rate(rows[:1], 1000))
+        self.assertIsNone(frame_rate([rows[0], rows[0]], 1000))
+
     @staticmethod
     def complete_capture(output, motion=False):
         output.mkdir(exist_ok=True)

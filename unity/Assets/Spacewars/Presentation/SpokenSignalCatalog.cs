@@ -5,10 +5,15 @@ namespace Spacewars.Presentation
     // Stable authored vocabulary; keys also name packaged, offline speech clips.
     public static class SpokenSignalCatalog
     {
+        public const string NuclearLaunchKey="system-nuclear-launch";
         public static readonly IReadOnlyDictionary<string,string> Phrases=new Dictionary<string,string>{
-            {"system-building-attacked","Здание атаковано"},{"system-units-attacked","Юниты атакованы"},
+            {NuclearLaunchKey,"Запущена ядерная ракета"},{"system-building-attacked","Здание атаковано"},{"system-units-attacked","Юниты атакованы"},
             {"system-building-ready","Здание готово"},{"system-unit-ready","Юнит готов"},{"system-research-ready","Исследование готово"},
-            {"system-unit-captured","Юнит захвачен"},{"system-mine-captured","Шахта захвачена"},{"system-relay-lost","Вышка потеряна"},
+            {"system-unit-captured","Юнит захвачен"},{"system-mine-captured","Шахта захвачена"},{"system-mine-depleted","Шахта истощена"},{"system-relay-lost","Вышка потеряна"},
+            {"system-relay-captured","Вышка захвачена"},
+            {"system-domination","Доминирование"},{"system-domination-lost","Доминирование прервано"},
+            {"system-domination-ninety","Внимание, до полного доминирования 90 секунд"},
+            {"system-domination-ten","Внимание, до полного доминирования 10 секунд"},
             {"system-mine-hit","Мина!"},{"system-mine-triggered","Мина сработала"},{"system-upgrade-ready","Улучшение готово"},
             {"system-army-limit","Лимит армии"},{"system-credits-needed","Нет кредитов"},{"system-exit-blocked","Выход заблокирован"},
             {"ally-attack","Атаковать!"},{"ally-defend","Защищать!"},{"ally-recon","Разведать!"},
@@ -17,6 +22,7 @@ namespace Spacewars.Presentation
         public static string Key(MatchEventKind kind)
         {
             switch(kind){
+                case MatchEventKind.NuclearLaunch:return NuclearLaunchKey;
                 case MatchEventKind.BuildingAttacked:return "system-building-attacked";
                 case MatchEventKind.UnitsAttacked:return "system-units-attacked";
                 case MatchEventKind.BuildingCompleted:return "system-building-ready";
@@ -24,7 +30,13 @@ namespace Spacewars.Presentation
                 case MatchEventKind.ResearchCompleted:return "system-research-ready";
                 case MatchEventKind.UnitCaptured:return "system-unit-captured";
                 case MatchEventKind.MineCaptured:return "system-mine-captured";
+                case MatchEventKind.MineDepleted:return "system-mine-depleted";
                 case MatchEventKind.RelayControlLost:return "system-relay-lost";
+                case MatchEventKind.RelayCaptured:return "system-relay-captured";
+                case MatchEventKind.DominationGained:return "system-domination";
+                case MatchEventKind.DominationLost:return "system-domination-lost";
+                case MatchEventKind.DominationNinety:return "system-domination-ninety";
+                case MatchEventKind.DominationTen:return "system-domination-ten";
                 case MatchEventKind.MineHit:return "system-mine-hit";
                 case MatchEventKind.MineTriggered:return "system-mine-triggered";
                 case MatchEventKind.UpgradeCompleted:return "system-upgrade-ready";
@@ -35,8 +47,10 @@ namespace Spacewars.Presentation
             }
         }
         public static string Key(TeamSignalKind kind)=>kind==TeamSignalKind.Attack?"ally-attack":kind==TeamSignalKind.Defend?"ally-defend":"ally-recon";
+        internal static bool IsUrgent(string key)=>key is NuclearLaunchKey or "system-domination-ninety" or "system-domination-ten";
+        internal static bool IsDomination(string key)=>key.StartsWith("system-domination",System.StringComparison.Ordinal);
         // Categorical urgency, not designer balance: loss/mine hit > combat > coordination > completion.
-        public static int Priority(MatchEventKind kind)=>kind==MatchEventKind.MineHit||kind==MatchEventKind.UnitCaptured||kind==MatchEventKind.MineCaptured||kind==MatchEventKind.RelayControlLost?4:
+        public static int Priority(MatchEventKind kind)=>IsUrgent(Key(kind))?5:kind is MatchEventKind.RelayCaptured or MatchEventKind.DominationGained or MatchEventKind.DominationLost?4:kind==MatchEventKind.MineHit||kind==MatchEventKind.UnitCaptured||kind==MatchEventKind.MineCaptured||kind==MatchEventKind.RelayControlLost?4:
             kind==MatchEventKind.BuildingAttacked||kind==MatchEventKind.UnitsAttacked?3:kind==MatchEventKind.BuildingCompleted||kind==MatchEventKind.UnitReady||kind==MatchEventKind.ResearchCompleted||kind==MatchEventKind.UpgradeCompleted?1:2;
     }
 }

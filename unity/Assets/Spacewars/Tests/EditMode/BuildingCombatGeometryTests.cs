@@ -50,7 +50,7 @@ namespace Spacewars.Tests.EditMode
   object Inject(PlayableEntityKind kind,int target)
   {
    var p=PlayableProfile.Default;var type=Domain.GetNestedType("Projectile",BindingFlags.NonPublic);var shot=Activator.CreateInstance(type);void Set(string n,object v)=>type.GetField(n).SetValue(shot,v);
-   Set("Id",101);Set("TermsRevision",p.Revision);Set("Owner",View().Entities.Single().Id);Set("Target",target);Set("Faction",PlayableOwner.Player);Set("Kind",kind);Set("Position",new NavPoint(-3,0));Set("Height",1d);Set("Speed",15d);Set("Remaining",10d);Set("Damage",1d);Set("DirectionX",1d);Set("Radius",kind==PlayableEntityKind.Explorer?0d:.06);
+   Set("Id",101);Set("TermsRevision",p.Revision);Set("Owner",View().Entities.Single(e=>e.Owner==PlayableOwner.Player).Id);Set("Target",target);Set("Faction",PlayableOwner.Player);Set("Kind",kind);Set("Position",new NavPoint(-3,0));Set("Height",1d);Set("Speed",15d);Set("Remaining",10d);Set("Damage",1d);Set("DirectionX",1d);Set("Radius",kind==PlayableEntityKind.Explorer?0d:.06);
    if(kind==PlayableEntityKind.Explorer||kind==PlayableEntityKind.Hawk)Set("Spatial",true);
    if(kind==PlayableEntityKind.Shkval)
    {
@@ -58,6 +58,24 @@ namespace Spacewars.Tests.EditMode
     var f=new BallisticFlight(new BallisticPoint(-3,1,0),new BallisticPoint(3,1,0),0,15);R("Flight",f);R("DirectDamage",1d);R("Predicted",new BallisticContact(.3,new BallisticPoint(-1.3,1,0),target));R("Radius",p.ShkvalProjectileRadius);R("BlastRadius",p.ShkvalBlastRadius);R("MarkerStartRadius",p.ShkvalMarkerStartRadius);R("MarkerOpacity",p.ShkvalMarkerOpacity);R("BuildingHeight",p.ShkvalBuildingCollisionHeight);R("BuildingTarget",true);Set("Rocket",rocket);
    }
    ((IList)Domain.GetField("projectiles",Flags).GetValue(domain)).Add(shot);Domain.GetField("nextProjectile",Flags).SetValue(domain,102);return shot;
+  }
+  [TestCase(false)][TestCase(true)]
+  public void VeprShellContactReportsActualUnitDamage(bool lethal)
+  {
+   SetupDomain();
+   var target=(int)Call("SpawnUnit",new NavPoint(-3,0),PlayableOwner.Enemy,PlayableEntityKind.Tank);
+   Call("RefreshVision");double health=View().Entities.Single(e=>e.Id==target).Health;
+   var shot=Inject(PlayableEntityKind.Tank,target);var type=shot.GetType();
+   type.GetField("Position").SetValue(shot,new NavPoint(-4,0));
+   type.GetField("Height").SetValue(shot,.4d);
+   if(lethal)type.GetField("Damage").SetValue(shot,health+1);
+   Call("AdvanceProjectiles",.15d);var view=View();
+   if(lethal)Assert.False(view.Entities.Any(e=>e.Id==target));
+   else Assert.AreEqual(health-1,view.Entities.Single(e=>e.Id==target).Health);
+   var impact=view.Sounds.Single(s=>s.Kind==PlayableSoundKind.Impact);
+   Assert.False(impact.Building);
+   Assert.AreEqual(target,impact.Contact.TargetId);
+   Assert.True(impact.Contact.DamagedUnit);
   }
   [TestCase(PlayableEntityKind.Tank)][TestCase(PlayableEntityKind.Explorer)][TestCase(PlayableEntityKind.Shkval)][TestCase(PlayableEntityKind.Hawk)]
   public void EachProjectileFamilyUsesTheSameBuildingSurfaceAndKeepsNavigation(PlayableEntityKind kind)

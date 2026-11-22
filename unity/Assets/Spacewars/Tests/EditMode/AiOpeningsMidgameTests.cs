@@ -8,11 +8,11 @@ using Spacewars.Simulation;
 using Spacewars.Simulation.Ai;
 public sealed class AiOpeningsMidgameTests
 {
-    [Test] public void CatalogUsesAgreedUnmodifiedWeightsAndRealAirProducer()
+    [Test] public void CatalogUsesAgreedWeightsAndRealAirProducer()
     {
         var ai=AiProfile.Initial;
         Assert.AreEqual(5,AiOpeningCatalog.All.Count);
-        CollectionAssert.AreEqual(new[]{40d,20d,20d,10d,10d},AiOpeningCatalog.All.Select(x=>ai.Value(x.WeightPath)).ToArray());
+        CollectionAssert.AreEqual(new[]{40d,20d,20d,18d,10d},AiOpeningCatalog.All.Select(x=>ai.Value(x.WeightPath)).ToArray());
         Assert.AreEqual(AiMobilityClass.Aircraft,AiRosterCatalog.Initial.For(PlayableEntityKind.Hawk).mobility);
         Assert.AreEqual(PlayableBuildingKind.Hangar,AiRosterCatalog.Initial.Production(PlayableCommandKind.QueueHawk).producer);
         Assert.Greater(AiRosterCatalog.Initial.For(PlayableEntityKind.Explorer).lineWeight,0);
@@ -26,7 +26,7 @@ public sealed class AiOpeningsMidgameTests
         Assert.Greater(air,0);Assert.Less(air,60);
     }
 
-    private static PlayableAiObservation View(int income=3,bool mine=false,bool factory=false,int queue=0,int seed=771205,PlayableEntityKind unitKind=PlayableEntityKind.Hawk,int unitCount=4,string owner="air-owner",OfflineParticipant[] participants=null)
+    private static PlayableAiObservation View(int income=3,bool mine=false,bool factory=false,int queue=0,int seed=771205,PlayableEntityKind unitKind=PlayableEntityKind.Hawk,int unitCount=4,string owner="air-owner",OfflineParticipant[] participants=null,AiDifficulty difficulty=AiDifficulty.Fighter)
     {
         var p=PlayableProfile.Default;var slots=Enumerable.Range(1,5).Select(i=>new TerritorySlot(i,new NavPoint(i*9,10),0)).ToArray();
         var site=new TerritorySite(1,PlayableBuildingKind.Headquarters,new NavPoint(0,0),slots);
@@ -37,7 +37,7 @@ public sealed class AiOpeningsMidgameTests
         if(mine)bs.Add(new PlayableBuildingSnapshot(11,PlayableOwner.Player,PlayableBuildingKind.Mine,new NavPoint(0,20),100,1,0,0,default,siteId:2,phase:ConstructionPhase.Ready));
         if(participants!=null)foreach(var participant in participants.Where(x=>x.Id!=owner))bs.Add(new PlayableBuildingSnapshot(20+Array.IndexOf(participants,participant),(PlayableOwner)Array.IndexOf(participants,participant),PlayableBuildingKind.Factory,new NavPoint(50,0),100,1,0,0,default,phase:ConstructionPhase.Ready));
         var units=Enumerable.Range(0,unitCount).Select(i=>new PlayableEntitySnapshot(100+i,PlayableOwner.Player,unitKind,new NavPoint(0,0),PlayableUnitRules.Health(p,unitKind),false,0,0,0)).Concat(unitKind==PlayableEntityKind.Hawk?new[]{new PlayableEntitySnapshot(50,PlayableOwner.Player,PlayableEntityKind.Explorer,default,p.ExplorerHealth,false,0,0,0)}:Array.Empty<PlayableEntitySnapshot>()).ToArray();
-        return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,seed,1,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,units,bs.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(4,0,100),owner:PlayableOwner.Player,ownerId:owner,homeSiteId:1,team:1,participants:participants));
+        return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,seed,1,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,units,bs.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(4,0,100),owner:PlayableOwner.Player,ownerId:owner,homeSiteId:1,team:1,participants:participants),difficulty);
     }
     [Test] public void CalmAirRetainsLastSlotAndFundsFactoryAfterFourthActualIncome()
     {
@@ -66,6 +66,18 @@ public sealed class AiOpeningsMidgameTests
         Assert.AreEqual(action.Target,registry.Capture().Armies.Single().Rally,"The live claim keeps its accepted approach without assuming site IDs are unique objectives.");
         var covered=new AiKnowledgeState(o.OwnerId,o.Generation,o.Tick,Array.Empty<AiKnownContact>(),new[]{new AiVisitedArea(2,o.Tick,true,false)});
         planner.Observe(o,covered,registry,ai,2);Assert.Zero(registry.ArmyFor(unit.Id),"Genuine area coverage still releases scouting ownership.");
+    }
+    [Test] public void OpeningForceSelectsHealthyReplacementWithoutChangingRequiredKindsOrSize()
+    {
+        var p=PlayableProfile.Default;var ai=AiProfile.Initial;var basis=View(unitCount:8);
+        var executor=new AiOpeningExecutor(PlayableAiOpeningComposition.Initialize(basis.Seed,basis.OwnerId,forcedOpening:PlayableAiOpening.Air),71){PlayableProfileForObservation=p};
+        executor.Observe(basis,null,null,ai);
+        var units=basis.Entities.Select(u=>new PlayableEntitySnapshot(u.Id,u.Owner,u.Kind,u.Position,u.Id==100?1:u.Health,false,0,0,0)).ToArray();
+        var current=PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,basis.Seed,2,110,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,units,basis.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:p,ownerId:basis.OwnerId));
+        var selected=executor.InitialMembers(current,ai);
+        Assert.AreEqual(executor.RequiredForce,selected.Length);Assert.False(selected.Contains(100),"Wounded oldest member cannot pin healthy opening reserves at home");
+        Assert.True(selected.All(id=>current.Entities.Single(u=>u.Id==id).Kind==PlayableEntityKind.Hawk));
+        CollectionAssert.AreEqual(selected,executor.InitialMembers(current,ai),"Selection remains deterministic");
     }
     [Test] public void AirIncomeSavingsRequireTheChosenReadyHomeProducer()
     {
@@ -132,9 +144,32 @@ public sealed class AiOpeningsMidgameTests
         finally{a.Stop();ra.Dispose();rb.Dispose();a.Domain.Navigation.DestroyNavigationAuthority();if(b!=null){b.Stop();b.Domain.Navigation.DestroyNavigationAuthority();}}
     }
 
+    [TestCase(AiDifficulty.Veteran,false)]
+    [TestCase(AiDifficulty.Expert,true)]
+    [TestCase(AiDifficulty.Cheater,true)]
+    public void EarlyGroundIncomeTakesPriorityAfterTheFirstForce(AiDifficulty difficulty,bool incomeFirst)
+    {
+        var p=PlayableProfile.Default;var data=AiProfile.Initial.CopyData();
+        var field=AiProfileMetadata.Field("difficulty.expert.opening.incomeBeforeReinforcement");
+        Assert.Contains(field,NativeBalanceFields.AiLabFields.ToList());
+        NativeBalanceFields.Write(field,data,1);
+        var ai=new AiProfile(data);
+        var o=View(income:1,factory:true,unitKind:PlayableEntityKind.Tank,unitCount:2,difficulty:difficulty);
+        var opening=PlayableAiOpeningComposition.Initialize(o.Seed,o.OwnerId,aiProfile:ai,forcedOpening:PlayableAiOpening.BlindRush,difficulty:difficulty);
+        var executor=new AiOpeningExecutor(opening,o.Generation){PlayableProfileForObservation=p,AggressivePersonality=true};
+        executor.Observe(o,null,null,ai);
+        var flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+        typeof(AiOpeningExecutor).GetField("mixedForce",flags).SetValue(executor,false);
+        executor.Observe(o,null,null,ai);
+        Assert.True(executor.Capture().InitialForceFulfilled);
+        var candidates=executor.MacroRequests(o,p,ai,Array.Empty<AiEconomyCandidate>());
+        Assert.AreEqual(incomeFirst,candidates.Any(c=>c.Legal&&c.Action.Kind==PlayableCommandKind.BuildAt&&c.Action.BuildingKind==PlayableBuildingKind.Refinery));
+        Assert.AreEqual(!incomeFirst,candidates.Any(c=>c.Legal&&c.Policy=="production"&&c.Action.Kind==PlayableCommandKind.QueueTank));
+    }
+
     [TestCase(false)][TestCase(true)] public void AggressiveContinuationKeepsActualCandidatesAndFundingSeparate(bool reinforce)
     {
-        var p=PlayableProfile.Default;var ai=AiProfile.Initial;var o=View(income:1,factory:true,unitKind:PlayableEntityKind.Explorer,unitCount:2);
+        var p=PlayableProfile.Default;var ai=AiProfile.Initial;var o=View(income:1,factory:true,unitKind:PlayableEntityKind.Explorer,unitCount:3);
         var opening=PlayableAiOpeningComposition.Initialize(771205,"air-owner",forcedOpening:PlayableAiOpening.BlindRush);var e=new AiOpeningExecutor(opening,71){PlayableProfileForObservation=p,AggressivePersonality=true};e.Observe(o,null,null,ai);
         var flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
         typeof(AiOpeningExecutor).GetField("forceKind",flags).SetValue(e,PlayableEntityKind.Explorer);typeof(AiOpeningExecutor).GetField("mixedForce",flags).SetValue(e,false);e.Observe(o,null,null,ai);
@@ -146,10 +181,13 @@ public sealed class AiOpeningsMidgameTests
         if(reinforce)Assert.Greater(e.InitialForceFundingProtection(o,p,ai,null),0);
         var loop=new PlayableAiOwnerLoop(p,opening,71,null,ai,AiDifficulty.Fighter);
         typeof(PlayableAiOwnerLoop).GetField("openingExecutor",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).SetValue(loop,e);
-        Assert.AreEqual(0,typeof(PlayableAiOwnerLoop).GetProperty("ScoutBudget",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(loop),"completed live force is still committed until real pressure deployment");
+        Assert.Greater((int)typeof(PlayableAiOwnerLoop).GetProperty("ScoutBudget",flags).GetValue(loop),0,"the separate scout can work before pressure deployment");
         var registry=new AiArmyRegistry(o.OwnerId,o.Generation,ai,AiDifficulty.Fighter);
-        Assert.True(registry.TryCreate(o,AiArmyRole.Attack,AiArmyPlanner.Policy,o.Entities.Select(u=>u.Id),out var army,requiredMinimum:2));
-        Assert.True(o.Entities.All(u=>registry.ArmyFor(u.Id)==army),"both combat Explorers transfer atomically to first attack");
+        var members=e.InitialMembers(o,ai);
+        CollectionAssert.AreEquivalent(o.Entities.Select(u=>u.Id).Where(id=>id!=e.GroundScout),members);
+        Assert.True(registry.TryCreate(o,AiArmyRole.Attack,AiArmyPlanner.Policy,members,out var army,requiredMinimum:2));
+        Assert.True(members.All(id=>registry.ArmyFor(id)==army),"both combat Explorers transfer atomically to first attack");
+        Assert.Zero(registry.ArmyFor(e.GroundScout),"the separate scout remains available for recon or capture");
     }
 
     [TestCase(PlayableEntityKind.Tank,false)][TestCase(PlayableEntityKind.Explorer,false)][TestCase(PlayableEntityKind.Tank,true)]
@@ -162,7 +200,7 @@ public sealed class AiOpeningsMidgameTests
         var candidates=e.MacroRequests(empty,p,ai,Array.Empty<AiEconomyCandidate>()).Where(c=>c.Legal&&c.Policy=="production").ToArray();Assert.True(candidates.All(c=>desired.ContainsKey(c.Action.UnitKind)));
         if(kind==PlayableEntityKind.Tank&&!mixed){Assert.AreEqual(0,e.InitialMembers(empty,ai).Length);Assert.False(e.Capture().InitialForceFulfilled);Assert.True(candidates.Any(c=>c.Action.Kind==PlayableCommandKind.QueueTank));}
         var own=desired.SelectMany(x=>Enumerable.Range(0,x.Value).Select((n)=>new PlayableEntitySnapshot(200+(int)x.Key*20+n,PlayableOwner.Player,x.Key,default,PlayableUnitRules.Health(p,x.Key),false,0,0,0))).ToArray();
-        var basis=View(income:1,factory:true,unitCount:0);var snapshot=new PlayableSnapshot(p.ProfileId,p.Revision,71,771205,2,101,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,own,basis.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:basis.Sites.ToArray(),population:new PlayablePopulationSnapshot(2,0,100),ownerId:"air-owner",homeSiteId:1);
+        var basis=View(income:1,factory:true,unitCount:0);var snapshot=new PlayableSnapshot(p.ProfileId,p.Revision,71,771205,2,101,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,own.Concat(empty.Entities).ToArray(),basis.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:basis.Sites.ToArray(),population:new PlayablePopulationSnapshot(2,0,100),ownerId:"air-owner",homeSiteId:1);
         var o=PlayableAiObservation.From(snapshot);e.Observe(o,null,null,ai);Assert.True(e.Capture().InitialForceFulfilled);
         var ids=e.InitialMembers(o,ai);var registry=new AiArmyRegistry(o.OwnerId,71,ai,AiDifficulty.Fighter);Assert.True(registry.TryCreate(o,AiArmyRole.Attack,AiArmyPlanner.Policy,ids,out var id,requiredMinimum:2));
         CollectionAssert.AreEquivalent(own.Select(u=>u.Id),registry.Capture().Armies.Single().Members);

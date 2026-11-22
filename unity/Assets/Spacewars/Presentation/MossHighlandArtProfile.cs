@@ -60,6 +60,8 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Highland transitions","Compacted texture","Reduction of loose clod contrast in trampled edge soil.","ratio",0,1,.05f)] public float apronCompaction=.55f;
         [SurfaceSetting("Highland transitions","Compacted value","Relative brightness of trampled edge soil.","ratio",.5f,1,.025f)] public float apronSoilValue=.85f;
         [SurfaceSetting("Highland geology","Cliff face contrast","Material value separation of vertical rock faces from upper shelves, independent of cast shadows.","ratio",0,.6f,.025f)] public float cliffFaceContrast=.35f;
+        [SurfaceSetting("Highland geology","Plateau rock rim","Width of exposed rock inside the central plateau cliffs, interrupted by ramps.","m",.5f,1.5f,.05f)] public float plateauRimWidth=1.35f;
+        [SurfaceSetting("Highland geology","Plateau edge contrast","Bright exposed rock along the top lip and darker vertical faces.","ratio",0,.8f,.025f)] public float plateauEdgeContrast=.8f;
         [SurfaceSetting("Highland cliff sample","Edge retreat","Inward-only lip retreat in the single southwest review sample. Zero restores the accepted edge.","m",0,.45f,.025f)] public float cliffEdgeInset=.4f;
         [SurfaceSetting("Highland cliff sample","Lip chips","Vertical chips below the original top in the review sample.","m",0,.8f,.05f)] public float cliffChipDepth=.55f;
         [SurfaceSetting("Highland cliff sample","Fracture scale","World scale of irregular lip cuts and face facets in the review sample.","m",.75f,4,.25f)] public float cliffFractureScale=1.75f;
@@ -77,6 +79,9 @@ namespace Spacewars.Presentation
         public static MossHighlandArtProfile Load(){var p=JsonUtility.FromJson<MossHighlandArtProfile>(Resources.Load<TextAsset>("MossHighlandArtProfile").text);p.Validate();return p;}
         // Source roles remain content identifiers; added soil/scree are presentation only.
         public static readonly string[] Roles={"mountain.base-dark","mountain.base-mid","metal-deck","scree","moss-ground","damp-soil","pebbles"};
+
+        // Current construction aprons are applied separately from source terrain paint.
+        internal static string GroundMaterial(string source)=>source=="metal-deck"?"moss-ground":source;
         public static int Role(string id){int i=Array.IndexOf(Roles,id);if(i<0)throw new ArgumentException("Unknown highland material: "+id);return i;}
         public Color Palette(int role){switch(role){case 0:return new Color(rockValue*.8f,rockValue*.85f,rockValue*.83f);case 1:return new Color(rockValue,rockValue*1.04f,rockValue*.98f);case 2:return new Color(.40f,.44f,.45f);case 3:return new Color(.40f,.41f,.35f);case 4:return Color.HSVToRGB(mossHue,mossSaturation,mossValue);case 5:return new Color(soilValue,soilValue,soilValue);case 6:return new Color(.45f,.46f,.38f);default:throw new ArgumentOutOfRangeException(nameof(role));}}
         public Material Material(Texture fog,Vector4 bounds,Color fogColor){
@@ -87,7 +92,7 @@ namespace Spacewars.Presentation
             EnvironmentArt.BindFamily(m,"Concrete","Environment/NaturalFrontier/Concrete",new Vector3(.38497328f,.37142344f,.37949659f));
             m.SetVector("_BorderSettings",new Vector4(mountainMoss,waterValue,waterRipples,mountainShadowBias));
             m.SetVector("_RouteReadability",new Vector4(rampSoilStrength,siteRoleContrast,0,0));
-            m.SetVector("_Scree",new Vector4(screeReach,screeDensity,screeSize,apronSoilValue));m.SetVector("_EdgeTransition",new Vector4(apronEdgeReach,apronDust,drainMoss,apronCompaction));m.SetVector("_CliffVariation",new Vector4(strataTilt,strataRegion,cliffFaceContrast,0));
+            m.SetVector("_Scree",new Vector4(screeReach,screeDensity,screeSize,apronSoilValue));m.SetVector("_EdgeTransition",new Vector4(apronEdgeReach,apronDust,drainMoss,apronCompaction));m.SetVector("_CliffVariation",new Vector4(strataTilt,strataRegion,cliffFaceContrast,plateauEdgeContrast));
             m.SetVector("_RoleDetail",new Vector4(rockTile,soilTile,concreteTile,sourceColorStrength));m.SetVector("_ApronWeather",new Vector4(apronWeathering,apronMossReach,apronMossStrength,0));
             m.SetVector("_DetailSettings",new Vector4(detailTile,variantScale,variantBlend,detailContrast));m.SetVector("_NaturalPattern",new Vector4(soilScale,soilCoverage,naturalFeather,textureWarp));m.SetVector("_Geology",new Vector4(strataSpacing,strataContrast,creviceContrast,0));m.SetVector("_HighlandPattern",new Vector4(stoneCoverage,patchFeather,macroContrast,0));m.SetVector("_ApronSlabs",new Vector4(slabSize,jointWidth,jointContrast,slabVariation));m.SetVector("_ApronFinish",new Vector4(concreteValue,drainWidth,drainPitch,drainContrast));m.SetVector("_ApronCovers",new Vector4(coverSize,coverFrequency,0,0));m.SetFloat("_NormalSlope",normalSlope);m.SetFloat("_ReceiverBias",receiverBias);
             var colors=new Vector4[7];for(int i=0;i<7;i++){var c=Palette(i).linear;colors[i]=new Vector4(c.r,c.g,c.b,1);}m.SetVectorArray("_RoleTints",colors);m.SetTexture("_FogMask",fog);m.SetVector("_FogBounds",bounds);m.SetColor("_FogColor",fogColor);return m;

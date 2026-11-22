@@ -1,5 +1,7 @@
 """Release routing, crash recovery and source guards; never starts Unity or GitHub."""
 import copy
+import io
+from contextlib import redirect_stderr
 import importlib.util
 import json
 import pathlib
@@ -55,6 +57,51 @@ class Checkpoints(unittest.TestCase):
             with self.assertRaises(ValueError):ps.space_guard('.',11,10)
 
 
+def release_profile_fixture(version):
+    row = {'revision': 19, 'releaseVersion': version, 'data': {'revision': 19},
+           'audio': {'near': 1}, 'modelDetail': {'lod': 1},
+           'aiProfile': {'id': 'spacewars-default', 'revision': 19,
+                         'fields': [{'path': 'example', 'value': 1}]}}
+    return {'schema': 2, 'defaultId': 'spacewars-default', 'releaseVersion': version,
+            'profileDefaultsVersion': 19,
+            'profiles': [{'id': 'spacewars-default', 'release': [19], 'versions': [row]}]}
+
+
+def write_release_profile_fixture(root, version):
+    path = root / bs.LAB
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(release_profile_fixture(version)))
+
+
+class UnifiedReleaseProfile(unittest.TestCase):
+    def test_build_identity_rejects_histories_and_separate_ai_versions(self):
+        catalog = release_profile_fixture('0.6.20')
+        row = catalog['profiles'][0]['versions'][0]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / bs.LAB
+            path.parent.mkdir(parents=True)
+            def write(value):
+                path.write_text(json.dumps(value))
+            write(catalog)
+            identity = bs.release_profile(tmp, '0.6.20')
+            self.assertEqual(('spacewars-default', 19, '0.6.20'),
+                             (identity['id'], identity['revision'], identity['release_version']))
+            self.assertEqual(64, len(identity['catalog_sha256']))
+            for change in ('history', 'experiment', 'ai-version', 'ai-id', 'old-defaults', 'missing-audio', 'wrong-version'):
+                with self.subTest(change=change):
+                    bad = copy.deepcopy(catalog)
+                    badrow = bad['profiles'][0]['versions'][0]
+                    if change == 'history': bad['profiles'][0]['versions'].append(copy.deepcopy(row))
+                    elif change == 'experiment': bad['profiles'].append(copy.deepcopy(bad['profiles'][0]))
+                    elif change == 'ai-version': badrow['aiProfile']['revision'] = 8
+                    elif change == 'ai-id': badrow['aiProfile']['id'] = 'ai-openings-midgame-v1'
+                    elif change == 'old-defaults': bad['profileDefaultsVersion'] = 1
+                    elif change == 'missing-audio': del badrow['audio']
+                    elif change == 'wrong-version': bad['releaseVersion'] = '0.6.19'
+                    write(bad)
+                    with self.assertRaises(ValueError): bs.release_profile(tmp, '0.6.20')
+
+
 class GeneratedSource(unittest.TestCase):
     def repo(self,t):
         root=pathlib.Path(t);subprocess.run(['git','init','-q'],cwd=root,check=True)
@@ -79,14 +126,32 @@ class GeneratedSource(unittest.TestCase):
     def test_shader_prefilter_and_generated_map_only(self):
         bs.validate_change(bs.PIPELINE,b'  m_PrefilterFoo: 1\nquality: 5\n',b'  m_PrefilterFoo: 0\nquality: 5\n')
         bs.validate_change(bs.GLOBAL,b'x\n      - rid: 1\n',b'x\n      - rid: 1\n      - rid: 2\n')
-        self.assertTrue(bs.generated(bs.MAPS+'World-CrimsonGrove.bytes'))
-        self.assertFalse(bs.generated(bs.MAPS+'Unexpected.cs'))
+        for name in ('World-CrimsonGrove.bytes', 'TacticalMinimap-NullDock.bytes',
+                     'OverheadBattle-ThreeCrossings.bytes', 'overhead-stamp.txt'):
+            with self.subTest(name=name):
+                self.assertTrue(bs.generated(bs.MAPS+name))
+        for name in ('Unexpected.cs', 'OverheadBattle-NullDock.bytes.meta', 'overhead-stamp.txt.backup'):
+            with self.subTest(name=name):
+                self.assertFalse(bs.generated(bs.MAPS+name))
 
 
 class Pipeline(unittest.TestCase):
     def setup_fixture(self,t):
         self.root=pathlib.Path(t)/'repo';self.root.mkdir();self.out=pathlib.Path(t)/'out';self.calls=[];self.releases=[];self.fail_upload=False;self.fail_create=False;self.fail_package=False
-        self.head='a'*40;self.public='b'*40;self.version='9.8.7';self.channel='production'
+        self.public='b'*40;self.version='9.8.7';self.channel='production'
+        self.notes={'schema':2,'baseline':None,'balance_reviewed':True,'entries':[
+            {'category_ru':'Интерфейс','category_en':'Interface','ru':'Подсказки','en':'Tooltips'}]}
+        self.git('init','-q')
+        self.git('config','user.name','Fixture')
+        self.git('config','user.email','fixture@example.invalid')
+        self.commit_notes()
+    def git(self,*args):
+        return subprocess.check_output(['git',*args],cwd=self.root,text=True).strip()
+    def commit_notes(self):
+        (self.root/'notes.json').write_text(json.dumps(self.notes))
+        self.git('add','notes.json')
+        self.git('commit','-qm','Review release notes')
+        self.head=self.git('rev-parse','HEAD')
     def api(self,route):
         if route.startswith('releases?'):return copy.deepcopy(self.releases)
         if route=='releases/71' or route=='releases/tags/v9.8.7':return copy.deepcopy(self.releases[0])
@@ -102,9 +167,12 @@ class Pipeline(unittest.TestCase):
         if args==['gh','workflow','run','installer-downloads.yml','--repo','afonasev/spacewars','--ref','main','-f','apply=true']:
             self.assertFalse(self.releases[0]['draft'])
             return ''
+        if args[:4]==['gh','release','download','v9.8.6']:
+            self.assertEqual(args[args.index('--pattern')+1],'release.json')
+            return json.dumps({'payload':{'sequence':17,'commit':self.previous_commit}})
         if args[:3]==['gh','release','create']:
             notes=pathlib.Path(args[args.index('--notes-file')+1]).read_text()
-            self.releases=[{'id':71,'tag_name':'v9.8.7','draft':True,'prerelease':'--prerelease' in args,'assets':[],'html_url':'https://example.invalid/release','target_commitish':self.public,'body':notes}]
+            self.releases.insert(0,{'id':71,'tag_name':'v9.8.7','draft':True,'prerelease':'--prerelease' in args,'assets':[],'html_url':'https://example.invalid/release','target_commitish':self.public,'body':notes})
             if self.fail_create:self.fail_create=False;raise RuntimeError('lost create response')
             return ''
         if args[:3]==['gh','release','edit']:
@@ -137,11 +205,49 @@ class Pipeline(unittest.TestCase):
         (feed/'downloads.json').write_text(json.dumps({'channel':self.channel,'artifacts':[item]}));return 0
     def export(self,clone,head):
         self.calls.append(['export-source']);p=clone/'source-snapshot.json';p.write_text(json.dumps({'build_source_commit':head}));return self.public,p
-    def invoke(self,resume=False,extra=()):
-        argv=['publish.py','--version',self.version,'--sequence','18','--channel',self.channel,'--production-approved','--publish','--git-protocol','ssh','--output',str(self.out)]+(['--resume'] if resume else [])+list(extra)
-        with patch.object(pub,'ROOT',self.root),patch.object(pub,'run',side_effect=self.fake_run),patch.object(pub,'api',side_effect=self.api),patch.object(pub.subprocess,'check_call',side_effect=self.subprocess_call),patch.object(pub,'clone_public',side_effect=lambda clone,url:clone.mkdir()),patch.object(pub,'export_source',side_effect=self.export),patch.object(pub.release_notes,'previous_release',return_value=None),patch.object(pub.release_notes,'generate',return_value=('Notes',{})),patch.object(ps,'space_guard'),patch.object(sys,'argv',argv):
+    def invoke(self,resume=False,extra=(),with_notes=True):
+        argv=['publish.py','--version',self.version,'--sequence','18','--channel',self.channel,'--production-approved','--publish','--git-protocol','ssh','--output',str(self.out)]+(['--resume'] if resume else [])+(['--notes','notes.json'] if with_notes else [])+list(extra)
+        with patch.object(pub,'ROOT',self.root),patch.object(pub,'run',side_effect=self.fake_run),patch.object(pub,'api',side_effect=self.api),patch.object(pub.subprocess,'check_call',side_effect=self.subprocess_call),patch.object(pub,'clone_public',side_effect=lambda clone,url:clone.mkdir()),patch.object(pub,'export_source',side_effect=self.export),patch.object(ps,'space_guard'),patch.object(sys,'argv',argv):
             trust=self.root/'tools/native-release/trust.json';trust.parent.mkdir(parents=True,exist_ok=True);trust.write_text('{"public_key":"fixture"}')
             return pub.main()
+    def test_missing_or_stale_notes_stop_before_build(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.setup_fixture(t)
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                self.invoke(with_notes=False)
+            self.assertEqual(error.exception.code,2)
+            self.assertEqual(self.calls,[])
+            self.notes['baseline']='v9.8.6'
+            self.commit_notes()
+            with self.assertRaisesRegex(ValueError,'baseline must match'):
+                self.invoke()
+            self.assertFalse(any(c[0]=='gh' or len(c)>1 and c[1].endswith('build.py') for c in self.calls))
+    def test_notes_use_previous_published_release_in_the_same_channel(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.setup_fixture(t)
+            self.previous_commit=self.head
+            self.notes['baseline']='v9.8.6'
+            self.commit_notes()
+            self.releases=[
+                {'tag_name':'v9.8.6','draft':False,'prerelease':False},
+                {'tag_name':'v9.9.0','draft':False,'prerelease':True},
+            ]
+            self.invoke()
+            self.assertIn('Сравнение с v9.8.6.',self.releases[0]['body'])
+            provenance=json.loads((self.out/'release-notes-source.json').read_text())
+            self.assertEqual(provenance['baseline'],self.previous_commit)
+            self.assertEqual(provenance['head'],self.head)
+            self.assertEqual(provenance['authored']['baseline_release'],'v9.8.6')
+    def test_resumed_draft_does_not_publish_against_a_changed_baseline(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.setup_fixture(t);self.fail_upload=True
+            with self.assertRaisesRegex(RuntimeError,'interrupted upload'):
+                self.invoke()
+            self.releases.append({'tag_name':'v9.8.6','draft':False,'prerelease':False})
+            with self.assertRaisesRegex(ValueError,'comparison release changed'):
+                self.invoke(True)
+            self.assertTrue(self.releases[0]['draft'])
+            self.assertFalse(any(c[:4]==['gh','api','--method','PATCH'] for c in self.calls))
     def test_interrupted_upload_resumes_without_build_package_source_or_payload_readback(self):
         with tempfile.TemporaryDirectory() as t:
             self.setup_fixture(t);self.fail_upload=True

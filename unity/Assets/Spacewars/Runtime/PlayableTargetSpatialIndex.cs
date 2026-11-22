@@ -11,7 +11,10 @@ namespace Spacewars.Runtime
         {
             internal readonly int Id,Ordinal;
             internal readonly bool Building;
-            internal Entry(int id,bool building,int ordinal){Id=id;Building=building;Ordinal=ordinal;}
+            internal readonly int Team;
+            internal readonly NavPoint Position;
+            internal readonly long CellX, CellZ;
+            internal Entry(int id,bool building,int ordinal,NavPoint position,int team,long x,long z){Position=position;Id=id;Building=building;Ordinal=ordinal;Team=team;CellX=x;CellZ=z;}
             public int CompareTo(Entry other)=>Ordinal.CompareTo(other.Ordinal);
         }
         private readonly struct Cell:IEquatable<Cell>
@@ -40,14 +43,16 @@ namespace Spacewars.Runtime
             if(double.IsNaN(at)||double.IsInfinity(at)||Math.Abs(at)>=ExactCellLimit){cell=0;return false;}
             cell=(long)at;return true;
         }
-        internal void Add(int id,NavPoint position,bool building)
+        internal void Add(int id,NavPoint position,bool building,int team=-1)
         {
             if(count==entries.Length){Array.Resize(ref entries,checked(count*2));Array.Resize(ref next,entries.Length);}
-            int index=count++;entries[index]=new Entry(id,building,index);
-            if(!Coordinate(position.X,out long x)||!Coordinate(position.Z,out long z)){unbucketed=true;return;}
+            int index=count++;
+            bool validX=Coordinate(position.X,out long x), validZ=Coordinate(position.Z,out long z);
+            entries[index]=new Entry(id,building,index,position,team,x,z);
+            if(!validX||!validZ){unbucketed=true;return;}
             var cell=new Cell(x,z);next[index]=heads.TryGetValue(cell,out int head)?head:-1;heads[cell]=index;
         }
-        internal void Query(NavPoint point,double range,List<Entry> output)
+        internal void Query(NavPoint point,double range,List<Entry> output,int excludedTeam=int.MinValue,bool ordered=false)
         {
             output.Clear();VisitedEntries=0;
             if(range<0||double.IsNaN(range))return;
@@ -57,11 +62,20 @@ namespace Spacewars.Runtime
                 !Coordinate(point.Z-range,out long lowZ)||!Coordinate(point.Z+range,out long highZ)||
                 (double)(highX-lowX+3)*(highZ-lowZ+3)>4096)
             {
-                for(int i=0;i<count;i++)output.Add(entries[i]);VisitedEntries=count;return;
+                for(int i=0;i<count;i++)if(entries[i].Team!=excludedTeam)output.Add(entries[i]);VisitedEntries=count;return;
+            }
+            if(ordered && count <= 512){
+                for(int i=0;i<count;i++){
+                    var entry=entries[i];
+                    if(entry.Team!=excludedTeam && entry.CellX>=lowX-1 && entry.CellX<=highX+1 &&
+                        entry.CellZ>=lowZ-1 && entry.CellZ<=highZ+1){output.Add(entry);VisitedEntries++;}
+                }
+                return;
             }
             for(long x=lowX-1;x<=highX+1;x++)for(long z=lowZ-1;z<=highZ+1;z++)
                 if(heads.TryGetValue(new Cell(x,z),out int head))
-                    for(int i=head;i>=0;i=next[i]){output.Add(entries[i]);VisitedEntries++;}
+                    for(int i=head;i>=0;i=next[i]){if(entries[i].Team!=excludedTeam)output.Add(entries[i]);VisitedEntries++;}
+            if(ordered)output.Sort();
         }
     }
 
@@ -71,21 +85,21 @@ namespace Spacewars.Runtime
         private void RebuildTargetSpatialIndex()
         {
             targetSpatialIndex.Clear();
-            foreach(var u in units.Values)if(TryActor(u.Id,out var n))targetSpatialIndex.Add(u.Id,n.Position,false);
-            foreach(var b in buildings.Values)if(b.Phase!=ConstructionPhase.Pending)targetSpatialIndex.Add(b.Id,b.Position,true);
+            foreach(var u in units.Values)if(TryActor(u.Id,out var n))targetSpatialIndex.Add(u.Id,n.Position,false,TeamOf(u.Owner));
+            foreach(var b in buildings.Values)if(b.Phase!=ConstructionPhase.Pending)targetSpatialIndex.Add(b.Id,b.Position,true,TeamOf(b.Owner));
         }
         private void AdvanceIndexedCombat(double dt)
         {
             // Called after movement/vision. Combat requests do not move bodies; projectile
             // deaths and economy spawns occur after this phase. Restore needs no wire state.
             RebuildTargetSpatialIndex();targetSpatialIndex.CombatPhase=true;
-            try{AdvanceCombat(dt);}finally{targetSpatialIndex.CombatPhase=false;}
+            try{CollectActiveAttackers();AdvanceCombat(dt);}finally{targetSpatialIndex.CombatPhase=false;}
         }
         private int NearestSpatialTarget(NavPoint point,PlayableOwner observer,double range,bool unitsFirst,bool includeAir=false)
         {
             // Direct domain queries outside combat must also observe spawn/death/restore.
             if(!targetSpatialIndex.CombatPhase)RebuildTargetSpatialIndex();
-            targetSpatialIndex.Query(point,range,targetSpatialIndex.Candidates);
+            targetSpatialIndex.Query(point,range,targetSpatialIndex.Candidates,TeamOf(observer));
             int best=0,bestClass=2;double distance=range;
             foreach(var candidate in targetSpatialIndex.Candidates)
             {

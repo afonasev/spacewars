@@ -32,6 +32,17 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(viable,AiReinforcementPolicy.ReceivingCore(o,army,PlayableProfile.Default,AiProfile.Initial).Length>0);
             army.Phase=AiArmyPhase.Retreating;Assert.IsEmpty(AiReinforcementPolicy.ReceivingCore(o,army,PlayableProfile.Default,AiProfile.Initial));
         }
+        [TestCase("healthy",false)][TestCase("dispersed",false)][TestCase("wounded",true)][TestCase("overwhelmed",true)]
+        public void SafeReinforcement_EngagedCoreLossDistinguishesSpacingFromThreat(string change,bool regroup)
+        {
+            var observation=SafeWave(change);
+            var army=new AiArmyState{Id=1,OwnerId=observation.OwnerId,TacticalOwner=AiArmyPlanner.Policy,
+                Members=new[]{1,2,3,4},Reinforcements=new[]{4},MinimumViableForce=3,Phase=AiArmyPhase.Engaging};
+
+            Assert.AreEqual(regroup,AiReinforcementPolicy.LostReceivingCore(
+                observation,army,PlayableProfile.Default,AiProfile.Initial,null,checkSafety:true));
+        }
+
         [Test] public void SafeReinforcement_HealthyCoreGetsOneUnitFollowImmediatelyAndTargetTracksIt()
         {
             var o=SafeWave();var registry=Registry();Assert.True(registry.TryCreate(o,AiArmyRole.Attack,AiArmyPlanner.Policy,new[]{1,2,3},out long id));registry.UpdateMission(id,AiArmyPlanner.Policy,AiArmyPhase.Advancing,o.Tick,"front");
@@ -41,6 +52,21 @@ namespace Spacewars.Tests.EditMode
             Assert.NotNull(action);Assert.AreEqual(PlayableCommandKind.Follow,action.Kind);CollectionAssert.AreEqual(new[]{4},action.EntityIds);Assert.Contains(action.TargetId,new[]{1,2,3});
             Assert.AreEqual(0,action.SiteId);Assert.False(action.TargetId==101);
             Assert.IsEmpty(AiTacticalExecutor.Ready(o,army,PlayableProfile.Default));
+        }
+        [Test] public void GuardRetryDoesNotIncludeReinforcementsStillAssembling()
+        {
+            var observation=SafeWave();
+            var registry=Registry();
+            var planner=new AiArmyPlanner(observation.OwnerId,observation.Generation);
+            var army=new AiArmyState{Id=1,OwnerId=observation.OwnerId,TacticalOwner=AiArmyPlanner.Policy,
+                Members=new[]{1,2,3,4},Reinforcements=new[]{4},MinimumViableForce=3,Phase=AiArmyPhase.Staging};
+
+            var guard=(PlayableAiAction)typeof(AiArmyPlanner).GetMethod("Guard",F).Invoke(planner,
+                new object[]{observation,PlayableProfile.Default,AiProfile.Initial,registry,army,null});
+
+            Assert.IsNotNull(guard);
+            Assert.True(AiArmyPlanner.IsGuardDeployment(guard));
+            CollectionAssert.AreEquivalent(new[]{1,2,3},guard.EntityIds);
         }
         [Test] public void SafeReinforcement_InterceptedJoinUsesSafeHomeInsteadOfEnemyOrUnsafeLeader()
         {
@@ -75,6 +101,31 @@ namespace Spacewars.Tests.EditMode
             var action=AiReinforcementPolicy.Gather(o,army,p,99,Array.Empty<PlayableAiTraceRecord>(),regroupTick:80);
             Assert.NotNull(action);Assert.AreEqual(PlayableCommandKind.Move,action.Kind);CollectionAssert.AreEqual(new[]{5},action.EntityIds);
         }
+        [Test]
+        public void SafeReinforcement_MissingHomeProofDoesNotStopAnInstalledRegroupLeg()
+        {
+            var basis = SafeWave("lost");
+            var unit = basis.Entities.Single();
+            var destination = new NavPoint(-25, 12);
+            var order = new PlayableTacticalOrderSnapshot(4, unit.Owner, 71, 7, 90, PlayableTacticalOrderKind.Move, destination, 0);
+            var stamp = new PlayableOrderStamp(4, unit.Owner, 71, 1, 7, 90, PlayableOrderOrigin.Ai,
+                PlayableCommandKind.Move, PlayableAiOpeningComposition.SourceIdentity, 44, 44);
+            var moving = new PlayableEntitySnapshot(4, unit.Owner, unit.Kind, unit.Position, unit.Health, true, 0, 0, 0,
+                order, navigationOutcome: NavigationOutcome.Moving, orderStamp: stamp);
+            var view = PlayableAiObservation.From(new PlayableSnapshot(basis.ProfileId, basis.ProfileRevision, 71,
+                basis.Seed, basis.Tick, basis.Tick, RuntimeStatus.Running, false, PlayableMatchOutcome.Playing, 1000,
+                null, new[] { moving }, basis.Buildings.ToArray(), Array.Empty<PlayableProjectileSnapshot>(),
+                new PlayableRuntimeMetrics(0, 0, 0, 0, 0), null, vision: basis.Vision, activeProfile: PlayableProfile.Default));
+            var army = new AiArmyState { Id = 1, OwnerId = view.OwnerId, TacticalOwner = AiArmyPlanner.Policy,
+                Members = new[] { 4 }, Reinforcements = new[] { 4 }, MinimumViableForce = 3,
+                Phase = AiArmyPhase.Regrouping, CreatedTick = 10 };
+            var receipt = new PlayableAiTraceRecord(SafeWave(tick:90).Identity, 44, 90, 7, 90,
+                PlayableAiDeliveryStatus.Applied, PlayableCommandStatus.Applied, "owned home leg", view.OwnerId,
+                PlayableAiOpeningComposition.SourceIdentity, new AiReceiptIdentity(71, view.OwnerId, 1, 1),
+                AiArmyPlanner.Policy, PlayableCommandKind.Move);
+            Assert.IsNull(AiReinforcementPolicy.Gather(view, army, PlayableProfile.Default, 99, new[] { receipt }, regroupTick:80));
+        }
+
         [Test] public void SafeReinforcement_JoinedClientEscapePrecedesTrappedCoreLastResortAttack()
         {
             var p=PlayableProfile.Default;var o=SafeWave("intercepted");
@@ -126,23 +177,73 @@ namespace Spacewars.Tests.EditMode
             var action=AiReinforcementPolicy.Gather(o,army,p,99,new[]{receipt},regroupTick:100);
             if(human)Assert.Null(action);else{Assert.NotNull(action);Assert.AreEqual(PlayableCommandKind.Stop,action.Kind);CollectionAssert.AreEqual(new[]{4},action.EntityIds);}
         }
-        [TestCase(false)][TestCase(true)] public void SafeReinforcement_SafeRebuildReleasesOnlyAPhysicallyAssembledSufficientGroup(bool sufficient)
+        [TestCase("moving")][TestCase("arrived")]
+        public void SafeReinforcement_CompactAirRebuildSurvivesReceiptEvictionAndExactRestore(string mode)
+        {
+            var p=PlayableProfile.Default;var ai=AiProfile.Initial;var registry=Registry();var planner=A4Mission(registry);var id=planner.Capture().ArmyId;
+            var basis=SafeWave();var home=basis.Buildings.Single();var ids=Enumerable.Range(4,6).ToArray();
+            PlayableAiObservation View(bool near,bool human=false)
+            {
+                long tick=near?300:120;var radius=PlayableUnitRules.Radius(p,PlayableEntityKind.Hawk);
+                var units=ids.Select((unit,index)=>{
+                    var point=new NavPoint(home.Position.X+(near?index%3*radius*2:20+index*3),home.Position.Z+(near?index/3*radius*2:20));
+                    var order=mode=="moving"?new PlayableTacticalOrderSnapshot(unit,basis.Owner,71,unit*10,110,PlayableTacticalOrderKind.Move,home.Position,0):null;
+                    var stamp=new PlayableOrderStamp(unit,basis.Owner,71,1,unit*10,110,human?PlayableOrderOrigin.Human:PlayableOrderOrigin.Ai,PlayableCommandKind.Move,PlayableAiOpeningComposition.SourceIdentity,100+unit,100+unit);
+                    return new PlayableEntitySnapshot(unit,basis.Owner,PlayableEntityKind.Hawk,point,(int)p.HawkHealth,mode=="moving",0,0,0,order,navigationOutcome:mode=="moving"?NavigationOutcome.Moving:NavigationOutcome.Arrived,orderStamp:stamp);
+                }).ToArray();
+                var proofs=units.Select(u=>new PlayableRouteProof(u.Id,u.Owner,71,tick,1,u.Position,radius,PlayableRouteTargetKind.FriendlyAnchor,home.Id,home.Position,home.Position,new[]{u.Position,home.Position})).ToArray();
+                return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,basis.Seed,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,basis.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:basis.Vision,routeProofs:proofs,activeProfile:p));
+            }
+            var away=View(false);Assert.True(registry.TryReinforce(away,id,AiArmyPlanner.Policy,ids));registry.Observe(away);
+            var receipts=ids.Select(unit=>new PlayableAiTraceRecord(SafeWave(tick:110).Identity,100+unit,110,unit*10,110,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"owned safe home move",away.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,away.OwnerId,1,unit),AiArmyPlanner.Policy,PlayableCommandKind.Move)).ToArray();
+            planner.Observe(away,registry,ai,receipts,replanQuietGuards:false);Assert.True(planner.Active,"Distant bodies are not assembled");
+            byte[] Bytes(AiArmyPlanner value){using(var stream=new MemoryStream()){using(var writer=new BinaryWriter(stream,System.Text.Encoding.UTF8,true))value.WriteState(writer);return stream.ToArray();}}
+            var saved=Bytes(planner);var restored=new AiArmyPlanner(away.OwnerId,71);restored.Rebind(p);using(var reader=new BinaryReader(new MemoryStream(saved)))restored.ReadState(reader,away.Tick,registry);
+            CollectionAssert.AreEqual(saved,Bytes(restored));
+            var near=View(true);var army=registry.CaptureArmy(id).Single();
+            Assert.False(AiReinforcementPolicy.AssembledAtHome(near,army,near.Entities.First(),p,ai,Array.Empty<PlayableAiTraceRecord>()),"No fabricated authority without receipt or saved proof");
+            Assert.False(AiReinforcementPolicy.AssembledAtHome(View(true,true),army,View(true,true).Entities.First(),p,ai,receipts),"Human commands remain protected");
+            restored.Observe(near,registry,ai,Array.Empty<PlayableAiTraceRecord>(),replanQuietGuards:false);
+            Assert.False(restored.Active,"A safe compact six-aircraft group can launch again despite occupied point and evicted trace");
+            Assert.True(ids.All(unit=>registry.ArmyFor(unit)==0));registry.AssertInvariants();
+        }
+        [TestCase(false,false)][TestCase(true,false)][TestCase(true,true)]
+        public void SafeReinforcement_SafeRebuildReleasesOnlyAPhysicallyAssembledSufficientGroup(bool sufficient,bool laggard)
         {
             var p=PlayableProfile.Default;var registry=Registry();var planner=A4Mission(registry);long id=planner.Capture().ArmyId;var before=SafeWave();
-            var ids=sufficient?new[]{4,5,6}:new[]{4,5};var home=before.Buildings.Single();
+            var ids=laggard?new[]{4,5,6,7}:sufficient?new[]{4,5,6}:new[]{4,5};var home=before.Buildings.Single();
             PlayableAiObservation View(bool arrived)
             {
-                var spots=new[]{new NavPoint(-18,12),new NavPoint(-20,18),new NavPoint(-28,19)};
+                var spots=new[]{new NavPoint(-18,12),new NavPoint(-20,18),new NavPoint(-28,19),new NavPoint(-22,16)};
                 var units=ids.Select((unit,index)=>new PlayableEntitySnapshot(unit,before.Owner,PlayableEntityKind.Tank,arrived?spots[index]:new NavPoint(-16,index*2),100,false,0,0,0,
-                    navigationOutcome:arrived?NavigationOutcome.Arrived:NavigationOutcome.Idle,orderStamp:arrived?new PlayableOrderStamp(unit,before.Owner,71,1,unit*10,110,PlayableOrderOrigin.Ai,PlayableCommandKind.Move,PlayableAiOpeningComposition.SourceIdentity,100+unit,100+unit):null)).ToArray();
+                    navigationOutcome:arrived&&unit!=7?NavigationOutcome.Arrived:NavigationOutcome.Idle,orderStamp:arrived&&unit!=7?new PlayableOrderStamp(unit,before.Owner,71,1,unit*10,110,PlayableOrderOrigin.Ai,PlayableCommandKind.Move,PlayableAiOpeningComposition.SourceIdentity,100+unit,100+unit):null)).ToArray();
                 var routes=units.Select(u=>new PlayableRouteProof(u.Id,u.Owner,71,arrived?120:100,1,u.Position,PlayableUnitRules.Radius(p,u.Kind),PlayableRouteTargetKind.FriendlyAnchor,home.Id,home.Position,arrived?u.Position:spots[Array.IndexOf(ids,u.Id)],new[]{arrived?u.Position:spots[Array.IndexOf(ids,u.Id)]})).ToArray();
                 return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,before.Seed,arrived?120:100,arrived?120:100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,new[]{home},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:before.Vision,routeProofs:routes,activeProfile:p));
             }
             var waiting=View(false);Assert.True(registry.TryReinforce(waiting,id,AiArmyPlanner.Policy,ids));registry.Observe(waiting);planner.Observe(waiting,registry,AiProfile.Initial,replanQuietGuards:false);Assert.AreEqual(AiArmyPhase.Regrouping,planner.Capture().Phase);
-            var arrived=View(true);var receipts=ids.Select(unit=>new PlayableAiTraceRecord(SafeWave(tick:110).Identity,100+unit,110,unit*10,110,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"actual owned home arrival",arrived.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,arrived.OwnerId,1,unit),AiArmyPlanner.Policy,PlayableCommandKind.Move)).ToArray();
+            var arrived=View(true);var receipts=ids.Where(unit=>unit!=7).Select(unit=>new PlayableAiTraceRecord(SafeWave(tick:110).Identity,100+unit,110,unit*10,110,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"actual owned home arrival",arrived.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,arrived.OwnerId,1,unit),AiArmyPlanner.Policy,PlayableCommandKind.Move)).ToArray();
             planner.Observe(arrived,registry,AiProfile.Initial,receipts,replanQuietGuards:false);Assert.AreEqual(!sufficient,planner.Active);
-            if(sufficient){Assert.True(ids.All(unit=>registry.ArmyFor(unit)==0));Assert.True(registry.TryCreate(arrived,AiArmyRole.Attack,AiArmyPlanner.Policy,ids,out long replacement));Assert.Greater(replacement,id);}
+            if(sufficient){Assert.True(ids.All(unit=>registry.ArmyFor(unit)==0));Assert.True(registry.TryCreate(arrived,AiArmyRole.Attack,AiArmyPlanner.Policy,ids.Where(unit=>unit!=7),out long replacement));Assert.Greater(replacement,id);}
             else{Assert.AreEqual(AiArmyPhase.Regrouping,planner.Capture().Phase);Assert.Null(planner.ProposeWithRecords(arrived,A4Opening(),p,AiProfile.Initial,registry,receipts));}
+        }
+        [Test]
+        public void SafeReinforcement_StalledRegroupReleasesAnIdleRemnantAndRejectsOldJoin()
+        {
+            var p=PlayableProfile.Default;var ai=AiProfile.Initial;var registry=Registry();var planner=A4Mission(registry);
+            var wave=SafeWave();long id=planner.Capture().ArmyId;
+            Assert.True(registry.TryReinforce(wave,id,AiArmyPlanner.Policy,new[]{4}));
+            var lost=SafeWave("lost");registry.Observe(lost);planner.Observe(lost,registry,ai,replanQuietGuards:false);
+            Assert.AreEqual(AiReinforcementPolicy.RegroupReason,planner.Capture().Reason);
+            var stale=new PlayableAiAction(1,lost.OwnerId,lost.ProfileId,lost.ProfileRevision,lost.Generation,lost.SnapshotSequence,
+                PlayableCommandKind.Move,new[]{4},default,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            Assert.False(planner.CanDeliverReinforcement(lost,p,ai,registry,stale));
+            var tick=lost.Tick+AiProfile.SecondsToTicks(ai.Value("armies.stallSeconds"),30);
+            planner.Observe(SafeWave("lost",tick-1),registry,ai,replanQuietGuards:false);
+            Assert.True(planner.Active);
+            planner.Observe(SafeWave("lost",tick),registry,ai,replanQuietGuards:false);
+            Assert.AreEqual("safe regroup no meaningful progress deadline",planner.Capture().Reason);
+            Assert.False(planner.Active);
+            Assert.Zero(registry.ArmyFor(4));
         }
     }
 }

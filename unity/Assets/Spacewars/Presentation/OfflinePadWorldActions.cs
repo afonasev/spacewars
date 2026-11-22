@@ -11,6 +11,8 @@ namespace Spacewars.Presentation
     {
         public OfflinePadSector Sector;public string Label,Detail;public OfflinePadActionCommand Command,HoldCommand;
         public RadialActionPresentation Presentation;
+        public UnityEngine.Color? PlayerColor;
+        public string PlayerIncome;
         public string[] BlockedReasons=Array.Empty<string>();
         public NavPoint? Point;public bool Repeat;public double? Progress;public double? Price;
         public OfflinePadAction(string id,string label,bool enabled,string detail="",string hold=null){Sector=new OfflinePadSector(id,enabled,hold);Label=label;Detail=detail;}
@@ -31,17 +33,19 @@ namespace Spacewars.Presentation
         // Disabled choices remain focused for their reason, while gestures still reject them.
         public static int? RingSector(OfflinePadAction[] actions,double x,double y,double deadzone)
         {
-            if(actions.Length==1&&actions[0].Sector.Id.StartsWith("build:",StringComparison.Ordinal))return 0;
+            if(actions.Length==1&&(actions[0].Sector.Id.StartsWith("build:",StringComparison.Ordinal)||actions[0].Command?.Kind==PlayableCommandKind.TransferRelay))return 0;
             return OfflinePadGestures.RingSector(x,y,actions.Length,deadzone);
         }
         // Presentation order only; authority, prerequisites and research identifiers stay unchanged.
         public static int ResearchMenuOrder(PlayableResearchKind kind)=>kind switch {
-            PlayableResearchKind.TankChassis=>0,PlayableResearchKind.ExplorerAssaultGuns=>1,
+            PlayableResearchKind.TankChassis=>0,PlayableResearchKind.ExplorerAssaultGuns=>1,PlayableResearchKind.ExplorerRocketLauncher=>1,
             PlayableResearchKind.ShkvalGuidance=>2,PlayableResearchKind.HawkSalvoSystems=>3,
             _=>PlayableResearchRules.Weapon(kind)?4:PlayableResearchRules.Defense(kind)?5:PlayableResearchRules.Concrete(kind)?6:7
         };
+        public static bool CerberusAvailable(PlayableSnapshot view)=>view.Buildings.Any(b=>b.Owner==view.Owner&&b.ScientificCenterUpgraded&&b.Phase==ConstructionPhase.Ready&&b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true);
         public static bool ShkvalAvailable(PlayableSnapshot view)=>view.Buildings.Any(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Phase==ConstructionPhase.Ready&&b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true);
-        public static string Name(PlayableEntityKind kind)=>kind==PlayableEntityKind.Hawk?"Ястреб":kind==PlayableEntityKind.Explorer?"Исследователь":kind==PlayableEntityKind.Shkval?"Шквал":"Танк";
+        internal const string VeprName="Вепрь";
+        public static string Name(PlayableEntityKind kind)=>kind==PlayableEntityKind.Igla?"Игла":kind==PlayableEntityKind.Cerberus?"Цербер":kind==PlayableEntityKind.Skat?"Скат":kind==PlayableEntityKind.Hawk?"Ястреб":kind==PlayableEntityKind.Explorer?"Исследователь":kind==PlayableEntityKind.Shkval?"Шквал":VeprName;
         public static string Name(PlayableBuildingKind kind)=>kind==PlayableBuildingKind.GaussTower?"Гаусс-башня":kind==PlayableBuildingKind.RepairTower?"Ремонтная вышка":kind==PlayableBuildingKind.SentryTurret?"Пулемётная турель":kind==PlayableBuildingKind.Hangar?"Ангар":kind==PlayableBuildingKind.Headquarters?"Штаб":kind==PlayableBuildingKind.Outpost?"Форпост":kind==PlayableBuildingKind.RelayTower?"Вышка связи":kind==PlayableBuildingKind.Mine?"Шахта":kind==PlayableBuildingKind.Factory?"Фабрика":kind==PlayableBuildingKind.Refinery?"Завод переработки":"Научный центр";
         private static OfflinePadActionCommand Command(PlayableCommandKind kind,int building,PlayableEntityKind unit=PlayableEntityKind.Tank,PlayableResearchKind research=PlayableResearchKind.TankChassis)=>new OfflinePadActionCommand{Kind=kind,Entities=new[]{building},Unit=unit,Research=research};
         public static OfflinePadAction[] Building(PlayableSnapshot view,PlayableProfile profile,int id,bool includeRally=true,bool freeEconomy=false)
@@ -53,9 +57,9 @@ namespace Spacewars.Presentation
             if(lifecycle?.Selling!=true){
                 if(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar){
                     int MenuOrder(PlayableEntityKind unit)=>unit==PlayableEntityKind.Explorer?profile.ExplorerProductionMenuOrder:unit==PlayableEntityKind.Shkval?profile.ShkvalProductionMenuOrder:profile.TankProductionMenuOrder;
-                    foreach(var unit in (b.Kind==PlayableBuildingKind.Hangar?new[]{PlayableEntityKind.Hawk}:new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval}).OrderBy(MenuOrder)){
-                        double cost=PlayableUnitRules.Cost(profile,unit);bool prerequisite=unit!=PlayableEntityKind.Shkval||ShkvalAvailable(view);bool manual=prerequisite&&(freeEconomy||view.ExactCredits>=cost)&&state.Orders.Count<6;
-                        var action=new OfflinePadAction(id+":"+(unit==PlayableEntityKind.Hawk?"hawk":unit==PlayableEntityKind.Explorer?"explorer":unit==PlayableEntityKind.Shkval?"shkval":"tank"),"Произвести: "+Name(unit),prerequisite||(state.Repeat&&state.RepeatKind==unit),PlayableMenuDescriptions.Unit(profile,unit,view.OwnerResearch,freeEconomy:freeEconomy)+(manual?"":(!prerequisite?" · Нужен готовый собственный Научный центр":!freeEconomy&&view.ExactCredits<cost?" · Недостаточно кредитов для разовой покупки":" · Очередь заполнена")),"repeat");
+                    foreach(var unit in (b.Kind==PlayableBuildingKind.Hangar?new[]{PlayableEntityKind.Hawk,PlayableEntityKind.Skat}:new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval,PlayableEntityKind.Igla,PlayableEntityKind.Cerberus}).OrderBy(RadialActionPresentation.UnitDisplaysLast).ThenBy(MenuOrder)){
+                        double cost=PlayableUnitRules.Cost(profile,unit);bool prerequisite=unit==PlayableEntityKind.Cerberus?CerberusAvailable(view):(unit!=PlayableEntityKind.Igla&&unit!=PlayableEntityKind.Shkval&&unit!=PlayableEntityKind.Skat)||ShkvalAvailable(view);bool manual=prerequisite&&(freeEconomy||view.ExactCredits>=cost)&&state.Orders.Count<6;
+                        var action=new OfflinePadAction(id+":"+(unit==PlayableEntityKind.Igla?"igla":unit==PlayableEntityKind.Cerberus?"cerberus":unit==PlayableEntityKind.Skat?"skat":unit==PlayableEntityKind.Hawk?"hawk":unit==PlayableEntityKind.Explorer?"explorer":unit==PlayableEntityKind.Shkval?"shkval":"tank"),"Произвести: "+Name(unit),prerequisite||(state.Repeat&&state.RepeatKind==unit),PlayableMenuDescriptions.Unit(profile,unit,view.OwnerResearch,freeEconomy:freeEconomy)+(manual?"":(!prerequisite?(unit==PlayableEntityKind.Cerberus?" · Нужен готовый улучшенный Научный центр":" · Нужен готовый собственный Научный центр"):!freeEconomy&&view.ExactCredits<cost?" · Недостаточно кредитов для разовой покупки":" · Очередь заполнена")),"repeat");
                         action.Price=freeEconomy?null:(double?)cost;action.Command=manual?Command(PlayableUnitRules.ProductionCommand(unit),id,unit):null;
                         action.HoldCommand=prerequisite||(state.Repeat&&state.RepeatKind==unit)?Command(PlayableCommandKind.ToggleRepeatProduction,id,unit):null;action.Repeat=state.Repeat&&state.RepeatKind==unit;if(action.Repeat)action.Label+=" ∞";
                         var active=state.Orders.FirstOrDefault(o=>!o.IsUpgrade&&o.Kind==unit&&o.Active);if(active!=null)action.Progress=active.Progress;
@@ -77,9 +81,10 @@ namespace Spacewars.Presentation
                         if(view.OwnerResearch.Any(o=>o.Kind==kind&&(!PlayableResearchRules.Local(kind)||o.CenterId==id))||!PlayableResearchRules.Prerequisite(kind,view.OwnerResearch))continue;
                         var availability=view.ResearchAvailability.FirstOrDefault(a=>a.Kind==kind);if(availability==null)continue;
                         string centerReason=PlayableResearchRules.CenterRequirement(kind,b.ScientificCenterUpgraded);
+                        if(kind==PlayableResearchKind.ExplorerRocketLauncher&&centerReason!=null)continue;
                         bool enabled=availability.Available&&centerReason==null&&(freeEconomy||view.ExactCredits>=availability.Cost);
-                        string suffix=kind==PlayableResearchKind.TankChassis?"tank-chassis":kind==PlayableResearchKind.ExplorerAssaultGuns?"explorer-assault-guns":kind==PlayableResearchKind.ShkvalGuidance?"shkval-guidance":kind.ToString(),label=kind==PlayableResearchKind.TankChassis?"Улучшить танковое шасси":kind==PlayableResearchKind.ExplorerAssaultGuns?"Улучшить штурмовые орудия":kind==PlayableResearchKind.ShkvalGuidance?"Исследовать системы наведения":PlayableResearchRules.Name(kind);
-                        actions.Add(new OfflinePadAction(id+":"+suffix,label,enabled,label+(freeEconomy?" · бесплатно":" · "+availability.Cost+" кредитов")+" · "+(freeEconomy?profile.ProvingGroundActionSeconds:PlayableResearchRules.Duration(profile,kind))+" с · "+PlayableResearchRules.Description(profile,kind)+" · "+(enabled?"Готово к запуску":centerReason??availability.BlockedReason??(freeEconomy?"Исследование недоступно":"Недостаточно кредитов"))){Price=freeEconomy?null:(double?)availability.Cost,Command=enabled?Command(PlayableCommandKind.QueueResearch,id,research:kind):null});
+                        string suffix=kind==PlayableResearchKind.TankChassis?"tank-chassis":kind==PlayableResearchKind.ExplorerAssaultGuns?"explorer-assault-guns":kind==PlayableResearchKind.ShkvalGuidance?"shkval-guidance":kind.ToString(),label=PlayableResearchRules.Name(kind);
+                        actions.Add(new OfflinePadAction(id+":"+suffix,label,enabled,label+(freeEconomy?" · бесплатно":" · "+availability.Cost+" кредитов")+" · "+(freeEconomy?profile.ProvingGroundActionSeconds:PlayableResearchRules.Duration(profile,kind))+" с · "+PlayableMenuDescriptions.ResearchDetail(profile,kind,view.OwnerResearch)+"\n"+(enabled?"Готово к запуску":centerReason??availability.BlockedReason??(freeEconomy?"Исследование недоступно":"Недостаточно кредитов"))){Price=freeEconomy?null:(double?)availability.Cost,Command=enabled?Command(PlayableCommandKind.QueueResearch,id,research:kind):null});
                     }
                 }
                 if(b.Kind==PlayableBuildingKind.Refinery&&state.Upgrade?.Active!=true&&state.Upgrade?.Complete!=true&&!b.RefineryUpgraded){
@@ -95,6 +100,34 @@ namespace Spacewars.Presentation
             if(includeRally&&lifecycle?.Selling!=true&&PlayableMenuDescriptions.RallyProducer(b.Kind))actions.Add(new OfflinePadAction("rally","Точка сбора",true,"A — флажок · Tab/Select — карта · A — поставить и вернуться · B — отменить"));
             return RadialActionPresentation.Decorate(actions.ToArray(),view,profile,b,freeEconomy);
         }
+        public static OfflinePadAction[] RelayTransfer(PlayableSnapshot view,int siteId,
+            Func<int,string> name,Func<PlayableOwner,UnityEngine.Color> paint)
+        {
+            var site=view.Sites.FirstOrDefault(s=>s.Site.Id==siteId);
+            if(site==null||site.Site.Kind!=PlayableBuildingKind.RelayTower||site.Owner!=view.Owner||
+                site.Progress<1||site.Contested||view.RelayTransferRecipients==0)
+                return Array.Empty<OfflinePadAction>();
+
+            var actions=new List<OfflinePadAction>();
+            for(int index=0;index<view.Participants.Count;index++)
+            {
+                if((view.RelayTransferRecipients&(1<<index))==0)continue;
+                var recipient=(PlayableOwner)index;
+                var title=name(index);
+                var income=view.RelayRecipientIncome.TryGetValue(recipient,out var rate)?rate.ToString("0.#")+"/с":null;
+                const string detail="Союзник получит контроль над вышкой и весь её дальнейший доход.";
+                actions.Add(new OfflinePadAction("relay-transfer:"+index,title,true,detail)
+                {
+                    PlayerColor=paint(recipient),
+                    PlayerIncome=income,
+                    Presentation=new RadialActionPresentation{Title=title,Description=detail,
+                        Stats=income==null?Array.Empty<string>():new[]{"Текущий доход: "+income}},
+                    Command=new OfflinePadActionCommand{Kind=PlayableCommandKind.TransferRelay,Site=siteId,Target=index}
+                });
+            }
+            return actions.ToArray();
+        }
+
         public static OfflinePadAction[] Build(PlayableSnapshot view,PlayableProfile profile,int siteId,int slotId,bool freeEconomy=false)
         {
             var site=view.Sites.FirstOrDefault(s=>s.Site.Id==siteId);if(site==null||site.Site.Kind==PlayableBuildingKind.RelayTower)return Array.Empty<OfflinePadAction>();

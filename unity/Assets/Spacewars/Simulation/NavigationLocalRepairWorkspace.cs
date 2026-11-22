@@ -30,11 +30,18 @@ namespace Spacewars.Simulation
             Radius=radius;Side=checked(2*radius+1);int slots=Slots(radius);
             Nodes=new Node[slots];Open=new int[slots];Reversed=new NavPoint[slots];Smoothed=new NavPoint[slots];Retain();
         }
+        internal static int RadiusFor(NavigationProfile profile)
+            =>checked((int)Math.Ceiling(profile.LocalDetourDistance/profile.LocalGridCell));
+        internal static long StorageBytesFor(NavigationProfile profile)
+            =>NavStorageLayout.Charge(Layout(RadiusFor(profile)));
+
         internal static NavLocalRepairWorkspace Create(int radius,Func<long,bool> reserve,NavOwnedStorage names)
         {
             if(radius<0)throw new ArgumentOutOfRangeException(nameof(radius));
             if(names!=null){if(reserve!=null)NavStorageAdmission.RequireLedger(reserve.Target,names);names.Retain();}
-            try{using(var allocation=new NavStorageAllocation(reserve)){
+            // StepCore owns the one reusable lattice only through computation.
+            // Drop its birth pin here so releasing that owner frees the credit.
+            try{using(var allocation=new NavStorageAllocation(reserve,localBirths:true)){
                 allocation.Reserve(Layout(radius));var root=allocation.Register(new NavLocalRepairWorkspace(radius));
                 root.surfaceNames=names;names=null;return root;
             }}finally{names?.Release();}

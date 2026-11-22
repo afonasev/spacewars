@@ -115,6 +115,37 @@ namespace Spacewars.Tests.EditMode
                 }
             });
         }
+        [Test] public void RepeatedContactStampsOnlyObservedMembersAndPreservesPinnedVersion()
+        {
+            Contact30Source(true,(config,views,profile)=>{
+                using(var source=new ContactCostSource(config,views,profile)){
+                    var owner=source.Queries[0].Owner;
+                    long group=owner.ImmutableVersion.Data.GroupId;
+                    Assert.True(source.Nav.TryOwnedGroupContacts(group,id=>false,1));
+                    var pinned=owner.ImmutableVersion;
+                    pinned.Retain();
+                    try{
+                        int missing=((NavigationAuthorityMember)pinned.Members[0]).Data.Entity;
+                        int switched=((NavigationAuthorityMember)pinned.Members[1]).Data.Entity;
+                        Assert.True(source.Nav.TryOwnedGroupContacts(group,
+                            id=>id==missing?(bool?)null:id==switched,2));
+                        var live=source.Nav.GroupFor(missing);
+                        for(int i=0;i<live.Members.Length;i++){
+                            var before=(NavigationAuthorityMember)pinned.Members[i];
+                            var current=(NavigationAuthorityMember)owner.ImmutableVersion.Members[i];
+                            var member=live.Members[i];
+                            Assert.AreEqual(1,before.Data.ContactTick);
+                            Assert.False(before.Data.FormationReleased);
+                            Assert.AreEqual(member.Entity==missing?1:2,member.ContactTick);
+                            Assert.AreEqual(member.Entity==switched,member.FormationReleased);
+                            Assert.AreEqual(member.ContactTick,current.Data.ContactTick);
+                            Assert.AreEqual(member.FormationReleased,current.Data.FormationReleased);
+                            Assert.AreEqual("PostMovementVisibility",current.ContactPhase);
+                        }
+                    }finally{pinned.Release();}
+                }
+            });
+        }
         [Test] public void Q9WholeContactsFixed400Control()
         {
             Assert.True(PerformanceProfile.Enabled);ContactPhaseQa.Reset();

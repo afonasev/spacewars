@@ -29,7 +29,7 @@ namespace Spacewars.Tests.EditMode
         private static AiArmyRegistry Registry()=>new AiArmyRegistry("player-1",71,AiProfile.Initial,AiDifficulty.Fighter);
         private static PlayableAiAction Plan(AiArmyPlanner p,AiArmyRegistry r,PlayableAiObservation o)=>p.Propose(o,Opening(),P,AiProfile.Initial,r);
         private static PlayableAiTraceRecord Receipt(PlayableAiAction a,PlayableAiDeliveryStatus status,long tick)=>new PlayableAiTraceRecord("fixture",a.ActionId,tick,1,tick,status,PlayableCommandStatus.Applied,"fixture",ownerId:a.PlayerId,sourceIdentity:a.SourceIdentity,receiptIdentity:new AiReceiptIdentity(71,a.PlayerId,1,1),policy:AiArmyPlanner.Policy,kind:a.Kind);
-        private static PlayableAiObservation ObjectiveObservation(long tick,int pendingSite=0,PlayableCommandKind pendingKind=PlayableCommandKind.AttackMove,NavPoint? pendingTarget=null,bool pendingViable=false,long pendingAction=0,PlayableTacticalOrderKind? effectiveOrder=null)
+        private static PlayableAiObservation ObjectiveObservation(long tick,int pendingSite=0,PlayableCommandKind pendingKind=PlayableCommandKind.AttackMove,NavPoint? pendingTarget=null,bool pendingViable=false,long pendingAction=0,PlayableTacticalOrderKind? effectiveOrder=null,bool overlappingOutpost=false)
         {
             var point=new NavPoint(8,0);var seed=Opening().MatchSeed;
             var units=Enumerable.Range(1,3).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(0,id*.1),100,false,0,0,0,
@@ -37,9 +37,23 @@ namespace Spacewars.Tests.EditMode
                 queue:pendingSite==0?null:new PlayableUnitQueueSnapshot(null,new PlayableQueuedOrderSnapshot(100,10,1,1,pendingKind,new NavLocation(pendingTarget??point,NavLocation.FlatSurface),0,pendingSite,pendingAction),Array.Empty<PlayableQueuedOrderSnapshot>(),null,pendingViable))).ToArray();
             var buildings=new[]{new PlayableBuildingSnapshot(50,PlayableOwner.Player,PlayableBuildingKind.Factory,new NavPoint(-10,0),100,1,0,0,default),new PlayableBuildingSnapshot(51,PlayableOwner.Player,PlayableBuildingKind.Refinery,new NavPoint(-15,0),100,1,0,0,default)};
             var objective=new PlayablePublicScoutObjective(77,point,PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true);
+            var objectives=overlappingOutpost
+                ? new[]{objective,new PlayablePublicScoutObjective(77,new NavPoint(9,0),PlayablePublicScoutObjectiveRole.ExpansionOutpost,true)}
+                : new[]{objective};
             var routes=units.Select(u=>new PlayableRouteProof(u.Id,u.Owner,71,tick,1,u.Position,P.TankCollisionRadius,PlayableRouteTargetKind.PublicObjective,77,point,point,new[]{point})).ToArray();
             return PlayableAiObservation.From(new PlayableSnapshot(P.ProfileId,P.Revision,71,seed,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
-                publicScoutObjectives:new[]{objective},routeProofs:routes));
+                publicScoutObjectives:objectives,routeProofs:routes));
+        }
+        [Test] public void VictoryBidAcceptsOneSiteWithBothStartAndOutpostRoles()
+        {
+            var observation=ObjectiveObservation(10,overlappingOutpost:true);
+            var knowledge=new AiKnowledgeState(observation.OwnerId,observation.Generation,observation.Tick,
+                Array.Empty<AiKnownContact>(),Array.Empty<AiVisitedArea>());
+            var bids=AiVictoryBid.Assess(observation,P,AiProfile.Initial,knowledge,observation.Entities.ToArray(),
+                pursuing:1,fortifications:null);
+            var bid=bids.Single();
+            Assert.AreEqual(77,bid.Target);
+            Assert.AreEqual(PlayableRouteTargetKind.PublicObjective,bid.Kind);
         }
         [Test] public void SafePressure_RequiresCommitmentsViableForceAndActualPermittedRoutes()
         {

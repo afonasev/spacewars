@@ -77,8 +77,14 @@ namespace Spacewars.Simulation
         [DllImport(Library,CallingConvention=CallingConvention.Cdecl)] internal static extern ulong sw_recast_allocation_bytes();
         [DllImport(Library,CallingConvention=CallingConvention.Cdecl)] internal static extern int sw_recast_abi();
         [DllImport(Library,CallingConvention=CallingConvention.Cdecl)] internal static extern IntPtr sw_recast_build(float[] vertices,int vertexCount,int[] triangles,byte[] areas,int triangleCount,byte[] directed,float cs,float ch,float radius,float height,float climb,float slope,Cancelled cancelled);
+        [DllImport(Library,CallingConvention=CallingConvention.Cdecl)] internal static extern IntPtr sw_recast_build_reusing_tiles(float[] vertices,int vertexCount,int[] triangles,byte[] areas,int triangleCount,byte[] directed,float cs,float ch,float radius,float height,float climb,float slope,Cancelled cancelled,IntPtr previous);
+        [DllImport(Library,CallingConvention=CallingConvention.Cdecl)] internal static extern int sw_recast_reused_tiles(RecastMapHandle map);
         [DllImport(Library,CallingConvention=CallingConvention.Cdecl)] internal static extern void sw_recast_map_free(IntPtr map);
         [DllImport(Library,CallingConvention=CallingConvention.Cdecl)] internal static extern IntPtr sw_recast_query(RecastMapHandle map,float[] start,float[] goal,int startArea,int goalArea,int maxNodes);
+        [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
+        internal static extern int sw_recast_capture_query(RecastQueryHandle query, [Out] uint[] words, int capacity);
+        [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
+        internal static extern int sw_recast_restore_query(RecastQueryHandle query, [In] uint[] words, int length);
         [DllImport(Library,CallingConvention=CallingConvention.Cdecl)] internal static extern RecastQueryStatus sw_recast_step(RecastQueryHandle query,int iterations,out int consumed);
         [DllImport(Library,CallingConvention=CallingConvention.Cdecl)] internal static extern RecastQueryStatus sw_recast_copy(RecastQueryHandle query,float[] points,int capacity,out int count);
         [DllImport(Library,CallingConvention=CallingConvention.Cdecl)] internal static extern RecastQueryStatus sw_recast_copy_areas(RecastQueryHandle query,byte[] areas,int capacity,out int count);

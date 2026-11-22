@@ -172,11 +172,22 @@ namespace Spacewars.Runtime
                 }
             }finally{backing?.Release();observedAdmission?.Release();}
         }
+        internal int QualifiedEntryPreparations { get; private set; }
         private bool PrepareAnswerInstallDestination(NavigationPreparedAnswerNames names,int index,NavigationRetentionBudget.Scope scope)
         {
             var answer=names.Answers[index];var request=answer.Request;NavUnit actor;bool detached;
             using(EnterTransport()){if(!AnswerNamesSourceCurrent(names))return false;if(!Crowd.TryGet(request.Entity,out actor))return false;detached=answer.Corridor==null||answer.Corridor.Group==0||!memberGroups.TryGetValue(request.Entity,out var group)||group!=answer.Corridor.Group;}
-            if(names.Routes[index]==null)names.Routes[index]=NavPreparedUnitRoute.PrepareOwned(Crowd,actor,request.Goal,answer.ReadOnlyRouteBacking,request.GoalLocation,scope.OwnedReservation(),terrain is IRecastPhysicalTerrain?answer.StorageOwner?.CorridorOwner?.TypedRoute:null);
+            if (names.Routes[index] == null)
+            {
+                var owner = answer.StorageOwner;
+                bool qualifiedEntry = owner?.CanInstallFrom(Crowd, actor, terrain) == true;
+                if (!qualifiedEntry && owner?.HasBoundedEntryFor(terrain) == true) return false;
+                names.Routes[index] = NavPreparedUnitRoute.PrepareOwned(Crowd, actor, request.Goal,
+                    answer.ReadOnlyRouteBacking, request.GoalLocation, scope.OwnedReservation(),
+                    terrain is IRecastPhysicalTerrain ? owner?.CorridorOwner?.TypedRoute : null,
+                    owner?.ExecutionPoints, qualifiedEntry);
+                if (qualifiedEntry && names.Routes[index] != null) QualifiedEntryPreparations++;
+            }
             if(names.Routes[index]==null)return false;
             if(answer.StorageOwner?.CorridorOwner!=null&&names.Installed[index]==null)names.Installed[index]=NavigationInstalledExecutionOwner.CreateOwned(answer.StorageOwner,names.Routes[index].Route,detached,scope.OwnedReservation());return true;
         }

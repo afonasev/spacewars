@@ -20,7 +20,7 @@ namespace Spacewars.Input.Tests
             // its existing preparation Update route; enabling the component would run
             // production Start a second time over the fixture's UIDocument.
             IEnumerator ServicePreparation(){yield return null;while(app!=null&&Get<bool>(app,"preparing")){Call(app,"UpdateFrame");yield return null;}}
-            yield return StartOrdinary(2,configureRoster:d=>{app.StartCoroutine(ServicePreparation());if(!pad)d.Participants[0].DeviceId=0;},mapName:"Переправа (4)");var caster=Seats[0];var victim=Seats[1];
+            yield return StartOrdinary(2,configureRoster:d=>{app.StartCoroutine(ServicePreparation());if(!pad)d.Participants[0].DeviceId=0;},mapName:"Переправа (2)");var caster=Seats[0];var victim=Seats[1];
             Runtime.RequestPause(true);yield return Wait(()=>Runtime.Latest.Paused,"arrange system failure");
             var domain=typeof(PlayableRuntime).GetField("domain",F).GetValue(Runtime);var type=domain.GetType();var profile=Get<PlayableProfile>(caster,"profile");
             object Domain(string method,params object[] args)=>type.GetMethod(method,F).Invoke(domain,args);

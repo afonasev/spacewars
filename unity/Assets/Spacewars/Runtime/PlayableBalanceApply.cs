@@ -23,6 +23,7 @@ namespace Spacewars.Runtime
         internal string ValidateAuthorityBalance(PlayableProfile candidate,bool allowConfigured)
         {
             if(candidate==null)return "Ревизия отсутствует.";
+            if(candidate.UsesCompactOrbitalProgression!=profile.UsesCompactOrbitalProgression)return "Ступени эскалации задаются при создании матча.";
             var error=NativeBalanceFields.ValidateLiveDifference(profile,candidate);if(error!=null)return error;
             if(!navigation.CanRebind)return "Выполняется слишком много маршрутов. Продолжите матч и повторите применение.";
             if(Outcome!=PlayableMatchOutcome.Playing)return "Матч уже завершён.";
@@ -42,6 +43,7 @@ namespace Spacewars.Runtime
             // An AI-only revision can keep the exact immutable gameplay profile.
             // It has no navigation terms to replace or rallies to restart.
             if(ReferenceEquals(candidate,profile))return true;
+            if(candidate.UsesCompactOrbitalProgression!=profile.UsesCompactOrbitalProgression)return false;
             var prepared=navigation.TryRebindBalance(this,candidate);if(prepared.HasValue)return prepared.Value;
             ApplyBalanceTerms(candidate);
             SetRallyPaused(true);navigation.Rebind(profile.Navigation);navigation.ConfigureMarch(profile.GroupMarchMaximumStretch,profile.Revision);return true;
@@ -90,7 +92,7 @@ namespace Spacewars.Runtime
         {
             // Called only after navigation admission succeeds in the prepared lane.
             BindTransactionTerms();profile=candidate;termProfiles[profile.Revision]=profile;
-            foreach(var u in units.Values){u.Health=Math.Min(u.Health,UnitMaximumHealth(u.Owner,u.Kind));if(u.Air!=null){u.Air.Actor.Speed=profile.HawkSpeed;u.Air.Actor.TurnSpeed=profile.HawkYawSpeed;}else navigation.Crowd.SetMobility(u.Id,PlayableUnitRules.Speed(profile,u.Kind,u.Kind==PlayableEntityKind.Tank&&UnitUpgraded(u)),PlayableUnitRules.Turn(profile,u.Kind));}
+            foreach(var u in units.Values){u.Health=Math.Min(u.Health,UnitMaximumHealth(u.Owner,u.Kind));if(u.Air!=null){u.Air.Actor.Speed=PlayableUnitRules.Speed(profile,u.Kind);u.Air.Actor.TurnSpeed=PlayableUnitRules.Turn(profile,u.Kind);}else navigation.Crowd.SetMobility(u.Id,PlayableUnitRules.Speed(profile,u.Kind,u.Kind==PlayableEntityKind.Tank&&UnitUpgraded(u)),PlayableUnitRules.Turn(profile,u.Kind));}
             foreach(var b in buildings.Values)b.Health=Math.Min(b.Health,BuildingMaximumHealth(b.Owner,b.Kind));
             foreach(var owner in Owners)RecordArmy(owner);
         }

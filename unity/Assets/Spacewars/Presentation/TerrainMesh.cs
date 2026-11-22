@@ -18,7 +18,7 @@ namespace Spacewars.Presentation
             }
         }
         public static Mesh ErodedRock(NavObstacle shape,double bottom,double top,float erosion)=>ErodedRock(shape,bottom,top,erosion,out _);
-        public static Mesh ErodedRock(NavObstacle shape,double bottom,double top,float erosion,out RockCap cap,bool broadLedges=false,float wavelength=12)
+        public static Mesh ErodedRock(NavObstacle shape,double bottom,double top,float erosion,out RockCap cap,bool broadLedges=false,float wavelength=12,int subdivisions=4)
         {
             var vertices=new List<Vector3>();var indices=new List<int>();
             var polygon=shape.Footprint;
@@ -51,7 +51,7 @@ namespace Spacewars.Presentation
             {int i=vertices.Count;vertices.Add(a);vertices.Add(b);vertices.Add(c);indices.Add(i);indices.Add(i+1);indices.Add(i+2);}
             void Cap(Vector3 a,Vector3 b,Vector3 c,int depth)
             {
-                if(depth<4)
+                if(depth<subdivisions)
                 {
                     Vector3 Mid(Vector3 u,Vector3 v){var m=(u+v)*.5f;m.y=Roof(m.x,m.z);return m;}
                     var ab=Mid(a,b);var bc=Mid(b,c);var ca=Mid(c,a);
@@ -71,8 +71,9 @@ namespace Spacewars.Presentation
             {
                 var a=P(polygon.Vertices[i]);var b=P(polygon.Vertices[(i+1)%polygon.Vertices.Count]);
                 var ra=P(roofPolygon.Vertices[i]);var rb=P(roofPolygon.Vertices[(i+1)%polygon.Vertices.Count]);
-                int steps=16; // Matches four cap subdivisions, avoiding T-junction cracks.
+                int steps=1<<subdivisions; // Match the cap subdivisions along the top edge.
                 int layers=broadLedges?4:Mathf.Max(2,Mathf.CeilToInt((float)(top-bottom)/.65f));
+                if(subdivisions<4)layers=Mathf.Min(layers,steps);
                 var inward=new Vector3(-(b.z-a.z),0,b.x-a.x).normalized;
                 Vector3 Wall(float along,float level)
                 {

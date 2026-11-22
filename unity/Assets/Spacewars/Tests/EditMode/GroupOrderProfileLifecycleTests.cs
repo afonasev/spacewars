@@ -26,7 +26,7 @@ namespace Spacewars.Tests.EditMode
         private static object UnitField(object unit,string name)=>unit.GetType().GetField(name,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).GetValue(unit);
         [Test] public void OrdinaryDomainDeathDoesNotBarrierRemainingInstalledRouteOrChangeItsBaseSpeed()
         {
-            int dead=Spawn(-12,-12),survivor=Spawn(-14,-12);
+            int dead=Spawn(-12,-9),survivor=Spawn(-14,-12);
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.Move,new[]{dead,survivor},new NavPoint(-10,-12)));
             Deliver();Assert.NotNull(nav.InstalledExecutionFor(survivor));
             var actor=nav.Crowd.Units.Single(u=>u.Id==survivor);double baseSpeed=actor.Speed;
@@ -92,9 +92,10 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(0,resumed.Entities.Single(e=>e.Id==actor).TargetId);
             Assert.True(actorState.Moving);
         }
-        [Test] public void VisibleOutOfRangeAttackMoveKeepsRouteAndDoesNotInventFireEligibility()
+        [Test] public void VisibleBeyondAttackMoveSearchKeepsRouteAndDoesNotInventFireEligibility()
         {
-            int actor=Spawn(-18,-16),enemy=Spawn(-8,-12,PlayableOwner.Enemy);
+            int actor=Spawn(-18,-16),enemy=Spawn(-5,-10,PlayableOwner.Enemy);
+            Spawn(-11,-10,PlayableOwner.Player,PlayableEntityKind.Explorer);
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.AttackMove,new[]{actor},new NavPoint(-15,-16)));
             Deliver();var group=nav.GroupFor(actor);Assert.NotNull(nav.InstalledExecutionFor(actor));
             Call("Step",1d/30);Assert.False(nav.GroupFor(actor).Members.Single().FormationReleased,"Visible contact outside weapon range does not release formation pacing.");

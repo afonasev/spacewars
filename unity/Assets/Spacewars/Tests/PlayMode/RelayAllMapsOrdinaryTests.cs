@@ -19,8 +19,8 @@ namespace Spacewars.Tests.PlayMode
     {
         const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
         GameObject host;PlayableBootstrap app;PlayableRuntime runtime;
-        static readonly string[] Names={"Нулевой док","Базальтовый венец","Забытое нагорье","Белый меридиан","Огненный разлом","Нова-Сити","Рубиновая котловина","Полигон","Переправа"};
-        static readonly int[] Counts={2,1,4,2,2,3,4,4,2};
+        static readonly string[] Names={"Нулевой док","Базальтовый венец","Забытое нагорье","Белый меридиан","Огненный разлом","Нова-Сити","Рубиновая котловина","Полигон","Переправа","Море Молчания"};
+        static readonly int[] Counts={2,1,4,2,2,3,4,4,2,3};
         T Get<T>(string name)=>(T)typeof(PlayableBootstrap).GetField(name,F).GetValue(app);
         void Call(string name)=>typeof(PlayableBootstrap).GetMethod(name,F).Invoke(app,null);
         IEnumerator Wait(Func<bool> ready,double seconds,string label){double until=Time.realtimeSinceStartupAsDouble+seconds;while(!ready()&&Time.realtimeSinceStartupAsDouble<until)yield return null;Assert.True(ready(),label);}
@@ -34,12 +34,66 @@ namespace Spacewars.Tests.PlayMode
             finally{camera.targetTexture=old;RenderTexture.active=active;rt.Release();Object.Destroy(rt);Object.Destroy(png);}
         }
         static IEnumerable<int> Cases=>(Environment.GetEnvironmentVariable("RELAY_MAPS_CASES")??string.Join(",",Enumerable.Range(0,Names.Length))).Split(',').Select(int.Parse);
+        [UnityTest,Timeout(180000)]
+        public IEnumerator PreparedRelayGroundLoadsFromLobbyTwice([ValueSource(nameof(Cases))] int i)
+        {
+            string output=Environment.GetEnvironmentVariable("RELAY_PAVING_EVIDENCE");
+            string oldCache=PreparedMapCache.DirectoryOverride;
+            string cache=Path.Combine(Application.temporaryCachePath,"relay-paving-"+Guid.NewGuid().ToString("N"));
+            PreparedMapCache.DirectoryOverride=cache;
+            bool ownKb=Keyboard.current==null,ownMouse=Mouse.current==null;
+            var kb=ownKb?InputSystem.AddDevice<Keyboard>():Keyboard.current;
+            var mouse=ownMouse?InputSystem.AddDevice<Mouse>():Mouse.current;
+            try
+            {
+                host=new GameObject("Relay paving lobby");
+                app=host.AddComponent<PlayableBootstrap>();
+                yield return Wait(()=>Get<VisualElement>("lobbyScreen")!=null,120,"lobby startup");
+                Call("ShowLobby");
+                var choices=Get<VisualElement>("lobbyScreen").Q<DropdownField>("lobby-map-choice");
+                choices.value=choices.choices.Single(name=>name.Contains(Names[i]));
+                var draft=Get<NativeLobbyConfiguration>("lobbySetup");
+                draft.HasExplicitSeed=true;draft.ExplicitSeed=3112026;
+                foreach(var seat in draft.Participants)seat.Human=false;
+                for(int pass=0;pass<2;pass++)
+                {
+                    double start=Time.realtimeSinceStartupAsDouble;
+                    Call("LaunchLobbyMatch");
+                    yield return Wait(()=>!Get<bool>("inLobby")&&!Get<bool>("preparing"),120,Names[i]+" ready");
+                    yield return null;
+                    var elapsed=Time.realtimeSinceStartupAsDouble-start;
+                    runtime=Get<PlayableRuntime>("runtime");
+                    var world=Get<PlayableWorld>("world");
+                    var minimap=Get<PlayableMapTerrain>("mapTerrain");
+                    var active=Get<PlayableProfile>("profile");
+                    Assert.That(world.GraphicsRoot.GetComponentsInChildren<RelayTowerPresentation>().Length,Is.EqualTo(Counts[i]));
+                    if(!string.IsNullOrEmpty(output))
+                        File.AppendAllText(Path.Combine(output,"lobby-times.txt"),$"{Names[i]} pass={pass+1} seconds={elapsed:F3} profile={active.ProfileId}@{active.Revision} world={world.PreparationCacheHit} minimap={minimap.PreparationCacheHit}\n");
+                    Assert.True(world.PreparationCacheHit && minimap.PreparationCacheHit,Names[i]+" prepared scene and map");
+                    Call("ReturnToLobby");
+                    yield return Wait(()=>Get<bool>("inLobby")&&Get<PlayableRuntime>("runtime")==null,30,"return to lobby");
+                    runtime=null;
+                }
+            }
+            finally
+            {
+                runtime?.RequestStop();
+                if(host)Object.Destroy(host);
+                PreparedMapCache.DirectoryOverride=oldCache;
+                if(Directory.Exists(cache))Directory.Delete(cache,true);
+                if(ownKb)InputSystem.RemoveDevice(kb);
+                if(ownMouse)InputSystem.RemoveDevice(mouse);
+            }
+        }
         [UnityTest,Timeout(180000)] public IEnumerator BasaltHumanCommandReachesAndCapturesCentralRelay()
         {
             string output=Environment.GetEnvironmentVariable("RELAY_MAPS_EVIDENCE");Assert.IsNotEmpty(output);Directory.CreateDirectory(output);
             using var log=new StreamWriter(Path.Combine(output,"basalt-human.txt")){AutoFlush=true};
             var author=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Spacewars.Editor.PreparedMapsAuthoring")).First(t=>t!=null);
             var p=(PlayableProfile)author.GetMethod("Profile").Invoke(null,new object[]{"BasaltCrown"});
+            Assert.AreEqual(11,p.Revision);
+            Assert.AreEqual(15,p.RelayCaptureSeconds);
+            log.WriteLine("Default @"+p.Revision+" relay.captureSeconds="+p.RelayCaptureSeconds);
             var setup=new NativeLobbyConfiguration{BasaltCrown=true,HasExplicitSeed=true,ExplicitSeed=3112026,Participants=new List<NativeLobbyParticipant>{
                 new NativeLobbyParticipant{Name="Command witness",Human=true,Team=1,Color=0},new NativeLobbyParticipant{Name="Idle opponent",Human=true,Team=2,Color=1,DeviceId=1}}};
             using var r=PlayableRuntime.CreateLobbyMatch(p,94,setup,startPaused:true);using var routes=new UnityHostRouteService();
@@ -75,7 +129,7 @@ namespace Spacewars.Tests.PlayMode
             try{
                 host=new GameObject("All relay maps ordinary lobby");app=host.AddComponent<PlayableBootstrap>();
                 yield return Wait(()=>Get<VisualElement>("lobbyScreen")!=null,120,"lobby startup");Call("ShowLobby");
-                var choices=Get<VisualElement>("lobbyScreen").Q<DropdownField>("lobby-map-choice");Assert.AreEqual(9,choices.choices.Count);
+                var choices=Get<VisualElement>("lobbyScreen").Q<DropdownField>("lobby-map-choice");Assert.AreEqual(Names.Length,choices.choices.Count);
                 {
                     choices.value=choices.choices.Single(s=>s.Contains(Names[i]));var draft=Get<NativeLobbyConfiguration>("lobbySetup");draft.HasExplicitSeed=true;draft.ExplicitSeed=3112026;
                     foreach(var seat in draft.Participants)seat.Human=false;

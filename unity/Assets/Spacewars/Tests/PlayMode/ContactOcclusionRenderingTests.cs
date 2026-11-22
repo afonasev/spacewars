@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -35,6 +36,87 @@ namespace Spacewars.Tests.PlayMode
         }
         private static Camera View(Transform root,RenderTexture target)
         {var c=new GameObject("Material preview camera").AddComponent<Camera>();c.transform.SetParent(root);c.targetTexture=target;c.fieldOfView=48;c.nearClipPlane=.1f;c.farClipPlane=700;c.clearFlags=CameraClearFlags.SolidColor;c.backgroundColor=new Color(.075f,.10f,.13f);return c;}
+#if UNITY_EDITOR
+        [UnityTest]
+        public IEnumerator SplitScreenTemporalHistoryFollowsViewportAndGraphicsChanges()
+        {
+            if (SystemInfo.graphicsDeviceType != GraphicsDeviceType.Metal)
+                Assert.Ignore("The temporal path is limited to Metal.");
+
+            const BindingFlags internalInstance = BindingFlags.Instance | BindingFlags.NonPublic;
+            var renderer = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(
+                "Assets/Spacewars/Content/FoundationRenderer.asset");
+            var feature = renderer.rendererFeatures.OfType<ContactOcclusionFeature>().Single();
+            var status = typeof(ContactOcclusionFeature).GetMethod("TemporalStatus", internalInstance);
+            var setEnabled = typeof(ContactOcclusionCamera).GetMethod("SetTemporalEnabled", internalInstance);
+            var root = new GameObject("Split-screen SSAO history");
+            var target = new RenderTexture(128, 96, 24, RenderTextureFormat.RGB111110Float)
+                { antiAliasing = 4 };
+            var camera = View(root.transform, target);
+            camera.enabled = false;
+            camera.allowHDR = camera.allowMSAA = camera.orthographic = true;
+            var control = camera.gameObject.AddComponent<ContactOcclusionCamera>();
+            control.Configure(ContactOcclusionProfile.Load());
+
+            try
+            {
+                Assert.True(target.Create());
+                yield return null;
+                camera.Render();
+                Assert.AreEqual((0, false, false), ReadStatus(), "A regular camera uses stock SSAO.");
+
+                EnableTemporal(true);
+                AssertFreshHistory();
+                camera.Render();
+                Assert.AreEqual((2, true, true), ReadStatus());
+
+                camera.transform.position += Vector3.right;
+                camera.Render();
+                Assert.AreEqual((2, false, false), ReadStatus(), "A moving view uses stock SSAO.");
+                camera.Render();
+                Assert.AreEqual((3, false, true), ReadStatus(), "The first settled frame seeds new history.");
+                camera.Render();
+                Assert.AreEqual((4, true, true), ReadStatus());
+
+                camera.orthographic = false;
+                camera.Render();
+                Assert.AreEqual((0, false, false), ReadStatus(), "Perspective fallback releases history.");
+                camera.orthographic = true;
+                AssertFreshHistory();
+
+                control.enabled = false;
+                Assert.AreEqual((0, false, false), ReadStatus(), "Disabling the control releases history immediately.");
+                control.enabled = true;
+                AssertFreshHistory();
+
+                var off = ContactOcclusionProfile.Load();
+                off.intensity = 0;
+                control.Configure(off);
+                Assert.AreEqual((0, false, false), ReadStatus(), "Turning SSAO off releases history immediately.");
+                control.Configure(ContactOcclusionProfile.Load());
+                AssertFreshHistory();
+
+                EnableTemporal(false);
+                Assert.AreEqual((0, false, false), ReadStatus(), "Leaving split-screen releases history immediately.");
+                camera.Render();
+                Assert.AreEqual((0, false, false), ReadStatus(), "The viewport falls back to stock SSAO.");
+            }
+            finally
+            {
+                camera.targetTexture = null;
+                UnityEngine.Object.DestroyImmediate(root);
+                UnityEngine.Object.DestroyImmediate(target);
+            }
+
+            void EnableTemporal(bool enabled) => setEnabled.Invoke(control, new object[] { enabled });
+            (int, bool, bool) ReadStatus() => ((int, bool, bool))status.Invoke(feature, new object[] { camera });
+            void AssertFreshHistory()
+            {
+                camera.Render();
+                Assert.AreEqual((1, false, true), ReadStatus());
+            }
+        }
+#endif
         private static Texture2D Read(RenderTexture target)
         {var old=RenderTexture.active;try{RenderTexture.active=target;var t=new Texture2D(target.width,target.height,TextureFormat.RGB24,false);t.ReadPixels(new Rect(0,0,target.width,target.height),0,0);t.Apply();return t;}finally{RenderTexture.active=old;}}
         private static int Changed(Color32[] a,Color32[] b,int tolerance=3)

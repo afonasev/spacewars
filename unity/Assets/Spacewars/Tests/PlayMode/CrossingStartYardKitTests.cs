@@ -10,6 +10,7 @@ namespace Spacewars.Tests.PlayMode
     {
         [TestCase("HeavyTractorWreck")][TestCase("PerimeterHangar")][TestCase("PerimeterWorkshop")][TestCase("PerimeterAnnex")]
         [TestCase("CargoModule")][TestCase("ExtractionSkid")][TestCase("PumpNode")][TestCase("VentilationBlock")][TestCase("CableCabinet")]
+        [TestCase("BankPump")][TestCase("MineWorkModule")]
         public void ReducedTiersKeepSilhouetteAndUseCompactProjectedSelection(string kind)
         {
             var meshes=Enumerable.Range(0,3).Select(t=>CrossingStartYardKit.Build(kind,t)).ToArray();

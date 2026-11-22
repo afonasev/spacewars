@@ -15,7 +15,7 @@ namespace Spacewars.Presentation
   public void RenderShkvalEvidence(PlayableSnapshot snapshot,Camera camera)
   {
    view=snapshot;
-   world.Fog.Update(view.Vision,.033f);world.RenderSites(view,camera);world.AdvanceAircraftAnimation(view,Time.realtimeSinceStartup);
+   world.UpdateMatchAnimation(view);world.Fog.Update(view.Vision,.033f);world.RenderSites(view,camera);
    foreach(var e in view.Entities){if(!world.Actors.TryGetValue(e.Id,out var a))a=world.Tank(e.Id,e.Owner==view.Owner,e.Kind);world.UpdateResearchModel(a,e);a.Root.position=world.Point(e.Position);a.Hull.localRotation=Quaternion.Euler(0,90-(float)e.HullHeading*Mathf.Rad2Deg,0);a.Turret.localRotation=Quaternion.Euler(0,(float)(e.HullHeading-e.TurretHeading)*Mathf.Rad2Deg,0);world.UpdateAircraft(a,e,view);world.AimExplorer(a,e);a.Health.parent.gameObject.SetActive(false);}
    foreach(var b in view.Buildings){if(!world.Actors.TryGetValue(b.Id,out var a))a=world.Building(b.Id,b.Kind.ToString(),b.Owner==view.Owner);world.UpdateRefineryModel(a,b,view.Tick);world.UpdateFactoryModel(a,b,view);a.Root.position=world.Point(b.Position);world.FaceBuilding(a);world.UpdateHangar(a,b,view.Tick);a.Health.parent.gameObject.SetActive(false);}
    RenderDirectContacts();RenderProjectiles();
@@ -129,7 +129,7 @@ namespace Spacewars.Presentation
     foreach(var pair in world.Actors)pair.Value.Root.gameObject.SetActive(pair.Key==source.OwnerId);
     var flight=BallisticFlight.Restore(l.Start,new BallisticPoint(l.Start.X+l.Tangent.X,l.Start.Y+l.Tangent.Y-4*p.ShkvalArcHeight,l.Start.Z+l.Tangent.Z),p.ShkvalArcHeight,l.Duration);
     PlayableSnapshot Frame(double age,bool firing){
-     var cells=new double[4];if(firing)cells[l.Barrel]=2*p.ShkvalFireIntervalMs/1000d-age;
+     var cells=new double[4];if(firing)cells[l.Barrel]=2*PlayableUnitRules.ShkvalFireInterval(p,l.Upgraded)-age;
      var entity=new PlayableEntitySnapshot(source.OwnerId,source.Faction,PlayableEntityKind.Shkval,l.Ground.Ground,100,false,source.TargetId,l.Hull,l.Turret,upgraded:l.Upgraded,weaponPitch:l.Pitch,shkvalCells:firing?new ShkvalCellsSnapshot(cells):null);
      var at=flight.Point(age/flight.Duration);var tangent=flight.Tangent(age/flight.Duration);
      var shot=new PlayableProjectileSnapshot(source.Id,source.OwnerId,source.TargetId,new NavPoint(at.X,at.Z),PlayableEntityKind.Shkval,Math.Atan2(tangent.Z,tangent.X),at.Y,Math.Atan2(tangent.Y,Math.Sqrt(tangent.X*tangent.X+tangent.Z*tangent.Z)),age:age,launch:l);

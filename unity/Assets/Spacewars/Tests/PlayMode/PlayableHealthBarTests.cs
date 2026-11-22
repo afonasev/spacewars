@@ -62,6 +62,116 @@ public sealed class PlayableHealthBarTests
             }return stream.ToArray();
         }
     }
+    [Test] public void MineReserveStaysCenteredBelowTheHealthOutline()
+    {
+        var profile=PlayableProfile.Default;
+        var root=new GameObject("Mine reserve stack");
+        var world=new PlayableWorld(root.transform,profile);
+        var camera=new GameObject("Mine reserve camera").AddComponent<Camera>();
+        camera.transform.SetParent(root.transform);
+        var target=new RenderTexture(800,640,24);
+        camera.targetTexture=target;
+        camera.orthographic=true;
+        camera.orthographicSize=4.7f;
+        var light=new GameObject("Review daylight").AddComponent<Light>();
+        light.transform.SetParent(root.transform);
+        light.type=LightType.Directional;
+        light.intensity=1.7f;
+        light.transform.rotation=Quaternion.Euler(50,-35,0);
+
+        try
+        {
+            var site=new TerritorySite(17,PlayableBuildingKind.Mine,default,profile);
+            var building=new PlayableBuildingSnapshot(22,PlayableOwner.Player,site.Kind,site.Position,
+                50,1,0,0,default,site.Id,0,phase:ConstructionPhase.Ready);
+            var state=new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,
+                building.Id,true,mineReserve:65,mineReserveCapacity:100);
+            var view=new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,1,1,RuntimeStatus.Running,
+                false,PlayableMatchOutcome.Playing,0,null,System.Array.Empty<PlayableEntitySnapshot>(),new[]{building},
+                System.Array.Empty<PlayableProjectileSnapshot>(),null,null,sites:new[]{state});
+            world.Fog.ShowPublic();
+            var actor=world.Building(building.Id,site.Kind.ToString(),true);
+            actor.Root.position=world.Point(site.Position);
+            world.FaceBuilding(actor,camera);
+            camera.transform.position=new Vector3(6,11,-9);
+            camera.transform.LookAt(actor.Root.position+Vector3.up);
+            world.RenderSites(view,camera);
+            var reserve=world.GraphicsRoot.Find("Site pad 17:0/Mine reserve");
+            var outline=actor.Health.parent.Find("Health outline");
+            var background=reserve.Find("Reserve background");
+            var track=reserve.Find("Reserve track");
+            var fill=reserve.Find("Reserve fill");
+            var dividers=reserve.Cast<Transform>().Where(t=>t.name.StartsWith("Reserve divider ")).ToArray();
+            Assert.AreEqual(3,dividers.Length,"Three separators form four cells.");
+
+            foreach(var (zoom,pitch,yaw) in new[]{(4.7f,48f,326f),(12f,65f,120f),(25f,30f,240f)})
+            {
+                camera.orthographicSize=zoom;
+                camera.transform.rotation=Quaternion.Euler(pitch,yaw,0);
+                camera.transform.position=actor.Root.position+Vector3.up-camera.transform.forward*20;
+                world.RenderSites(view,camera);
+                world.UpdateBuildingHealth(actor,building,camera,.5f);
+
+                Vector3 ScreenPoint(Transform bar,Vector3 at)=>camera.WorldToScreenPoint(bar.TransformPoint(at));
+                var reserveCenter=ScreenPoint(background,Vector3.zero);
+                var healthCenter=ScreenPoint(outline,Vector3.zero);
+                Assert.That(reserveCenter.x,Is.EqualTo(healthCenter.x).Within(.001f));
+                Assert.Less(ScreenPoint(background,Vector3.up*.5f).y,ScreenPoint(outline,Vector3.down*.5f).y);
+                float Width(Transform bar)=>ScreenPoint(bar,Vector3.right*.5f).x-ScreenPoint(bar,Vector3.left*.5f).x;
+                Assert.That(Width(background),Is.EqualTo(Width(outline)*.9f).Within(.001f));
+                float gap=Width(dividers[0]);
+                float cellWidth=(Width(track)-3*gap)/4;
+                float trackLeft=ScreenPoint(track,Vector3.left*.5f).x;
+                for(int i=0;i<dividers.Length;i++)
+                {
+                    float left=ScreenPoint(dividers[i],Vector3.left*.5f).x;
+                    Assert.That(left,Is.EqualTo(trackLeft+(i+1)*cellWidth+i*gap).Within(.001f));
+                }
+                Assert.That(ScreenPoint(fill,Vector3.left*.5f).x,Is.EqualTo(trackLeft).Within(.001f));
+                Assert.That(Width(fill),Is.EqualTo(2.6f*cellWidth+2*gap).Within(.001f),
+                    "At 65% reserve, the third cell is 60% full.");
+
+            }
+
+            camera.orthographicSize=4.7f;
+            camera.transform.position=new Vector3(6,11,-9);
+            camera.transform.LookAt(actor.Root.position+Vector3.up);
+            world.UpdateBuildingHealth(actor,building,camera,.5f);
+            Capture("mine-reserve-65.png");
+
+            NativeUserSettings.AlwaysHealth=false;
+            world.UpdateBuildingHealth(actor,building,camera,1);
+            Assert.False(actor.Health.parent.gameObject.activeSelf);
+            Assert.True(reserve.gameObject.activeSelf,"The reserve remains visible when full health is hidden.");
+            Assert.AreEqual(Vector3.one,reserve.localScale);
+        }
+        finally
+        {
+            camera.targetTexture=null;
+            Object.DestroyImmediate(target);
+            world.Dispose();
+            Object.DestroyImmediate(root);
+        }
+
+        void Capture(string file)
+        {
+            string output=System.Environment.GetEnvironmentVariable("SPACEWARS_MINE_BAR_EVIDENCE");
+            if(string.IsNullOrEmpty(output))return;
+            System.IO.Directory.CreateDirectory(output);
+            var image=new Texture2D(target.width,target.height,TextureFormat.RGB24,false);
+            var previous=RenderTexture.active;
+            try
+            {
+                camera.Render();
+                RenderTexture.active=target;
+                image.ReadPixels(new Rect(0,0,target.width,target.height),0,0);
+                image.Apply();
+                System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,file),image.EncodeToPNG());
+            }
+            finally{RenderTexture.active=previous;Object.DestroyImmediate(image);}
+        }
+    }
+
     [TestCase(0f,0.2f,45f,0f)]
     [TestCase(73f,0.6f,65f,120f)]
     [TestCase(180f,1f,30f,240f)]
@@ -164,7 +274,7 @@ public sealed class PlayableHealthBarTests
         try
         {
             var store=new NativeBalanceStore(profile,System.IO.Path.Combine(directory,"profiles.json"),false,package);
-            store.Select(NativeBalanceStore.NewMatchProfileId,NativeBalanceStore.NewMatchProfileVersion);
+            store.Select(NativeBalanceStore.CorridorExperimentId,NativeBalanceStore.CorridorExperimentVersion);
             Assert.AreEqual(profile.CameraOrthoSize,store.Active.CameraOrthoSize);
             Assert.AreEqual(profile.CameraMinZoom,store.Active.CameraMinZoom);Assert.AreEqual(profile.CameraMaxZoom,store.Active.CameraMaxZoom);
             Assert.AreEqual(1.4,store.Active.HealthBarWidth);Assert.AreEqual(.075,store.Active.HealthBarHeight);Assert.AreEqual(10,store.Active.HealthBarCells);

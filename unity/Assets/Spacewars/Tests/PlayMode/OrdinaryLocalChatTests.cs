@@ -25,28 +25,116 @@ namespace Spacewars.Input.Tests
         }
         void ChatKeys(PlayableBootstrap seat,params Key[] keys)
         {InputSystem.QueueStateEvent(Keyboard.current,new KeyboardState(keys));InputSystem.Update();Get<PlayableInput>(seat,"input").Poll();}
-        void ChatKey(PlayableBootstrap seat,KeyCode key,EventModifiers modifiers=EventModifiers.None)
+        IEnumerator DeviceChatKey(params Key[] keys)
         {
-            var field=Get<TextField>(seat,"chatInput");using(var evt=KeyDownEvent.GetPooled('\0',key,modifiers)){evt.target=field;field.SendEvent(evt);}
+            InputSystem.QueueStateEvent(Keyboard.current,new KeyboardState(keys));
+            yield return null;
+            InputSystem.QueueStateEvent(Keyboard.current,new KeyboardState());
+            yield return null;
+        }
+        void TypeChatText(PlayableBootstrap seat,string text)
+        {
+            // In batch PlayMode the editor's native text events aren't produced by the test keyboard.
+            // Dispatch text to the actual focus target and let UI Toolkit edit the field.
+            var field=Get<TextField>(seat,"chatInput");
+            var target=Get<VisualElement>(seat,"root").focusController.focusedElement as VisualElement;
+            Assert.True(target==field||target!=null&&field.Contains(target),
+                "The editor receives keyboard focus when opened. Actual focus: "+(target?.name??"<none>"));
+            foreach(char character in text)
+            {
+                using(var evt=KeyDownEvent.GetPooled(character,KeyCode.None,EventModifiers.None))
+                    target.SendEvent(evt);
+            }
+            Assert.AreEqual(text,field.value,"The focused field receives typed text");
+        }
+        [UnityTest] public IEnumerator SpectatorChatThroughKeyboardAfterHudFocus()
+        {
+            yield return StartOrdinary(0,configureRoster:setup=>{foreach(var participant in setup.Participants)participant.Human=false;});
+            Call(app,"CreateSpectatorHud");
+            Call(app,"UpdateFrame");
+            var chat=Get<NativeMatchChat>(app,"matchChat");
+            Assert.True(chat.RegisterSpectator(-2,"Другой зритель"));
+            var root=Get<VisualElement>(app,"root");
+
+            yield return DeviceChatKey(Key.Enter);
+            Assert.True(Get<bool>(app,"chatOpen"),"Enter opens chat after the ordinary spectator launch");
+            Assert.AreEqual(NativeMatchChat.Spectators,Get<int>(app,"chatChannel"));
+            TypeChatText(app,"Разведка");
+            yield return DeviceChatKey(Key.Enter);
+            Assert.False(Get<bool>(app,"chatOpen"));
+            Assert.AreEqual("Разведка",HumanChat(chat,-2,true).Single().Text);
+            Assert.IsEmpty(HumanChat(chat,0,false));
+
+            Call(app,"SetSpectatorPerspective",PlayableOwner.Enemy);
+            Call(app,"UpdateFrame");
+            yield return null;
+            var fold=root.Q<Button>("spectator-collapse");
+            Assert.NotNull(fold);
+            fold.Focus();
+            Assert.AreSame(fold,root.focusController.focusedElement);
+            var collapsed=Get<bool>(app,"spectatorCollapsed");
+            yield return DeviceChatKey(Key.LeftShift,Key.Enter);
+            Assert.True(Get<bool>(app,"chatOpen"),"Shift+Enter opens chat with a spectator HUD control focused");
+            Assert.AreEqual(collapsed,Get<bool>(app,"spectatorCollapsed"),"Opening chat must not activate the focused control");
+            Assert.AreEqual(NativeMatchChat.Public,Get<int>(app,"chatChannel"));
+            TypeChatText(app,"Всем привет");
+            yield return Capture("observer-chat-composer",captureChecks:()=>
+            {
+                var compose=Get<VisualElement>(app,"chatCompose");
+                var field=Get<TextField>(app,"chatInput");
+                var box=field.Q(className:TextField.inputUssClassName);
+                var channel=Get<Label>(app,"chatChannelLabel");
+                var feed=Get<VisualElement>(app,"chatFeed");
+                Inside(root.worldBound,compose.worldBound,"observer composer in player perspective");
+                Assert.AreEqual(feed.worldBound.xMin,channel.worldBound.xMin,.5f);
+                Assert.Zero(compose.resolvedStyle.backgroundColor.a);
+                Assert.Zero(box.resolvedStyle.backgroundColor.a);
+                Assert.Zero(box.resolvedStyle.borderBottomWidth);
+                Assert.AreEqual(Color.white,field.cursorColor);
+                Assert.False(Get<PlayableInput>(app,"input").CommandInputEnabled);
+            });
+            yield return DeviceChatKey(Key.NumpadEnter);
+            Assert.False(Get<bool>(app,"chatOpen"));
+            Assert.AreEqual("Всем привет",HumanChat(chat,0,false).Single().Text);
+        }
+        [UnityTest] public IEnumerator PlayerChatThroughKeyboardWithOrWithoutAiAlly([Values(false,true)] bool aiAlly)
+        {
+            yield return StartOrdinary(1,configureRoster:setup=>
+            {
+                for(int index=0;index<setup.Participants.Count;index++)
+                    setup.Participants[index].Team=aiAlly&&index==1?1:index+1;
+                setup.Participants[0].DeviceId=0;
+            });
+            var chat=Get<NativeMatchChat>(app,"matchChat");
+            yield return DeviceChatKey(Key.Enter);
+            Assert.True(Get<bool>(app,"chatOpen"));
+            Assert.AreEqual(aiAlly?1:NativeMatchChat.Public,Get<int>(app,"chatChannel"));
+            TypeChatText(app,"Проверка");
+            yield return DeviceChatKey(Key.Enter);
+            Assert.False(Get<bool>(app,"chatOpen"));
+            Assert.AreEqual("Проверка",HumanChat(chat,0,false).Single().Text);
+            Assert.AreEqual(aiAlly?0:1,HumanChat(chat,-1,true).Length);
+            Assert.AreEqual(1,HumanChat(chat,1,false).Length);
+            Assert.AreEqual(aiAlly?0:1,HumanChat(chat,2,false).Length);
         }
         [UnityTest] public IEnumerator ChatTeamPublicFocusAndIndependentPad()
         {
-            yield return StartOrdinary(2,allied:true);var author=Seats[0];var ally=Seats[1];
+            yield return StartOrdinary(2,allied:true,configureRoster:setup=>setup.Participants[0].DeviceId=0);var author=Seats[0];var ally=Seats[1];
             var chat=Get<NativeMatchChat>(app,"matchChat");var root=Get<VisualElement>(author,"root");root.Focus();yield return null;
             ChatKeys(author,Key.Enter);Assert.True(Get<bool>(author,"chatOpen"));Assert.AreEqual(1,Get<int>(author,"chatChannel"));ChatKeys(author);
             var camera=Get<Camera>(author,"cameraView");var before=camera.transform.position;int stops=0,orders=0,selectionKeys=0;
             var input=Get<PlayableInput>(author,"input");input.Stop=()=>stops++;input.Order=(_,__,___)=>orders++;input.SelectionKey=(_,__,___)=>selectionKeys++;
             ChatKeys(author,Key.S,Key.A,Key.Digit1,Key.RightArrow);Assert.AreEqual(before,camera.transform.position);Assert.Zero(stops);Assert.Zero(orders);Assert.Zero(selectionKeys);Assert.False(input.AttackMode);
-            var padBefore=Get<Vector2>(ally,"battleCursor");Set(pads[1].rightStick,Vector2.right);InputSystem.Update();yield return null;Call(app,"UpdateFrame");Set(pads[1].rightStick,Vector2.zero);InputSystem.Update();
-            Assert.AreNotEqual(padBefore,Get<Vector2>(ally,"battleCursor"),"Other local device must keep working during compose");ChatKeys(author);
-            Get<TextField>(author,"chatInput").value="Держим левый проход";yield return null;ChatKey(author,KeyCode.Return,EventModifiers.Shift);Assert.False(Get<bool>(author,"chatOpen"));
+            var allyCamera=Get<Camera>(ally,"cameraView");float padBefore=allyCamera.orthographicSize;Set(pads[1].rightStick,Vector2.up);InputSystem.Update();yield return null;Call(app,"UpdateFrame");Set(pads[1].rightStick,Vector2.zero);InputSystem.Update();
+            Assert.Less(allyCamera.orthographicSize,padBefore,"Other local device can still zoom during compose");ChatKeys(author);
+            TypeChatText(author,"Держим левый проход");yield return null;ChatKeys(author,Key.LeftShift,Key.Enter);Assert.False(Get<bool>(author,"chatOpen"));
             Assert.AreEqual(1,HumanChat(chat,1,false).Length);Assert.IsEmpty(HumanChat(chat,3,false));Assert.IsEmpty(HumanChat(chat,0,true));
             ChatKeys(author);root.Focus();ChatKeys(author,Key.LeftShift,Key.Enter);Assert.AreEqual(NativeMatchChat.Public,Get<int>(author,"chatChannel"));ChatKeys(author);
-            Get<TextField>(author,"chatInput").value="Всем удачи!";yield return null;ChatKey(author,KeyCode.Return);
+            TypeChatText(author,"Всем удачи!");yield return null;ChatKeys(author,Key.Enter);
             Assert.AreEqual("Всем удачи!",HumanChat(chat,0,true).Single().Text);Call(app,"UpdateFrame");
             Assert.AreEqual(2,HumanChatRows(ally).Length);Assert.AreEqual(chat.Visible(1,false,Time.unscaledTimeAsDouble).Length,Get<VisualElement>(ally,"chatFeed").childCount);Assert.True(Get<VisualElement>(author,"chatFeed").Query<Label>().ToList().All(l=>l.name=="chat-message"&&!l.parseEscapeSequences));
             yield return Capture("native-chat-allies-and-public");
-            ChatKeys(author);root.Focus();ChatKeys(author,Key.Enter);Get<TextField>(author,"chatInput").value="не отправлять";yield return null;ChatKeys(author,Key.RightArrow);before=camera.transform.position;ChatKey(author,KeyCode.Escape);Assert.False(Get<bool>(author,"chatOpen"));
+            ChatKeys(author);root.Focus();ChatKeys(author,Key.Enter);TypeChatText(author,"не отправлять");yield return null;ChatKeys(author,Key.RightArrow);before=camera.transform.position;ChatKeys(author,Key.RightArrow,Key.Escape);Assert.False(Get<bool>(author,"chatOpen"));
             ChatKeys(author,Key.RightArrow);Assert.AreEqual(before,camera.transform.position,"Closing waits for neutral input");ChatKeys(author);ChatKeys(author,Key.RightArrow);Assert.AreNotEqual(before,camera.transform.position);ChatKeys(author);
             root.Focus();ChatKeys(author,Key.Enter);Get<TextField>(author,"chatInput").value="пауза";Call(app,"Pause",true);Assert.False(Get<bool>(author,"chatOpen"));Assert.IsEmpty(Get<TextField>(author,"chatInput").value);Call(app,"Pause",false);ChatKeys(author);
             root.Focus();ChatKeys(author,Key.Enter);Get<TextField>(author,"chatInput").value="фокус";input.SetFocus(false);Assert.False(Get<bool>(author,"chatOpen"));Assert.IsEmpty(Get<TextField>(author,"chatInput").value);input.SetFocus(true);Call(app,"Pause",false);ChatKeys(author);
@@ -109,8 +197,8 @@ namespace Spacewars.Input.Tests
                 Assert.True(chat.Send(1,NativeMatchChat.Public,"Длинное сообщение переносится по всей ширине ленты: имя не обрезается, а каждая новая строка начинается с общего левого края.",now));
                 Call(app,"UpdateFrame");
             }
-            yield return Capture("F3-chat-columns-wide",AssertChatFlow,beforeFrames:PopulateAfterRender);
-            yield return Capture("F3-chat-columns-narrow",AssertChatFlow,1280,800,beforeFrames:PopulateAfterRender);
+            yield return Capture("F3-chat-columns-wide",AssertChatFlow,beforeFrames:PopulateAfterRender,warmFrames:8);
+            yield return Capture("F3-chat-columns-narrow",AssertChatFlow,1280,800,beforeFrames:PopulateAfterRender,warmFrames:8);
             var data=Get<PlayableProfile>(app,"profile").CopyData();
             double target=now+data.chatReadableSeconds+data.chatFadeSeconds*.25;
             while(Time.unscaledTimeAsDouble<target){Call(app,"UpdateFrame");yield return null;}
@@ -148,14 +236,14 @@ namespace Spacewars.Input.Tests
             ChatKeys(app,Key.Enter);Assert.True(Get<bool>(app,"chatOpen"));Assert.AreEqual(NativeMatchChat.Spectators,Get<int>(app,"chatChannel"));Assert.AreEqual("[Obs]:",Get<Label>(app,"chatChannelLabel").text);ChatKeys(app);
             var camera=Get<Camera>(app,"cameraView");var position=camera.transform.position;ChatKeys(app,Key.RightArrow,Key.S);Assert.AreEqual(position,camera.transform.position);Assert.False(input.CommandInputEnabled);ChatKeys(app);
             Get<TextField>(app,"chatInput").value="Только зрителям";yield return null;
-            yield return Capture("F3-observer-compose",captureChecks:AssertObserverCapture);ChatKey(app,KeyCode.Return);
+            yield return Capture("F3-observer-compose",captureChecks:AssertObserverCapture);ChatKeys(app,Key.Enter);
             Assert.AreEqual("Только зрителям",HumanChat(chat,-2,true).Single().Text);Assert.IsEmpty(HumanChat(chat,0,false));
             ChatKeys(app);root.Focus();ChatKeys(app,Key.LeftShift,Key.Enter);Assert.AreEqual(NativeMatchChat.Public,Get<int>(app,"chatChannel"));Assert.AreEqual("[All]:",Get<Label>(app,"chatChannelLabel").text);ChatKeys(app);
-            Get<TextField>(app,"chatInput").value="Публичное сообщение зрителя";yield return null;ChatKey(app,KeyCode.Return);
+            Get<TextField>(app,"chatInput").value="Публичное сообщение зрителя";yield return null;ChatKeys(app,Key.Enter);
             Assert.AreEqual("Публичное сообщение зрителя",HumanChat(chat,0,false).Single().Text);Assert.False(chat.Send(-1,1,"forbidden team",Time.unscaledTimeAsDouble));
             Call(app,"UpdateFrame");yield return Capture("F3-observer-feed",captureChecks:AssertObserverCapture);
             ChatKeys(app);Call(app,"SetSpectatorPerspective",PlayableOwner.Enemy);root.Focus();ChatKeys(app,Key.Enter);Assert.True(Get<bool>(app,"chatOpen"));Assert.AreEqual(NativeMatchChat.Spectators,Get<int>(app,"chatChannel"));
-            ChatKeys(app);Get<TextField>(app,"chatInput").value="отменить";yield return null;ChatKey(app,KeyCode.Escape);Assert.False(Get<bool>(app,"chatOpen"));
+            ChatKeys(app);Get<TextField>(app,"chatInput").value="отменить";yield return null;ChatKeys(app,Key.Escape);Assert.False(Get<bool>(app,"chatOpen"));
         }
     }
 }

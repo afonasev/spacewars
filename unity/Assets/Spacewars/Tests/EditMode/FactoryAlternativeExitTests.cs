@@ -127,7 +127,7 @@ namespace Spacewars.Tests.EditMode
             else if(action=="destroy")Call("Damage",f,(int)p.FactoryHealth);
             else Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.SellBuilding,action=="cascade"?1:f));
             Assert.Zero(View().Population.Reserved);Advance();Assert.AreEqual(count,View().Entities.Count);
-            Assert.AreEqual(before+(action=="cancel"?p.TankCreditCost:action=="sale"?Math.Floor(p.FactoryCreditCost*p.BuildingSaleRefundRatio):action=="cascade"?Math.Floor((p.FactoryCreditCost+p.HeadquartersCreditCost)*p.BuildingSaleRefundRatio):0),View().Credits);
+            Assert.AreEqual(before+(action=="cancel"||action=="destroy"?p.TankCreditCost:action=="sale"?Math.Floor(p.FactoryCreditCost*p.BuildingSaleRefundRatio):action=="cascade"?Math.Floor((p.FactoryCreditCost+p.HeadquartersCreditCost)*p.BuildingSaleRefundRatio):0),View().Credits);
         }
 
         [Test] public void MixedSixPaidHeadsAndReconstructedFactoryRetainUniqueLivingIdentities()

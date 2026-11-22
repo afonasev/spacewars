@@ -104,10 +104,26 @@ namespace Spacewars.Simulation
             foreach(int sz in new[]{1,-1})sites.Add(new TerritorySite(sites.Count+1,PlayableBuildingKind.RelayTower,Point(0,sz*40),p));
             return sites.ToArray();
         }
-        public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster){
-            if(roster.Length!=4||roster.GroupBy(r=>r.Team).Count()!=2||roster.GroupBy(r=>r.Team).Any(g=>g.Count()!=2))throw new ArgumentException("White Meridian requires two teams of two.");
-            var teams=roster.Select(r=>r.Team).Distinct().ToArray();var starts=new OfflineStart[4];
-            for(int side=0;side<2;side++){var allies=roster.Where(r=>r.Team==teams[side]).ToArray();for(int slot=0;slot<2;slot++){int i=side*2+slot;var h=Headquarters((PlayableOwner)i);starts[i]=new OfflineStart("meridian-"+i,i+1,h,Point(side==0?-62:62,slot==0?39:-39),slot==0?-Math.PI/2:Math.PI/2,allies[slot].LogicalPlayer);}}
+        public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster)
+        {
+            var teams=roster.GroupBy(r=>r.Team).ToArray();
+            if(roster.Length<2||roster.Length>4||teams.Length<2)
+                throw new ArgumentException("Invalid White Meridian roster or start capacity.");
+
+            var starts=Enumerable.Range(0,4).Select(i=>new OfflineStart("meridian-"+i,i+1,
+                Headquarters((PlayableOwner)i),Point(i<2?-62:62,i%2==0?39:-39),i%2==0?-Math.PI/2:Math.PI/2)).ToArray();
+            // Keep the original authored 2×2 pins for direct map consumers.
+            var assignment=teams.Length==2&&teams.All(team=>team.Count()==2)
+                ? teams.SelectMany(team=>team).Select((seat,index)=>(seat,index))
+                    .OrderBy(entry=>Array.IndexOf(roster,entry.seat)).Select(entry=>entry.index).ToArray()
+                : OfflineStartAssignment.ResolveLobby(starts,roster,seed);
+            for(int i=0;i<starts.Length;i++)
+            {
+                var start=starts[i];
+                int participant=Array.IndexOf(assignment,i);
+                starts[i]=new OfflineStart(start.Id,start.SiteId,start.Position,start.ExplorerAnchor,start.Heading,
+                    participant<0?(int?)null:roster[participant].LogicalPlayer);
+            }
             return new OfflineMatchConfiguration(p,"native-white-meridian-astra-v1",Id,"authored-paired-shelves-v1",seed,roster,starts,Sites(p),MovementBlockers.ToArray(),new double[4,4],terrain:Id);
         }
     }

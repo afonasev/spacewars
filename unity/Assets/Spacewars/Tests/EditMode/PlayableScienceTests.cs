@@ -55,14 +55,17 @@ namespace Spacewars.Tests.EditMode
             Assert.AreNotEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,s));
             Assert.AreNotEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UpgradeRefinery,s));
         }
-        [Test] public void OwnerResearchQueueChargesSequentiallyAndCenterLossDoesNotRefund()
+        [Test] public void OwnerResearchQueueChargesSequentiallyAndDestructionRefundsUnfinishedOrders()
         {
             Build(PlayableBuildingKind.Factory,1);int center=Build(PlayableBuildingKind.ScientificCenter,2);double before=Balance();
             Assert.AreEqual(PlayableCommandStatus.Applied,Research(PlayableResearchKind.TankChassis,center));
             Assert.AreEqual(PlayableCommandStatus.Applied,Research(PlayableResearchKind.ExplorerAssaultGuns,center));
             var orders=B(center).PrivateState.Research;Assert.AreEqual(2,orders.Count);Assert.True(orders[0].Active);Assert.False(orders[1].Active);Assert.AreEqual(before-p.TankChassisCost,Balance());
             Call("AdvanceResearch",p.TankChassisSeconds);orders=B(center).PrivateState.Research;Assert.True(orders[0].Complete);Assert.True(orders[1].Active);Assert.AreEqual(before-p.TankChassisCost-p.ExplorerAssaultCost,Balance());
-            Call("Damage",center,(int)p.ScienceHealth+1);Assert.AreEqual(before-p.TankChassisCost-p.ExplorerAssaultCost,Balance());
+            Assert.AreEqual(PlayableCommandStatus.Applied,Research(PlayableResearchKind.ShkvalGuidance,center));
+            Call("Damage",center,(int)p.ScienceHealth+1);
+            Assert.AreEqual(before-p.TankChassisCost,Balance());
+            Assert.True(View().OwnerResearch.Single().Complete);
         }
         [Test] public void GuidanceRequiresThreeHundredCreditsAndChargesOnce()
         {
@@ -128,8 +131,8 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(before-300,Balance());Call("AdvanceResearch",30d);
             int fresh=(int)Call("SpawnUnit",new NavPoint(-12,15),PlayableOwner.Player,PlayableEntityKind.Hawk);
             int enemy=(int)Call("SpawnUnit",new NavPoint(-3,15),PlayableOwner.Enemy,PlayableEntityKind.Hawk);
-            foreach(int id in new[]{old,fresh})Assert.AreEqual(1.5d,Call("HawkPreparation",((System.Collections.IDictionary)Domain.GetField("units",Flags).GetValue(domain))[id]));
-            Assert.AreEqual(3d,Call("HawkPreparation",((System.Collections.IDictionary)Domain.GetField("units",Flags).GetValue(domain))[enemy]));
+            foreach(int id in new[]{old,fresh})Assert.AreEqual(.5d,Call("HawkPreparation",((System.Collections.IDictionary)Domain.GetField("units",Flags).GetValue(domain))[id]));
+            Assert.AreEqual(1d,Call("HawkPreparation",((System.Collections.IDictionary)Domain.GetField("units",Flags).GetValue(domain))[enemy]));
             Call("Damage",hangar,100000);var saved=(PlayableResearchSaveState)Call("CaptureResearchState");Call("RestoreResearchState",saved);
             Assert.True((bool)Call("HawkSalvo",PlayableOwner.Player));Assert.False((bool)Call("HawkSalvo",PlayableOwner.Enemy));
         }

@@ -4,11 +4,10 @@ namespace Spacewars.Simulation
 {
     public static class NativeScreenLayout
     {
-        public static int Count(NativeLobbyConfiguration setup)=>setup.Spectator?0:setup.Participants.Count(p=>p.Human||p.ScreenSlot>=0);
+        public static int Count(NativeLobbyConfiguration setup)=>setup.Participants.Count(p=>p.Human||p.ScreenSlot>=0);
         public static void Normalize(NativeLobbyConfiguration setup)
         {
             setup.InitializeParticipants();
-            if(setup.Spectator){foreach(var p in setup.Participants)p.ScreenSlot=-1;return;}
             var humans=setup.Participants.Where(p=>p.Human).ToArray();
             var bots=setup.Participants.Where(p=>!p.Human&&p.ScreenSlot>=0).ToArray();
             foreach(var p in bots.Skip(Math.Max(0,4-humans.Length)))p.ScreenSlot=-1;
@@ -22,7 +21,6 @@ namespace Spacewars.Simulation
         public static string Assign(NativeLobbyConfiguration setup,NativeLobbyParticipant participant,int slot)
         {
             Normalize(setup);
-            if(setup.Spectator)return "В режиме зрителя используется весь экран.";
             if(!setup.Participants.Contains(participant))return "Участник отсутствует.";
             if(slot<0){if(participant.Human)return "Игроку нужен экран.";participant.ScreenSlot=-1;Normalize(setup);return null;}
             int count=Count(setup)+(participant.ScreenSlot<0?1:0);

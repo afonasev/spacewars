@@ -16,12 +16,15 @@ namespace Spacewars.Simulation
         internal IReadOnlyList<NavObstacle> ExclusionObstacles=>locations.Geometry.Obstacles;
         internal string TerrainId=>terrainId; internal string HoldBinding=>holdBinding;
         internal int TerrainRevision=>terrainRevision; internal int SurfaceSemanticsVersion=>surfaceSemanticsVersion;
+        internal int ClearSectionSupport(NavLocation first,NavLocation last,double radius)
+            =>locations.ClearSectionSupport(first,last,radius);
+        internal NavLocation SectionLocation(int support,NavPoint point)=>locations.Supports[support].OwnedLocation(point);
         internal NavLocation OwnedCheckpointLocation(NavLocation location)=>locations.OwnedCheckpointLocation(location);
         private IReadOnlyDictionary<string, NavLayerSurface> bySurface;
 
         // Admission and host construction must agree on the same immutable map set.
         public static bool SupportsTerrain(IPlayableTerrain terrain)
-            =>terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap||terrain is MossHighlandMap||terrain is CampaignOpeningMap||terrain is WhiteMeridianMap||terrain is AiTestMap||terrain is ProvingGroundMap||terrain is CrimsonGroveMap||terrain is NullDockMap||terrain is AntennaCityMap;
+            =>terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap||terrain is MossHighlandMap||terrain is CampaignOpeningMap||terrain is WhiteMeridianMap||terrain is AiTestMap||terrain is ProvingGroundMap||terrain is CrimsonGroveMap||terrain is NullDockMap||terrain is DeafMirrorMap||terrain is AntennaCityMap;
 
         public PartitionNavigationProvider(IPlayableTerrain terrain, NavGeometry movementGeometry, string holdBinding)
         {
@@ -117,10 +120,33 @@ namespace Spacewars.Simulation
         public bool TryTrace(NavLocation from, NavPoint to, NavClearanceProfile clearance,
             out NavLocation reached, out IReadOnlyList<NavTypedLeg> trace)
             => locations.TryTrace(from, to, clearance.Radius, out reached, out trace);
+        internal bool PrepareSurfaceTrace(NavLocation from,NavPoint target,double radius,
+            Action<NavLocation,NavLocation,double,NavTypedLegKind,string> emit)
+            => locations.PrepareSurfaceTrace(from,target,radius,emit);
+
         internal bool TryTraceOwned(NavLocation from,NavPoint to,NavClearanceProfile clearance,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace,INavStorageReservation reservation)
         {
             if(StorageRoot!=null)NavStorageAdmission.RequireOwned(reservation,StorageRoot);
             return locations.TryTrace(from,to,clearance.Radius,out reached,out trace,reservation,this);
+        }
+        // Same name/portal checks as NavTypedLeg.CreateOwned, for a synchronous
+        // observer that does not retain a leg. Provider ownership is admitted
+        // by TryObserveTrace before the callback can run.
+        internal void CanonicalTraceSegment(ref NavLocation from,ref NavLocation to,ref string portal,INavStorageReservation reservation)
+        {
+            from.RequireName(reservation);to.RequireName(reservation);
+            from=LayeredNavigationCompileWork.CanonicalLocation(this,from);to=LayeredNavigationCompileWork.CanonicalLocation(this,to);
+            if(portal!=null){string canonical=null;foreach(var seam in Seams)if(seam.Id==portal){canonical=seam.Id;break;}if(canonical==null)throw new ArgumentException("Unknown owned leg portal binding.");portal=canonical;}
+        }
+        internal bool TryObserveTrace(NavLocation from,NavPoint to,NavClearanceProfile clearance,INavStorageReservation reservation,Action<NavLocation,NavLocation,double,NavTypedLegKind,string> observe,out NavLocation reached)
+        {
+            NavStorageAdmission.RequireOwned(reservation,StorageRoot);
+            return locations.TryObserveTrace(from,to,clearance.Radius,reservation,observe,out reached);
+        }
+        internal bool ConnectsWithoutPortal(NavLocation from,NavLocation to,NavClearanceProfile clearance,INavStorageReservation reservation)
+        {
+            NavStorageAdmission.RequireOwned(reservation,StorageRoot);
+            return locations.ConnectsWithoutPortal(from,to,clearance.Radius,reservation);
         }
         internal void VerifyPhysicalTrace(NavLocation from,NavLocation to,NavClearanceProfile clearance,IReadOnlyList<NavTypedLeg> trace,INavStorageReservation reservation)
             =>locations.VerifyTrace(from,to,clearance,trace,this,reservation);

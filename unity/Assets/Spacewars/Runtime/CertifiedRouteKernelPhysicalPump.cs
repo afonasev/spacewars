@@ -27,21 +27,26 @@ namespace Spacewars.Runtime
         }
         private void RefreshPhysicalFrontier(NavigationRoutePort port)
         {var root=port.PinCommittedHostRoot();try{if(root!=null)AdoptPhysicalFrontier(root);}finally{root?.Release();}}
-        private bool PublishPhysicalFrame(NavigationRoutePort port,PumpFrontier frame)
+        private bool PublishPhysicalFrame(NavigationRoutePort port,PumpFrontier frame,NavigationRequest deferred=null)
         {
             var source=port.PinCommittedHostRoot();NavigationHostRoot next=null;
             NavigationRetentionBudget.Scope scope=null;
             try{
                 if(!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Solve,epoch,
                     port.Admission.PublicationIdentity,out scope))return false;
-                next=source==null?port.CreatePhysicalHostRoot(scope.OwnedReservation()):source.ForkOwned(scope.OwnedReservation());
-                if(source==null)port.StageRetainedPhysicalArrivals(next,scope.OwnedReservation());
-                next.SetFrontier(frame,epoch,ProgressSequence);
-                if(next.QuantumRunnable&&frame.Stage==PumpStage.Idle)next.CompleteQuantum();
-                next.SetOperation(new NavigationHostRoot.OperationDescriptor(frame.Stage,frame.PhaseUsed,false,false,default));
-                next.SealPrepared();scope.Attach(next);port.PublishPhysicalHostRoot(scope,source,next);
+                var reservation=scope.CapacityReservationOwned();
+                if(source!=null&&!scope.HasAllocationAdmission)
+                    next=source.WithPumpFrontier(frame,epoch,ProgressSequence,reservation);
+                else{
+                    next=source==null?port.CreatePhysicalHostRoot(reservation):source.ForkOwned(reservation);
+                    if(source==null)port.StageRetainedPhysicalArrivals(next,reservation);
+                    next.PreparePumpStage(frame,epoch,ProgressSequence);
+                    next.SealPrepared();
+                }
+                scope.Attach(next);port.PublishPhysicalHostRoot(scope,source,next,deferred);
                 AdoptPhysicalFrontier(next);return true;
-            }finally{next?.ReleaseStorage();scope?.Discard();source?.Release();}
+            }catch(NavigationRetentionBudget.CapacityRefused){return false;}
+            finally{next?.ReleaseStorage();scope?.Discard();source?.Release();}
         }
         private bool RetirePhysicalIdleCacheForArrival(NavigationRoutePort port)
         {
@@ -62,13 +67,20 @@ namespace Spacewars.Runtime
             }catch(NavigationSession.PhysicalIngressRefused){return false;}
             finally{next?.ReleaseStorage();scope?.Discard();source?.Release();}
         }
-        private bool? TryDropPhysicalStale(NavigationRoutePort port)
+        private bool? TryDropPhysicalStale(NavigationRoutePort port, bool replay = false)
         {
             if(!port.TryObservePhysicalStale(out var request))return null;
             var source=port.PinCommittedHostRoot();NavigationHostRoot next=null;NavigationRetentionBudget.Scope scope=null;
             try{
                 if(!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,epoch,port.Admission.PublicationIdentity,out scope))return false;
-                next=source.ForkOwned(scope.OwnedReservation());var f=CapturePumpFrontier();next.SetFrontier(WithCounters(f,transfers:checked(f.TransfersUsed+1)),epoch,checked(ProgressSequence+1));next.SetOperation(new NavigationHostRoot.OperationDescriptor(PumpStage.Transfer,f.TransfersUsed,true,false,default));next.SealPrepared();
+                var reservation = scope.OwnedReservation();
+                next = source == null && replay ? port.CreatePhysicalHostRoot(reservation) : source.ForkOwned(reservation);
+                if (source == null) port.StageRetainedPhysicalArrivals(next, reservation);
+                var f = CapturePumpFrontier();
+                next.SetFrontier(replay ? new PumpFrontier(PumpStage.Idle,0,0,0,0,0,0,0,0,0) :
+                    WithCounters(f,transfers:checked(f.TransfersUsed+1)),epoch,checked(ProgressSequence+1));
+                next.SetOperation(new NavigationHostRoot.OperationDescriptor(PumpStage.Transfer,f.TransfersUsed,true,false,default));
+                next.SealPrepared();
                 return port.PublishOwnedStaleIngress(scope,source,next,request);
             }finally{next?.ReleaseStorage();scope?.Discard();source?.Release();}
         }
@@ -109,6 +121,13 @@ namespace Spacewars.Runtime
             }catch(NavigationSession.PhysicalIngressRefused){diagnostic.Reason=3;return false;}catch{diagnostic.Committed=-1;diagnostic.Reason=5;throw;}finally{if(observedDiagnostic){diagnostic.Quantum=source?.QuantumSerial??0;OriginalGroupTrace.Append(diagnostic);}next?.ReleaseStorage();scope?.Discard();source?.Release();}
         }
         internal Func<bool> PauseAtPhysicalBoundary;
+        internal bool DropStaleRecordedIngress(NavigationRoutePort port)
+        {
+            Attach(port);
+            if (TryDropPhysicalStale(port, replay: true) != true) return false;
+            RefreshPhysicalFrontier(port);
+            return true;
+        }
         internal Func<bool> CapturePauseRequested;
         internal int PhysicalOperationsPerPump=int.MaxValue;
         private int pumpExecutions;
@@ -175,6 +194,7 @@ namespace Spacewars.Runtime
                         if(f.TransfersUsed<grant&&Continue?.Invoke()!=false){
                             var stale=TryDropPhysicalStale(port);
                             if(stale.HasValue){if(!stale.Value)return;RefreshPhysicalFrontier(port);break;}
+                            if (f.TransfersUsed == 0) port.PrioritizePhysicalRecastIngress();
                             if(TryRegisterPhysicalArrival(binding)||TryRegisterPhysicalOrdinary(binding)){RefreshPhysicalFrontier(port);break;}
                         }
                         if(!PublishPhysicalFrame(port,WithCounters(f,PumpStage.Solve,solveLimit:checked(grant*WorkUnitsPerRequestBudget))))return;break;
@@ -190,7 +210,11 @@ namespace Spacewars.Runtime
                         if(remaining>0)AdvancePhysicalOrdinary(binding,remaining);RefreshPhysicalFrontier(port);
                         if(pumpStage!=PumpStage.Solve)break;
                         if(local>0&&CapturePumpFrontier().SolveConsumed<CapturePumpFrontier().SolveWorkLimit)break;
-                        if(!PublishPhysicalFrame(port,WithCounters(CapturePumpFrontier(),PumpStage.Ready)))return;break;
+                        NavigationRequest deferred=null;
+                        if(port.QueuedRequestCount>1&&port.TryObservePhysicalIngress(out var head,out var ingressPin)){
+                            using(ingressPin)if(recastPreparation?.NeedsMoreWork(head)==true)deferred=head;
+                        }
+                        if(!PublishPhysicalFrame(port,WithCounters(CapturePumpFrontier(),PumpStage.Ready),deferred))return;break;
                     case PumpStage.Ready:
                         if(f.ReadyUsed<grant&&TransferPhysicalReady(binding,grant-f.ReadyUsed)>0){RefreshPhysicalFrontier(port);break;}
                         if(!PublishPhysicalFrame(port,WithCounters(CapturePumpFrontier(),PumpStage.Projection)))return;break;

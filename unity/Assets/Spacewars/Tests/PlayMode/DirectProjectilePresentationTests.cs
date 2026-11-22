@@ -372,7 +372,7 @@ public sealed class DirectProjectilePresentationTests
             Assert.True(Snapshot().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Hawk),"Actual domain must launch within the bounded preparation horizon.");
             for(int frame=0;frame<90;frame++)
             {
-                var snapshot=Snapshot();Set("view",snapshot);world.AdvanceAircraftAnimation(snapshot,snapshot.Tick/30d);
+                var snapshot=Snapshot();Set("view",snapshot);world.UpdateMatchAnimation(snapshot);
                 foreach(var entity in snapshot.Entities.Where(e=>e.Id==shooter||e.Id==target))
                 {
                     if(!world.Actors.TryGetValue(entity.Id,out var actor))actor=world.Tank(entity.Id,entity.Owner==PlayableOwner.Player,entity.Kind);

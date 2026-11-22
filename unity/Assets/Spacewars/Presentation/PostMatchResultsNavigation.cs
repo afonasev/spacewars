@@ -34,13 +34,22 @@ namespace Spacewars.Presentation
             if(!inspecting)return false;
             if(direction.y!=0)
             {
-                activeMetric=(Math.Max(0,activeMetric)+(direction.y>0?3:1))%4;selectedStack=-1;graphs[activeMetric].Focus();InspectTime(cursorTime);return true;
+                activeGraphIndex=(Math.Max(0,activeGraphIndex)+(direction.y>0?graphs.Count-1:1))%graphs.Count;
+                selectedStack=-1;FocusInspectedGraph();return true;
             }
             StepEvent(direction.x<0?-1:1);return true;
         }
+        private void FocusInspectedGraph()
+        {
+            var chart=graphs[activeGraphIndex];
+            chart.Focus();
+            graphScroll.ScrollTo(chart.parent.parent);
+            InspectTime(cursorTime);
+        }
+
         private void StepEvent(int direction)
         {
-            var chart=graphs[Math.Max(0,activeMetric)];var stacks=chart.Stacks.OrderBy(s=>s.Time).ThenBy(s=>s.Facts[0].Sequence).ToArray();
+            var chart=graphs[Math.Max(0,activeGraphIndex)];var stacks=chart.Stacks.OrderBy(s=>s.Time).ThenBy(s=>s.Facts[0].Sequence).ToArray();
             if(stacks.Length==0){InspectTime(cursorTime+direction);return;}
             int next=direction>0?Array.FindIndex(stacks,s=>s.Time>cursorTime+1e-6):Array.FindLastIndex(stacks,s=>s.Time<cursorTime-1e-6);
             // Select separately even when several stacks share exactly the same timestamp.
@@ -52,14 +61,14 @@ namespace Spacewars.Presentation
             if(focused?.userData is Action action){action();return true;}
             int graph=graphs.FindIndex(g=>g==focused);
             if(graph<0)return false;
-            if(!inspecting){inspecting=true;activeMetric=graph;selectedStack=-1;InspectTime(cursorTime);return true;}
-            var stack=graphs[activeMetric].Stacks.OrderBy(s=>Math.Abs(s.Time-cursorTime)).ThenBy(s=>s.Facts[0].Sequence).FirstOrDefault();
+            if(!inspecting){inspecting=true;activeGraphIndex=graph;selectedStack=-1;FocusInspectedGraph();return true;}
+            var stack=graphs[activeGraphIndex].Stacks.OrderBy(s=>Math.Abs(s.Time-cursorTime)).ThenBy(s=>s.Facts[0].Sequence).FirstOrDefault();
             if(stack!=null)OpenEvents(stack.Anchor,stack.Facts);return true;
         }
         bool INativeMenuScope.Cancel()
         {
             if(popup!=null){CloseDetails(true);return true;}
-            if(inspecting){inspecting=false;selectedStack=-1;graphTip.style.display=DisplayStyle.None;if(activeMetric>=0&&activeMetric<graphs.Count)graphs[activeMetric].Focus();return true;}
+            if(inspecting){inspecting=false;selectedStack=-1;graphTip.style.display=DisplayStyle.None;if(activeGraphIndex>=0&&activeGraphIndex<graphs.Count)graphs[activeGraphIndex].Focus();return true;}
             return false;
         }
         bool INativeMenuScope.ReadGamepad(Gamepad pad,float now)
@@ -73,8 +82,11 @@ namespace Spacewars.Presentation
             if(pad.rightStick.ReadValue().sqrMagnitude>.08f)
             {
                 usingPad=true;var focused=Root.focusController?.focusedElement as VisualElement;
+                var axis=pad.rightStick.ReadValue();
                 var scroll=popupScroll??focused?.GetFirstAncestorOfType<ScrollView>()??focused?.parent?.Q<ScrollView>()??content.Q<ScrollView>();
-                if(scroll!=null){var axis=pad.rightStick.ReadValue();scroll.scrollOffset=new Vector2(Mathf.Clamp(scroll.scrollOffset.x+axis.x*dt*420,0,Math.Max(0,scroll.horizontalScroller.highValue)),Mathf.Clamp(scroll.scrollOffset.y-axis.y*dt*420,0,Math.Max(0,scroll.verticalScroller.highValue)));}
+                if(Mathf.Abs(axis.y)>Mathf.Abs(axis.x)&&descriptionScroll!=null&&descriptionScroll.verticalScroller.highValue>0)
+                    scroll=descriptionScroll;
+                if(scroll!=null){scroll.scrollOffset=new Vector2(Mathf.Clamp(scroll.scrollOffset.x+axis.x*dt*420,0,Math.Max(0,scroll.horizontalScroller.highValue)),Mathf.Clamp(scroll.scrollOffset.y-axis.y*dt*420,0,Math.Max(0,scroll.verticalScroller.highValue)));}
             }
             if(!inspecting||popup!=null)return false;
             var stick=pad.leftStick.ReadValue();if(Math.Abs(stick.x)>.2f){selectedStack=-1;InspectTime(cursorTime+stick.x*dt*Math.Max(1,Result.Duration/8));}

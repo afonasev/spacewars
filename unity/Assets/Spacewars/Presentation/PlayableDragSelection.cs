@@ -63,6 +63,11 @@ namespace Spacewars.Presentation
             float left=Mathf.Min(from.x,to.x),right=Mathf.Max(from.x,to.x),bottom=Mathf.Min(from.y,to.y),top=Mathf.Max(from.y,to.y);
             foreach(var entity in view.Entities)if(entity.Owner==view.Owner&&entity.Health>0)
             {
+                if(PlayableUnitRules.Aircraft(entity.Kind))
+                {
+                    if(world.HawkScreenBounds(cameraView,entity,out var bounds)&&bounds.Overlaps(Rect.MinMaxRect(left,bottom,right,top)))yield return entity.Id;
+                    continue;
+                }
                 var point=cameraView.WorldToScreenPoint(world.EntityPoint(entity));
                 if(point.z>0&&point.x>=left&&point.x<=right&&point.y>=bottom&&point.y<=top)yield return entity.Id;
             }
@@ -76,6 +81,6 @@ namespace Spacewars.Presentation
             if(input.SelectionAppendHeld)foreach(var entity in view.Entities)if(entity.Owner==view.Owner&&entity.Health>0&&selection.Contains(entity.Id))dragSelectionPreview.Add(entity.Id);
             foreach(int id in BoxSelectionUnits(dragSelectionFrom,dragSelectionTo))dragSelectionPreview.Add(id);
         }
-        private bool DisplayedSelection(int id)=>worldDragPreviewActive?dragSelectionPreview.Contains(id):selection.Contains(id);
+        private bool DisplayedSelection(int id)=>worldDragPreviewActive?dragSelectionPreview.Contains(id):selection.Contains(id)||inspectionEntityId==id;
     }
 }

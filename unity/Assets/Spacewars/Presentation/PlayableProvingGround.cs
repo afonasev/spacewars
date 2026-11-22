@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
@@ -37,6 +38,20 @@ namespace Spacewars.Presentation
         private void CloseProvingConstruction(){provingConstruction?.RemoveFromHierarchy();provingConstruction=null;}
 
         private readonly string[] provingTabs={"Юниты","Юниты"};
+        private static readonly PlayableResearchKind[][] ProvingResearchChains={
+            new[]{PlayableResearchKind.TankChassis},new[]{PlayableResearchKind.ExplorerAssaultGuns,PlayableResearchKind.ExplorerRocketLauncher},
+            new[]{PlayableResearchKind.ShkvalGuidance},new[]{PlayableResearchKind.HawkSalvoSystems},
+            new[]{PlayableResearchKind.ImprovedWeaponSystems,PlayableResearchKind.AdvancedWeaponSystems,PlayableResearchKind.UltimateWeaponSystems},
+            new[]{PlayableResearchKind.ImprovedDefensiveSystems,PlayableResearchKind.AdvancedDefensiveSystems,PlayableResearchKind.UltimateDefensiveSystems},
+            new[]{PlayableResearchKind.ReinforcedConcrete,PlayableResearchKind.AdvancedReinforcedConcrete}};
+        private readonly Dictionary<(int side,PlayableResearchKind root),int> provingResearchStages=new();
+        private PlayableRuntime provingResearchUiRuntime;
+        private void BindProvingResearchRuntime()
+        {
+            if(ReferenceEquals(provingResearchUiRuntime,runtime))return;
+            provingResearchUiRuntime=runtime;provingResearchStages.Clear();
+        }
+
         private void OpenProvingGround(PlayableProfile snapshot,GameplayAudioProfile audio)
         {
             if(provingGroundBusy||provingGround!=null)return;
@@ -125,37 +140,80 @@ namespace Spacewars.Presentation
             }
             var list=OrbitalTheme.Scroll();list.style.flexShrink=1;list.style.minHeight=0;panel.Add(list);
             if(provingTabs[side]=="Юниты"){
-                foreach(PlayableEntityKind kind in Enum.GetValues(typeof(PlayableEntityKind))){if(!PlayableUnitRules.Supported(kind))continue;var k=kind;
-                    var b=Button(UnitName(k),()=>{provingUnit=provingSide==side&&provingUnit==k?null:(PlayableEntityKind?)k;provingSide=side;provingStatus.text="Игрок "+(side+1)+": "+UnitName(k)+" — укажите точку на своей половине";});b.name="proving-unit-"+side+"-"+kind;b.style.flexShrink=0;b.style.height=b.style.minHeight=34;b.style.fontSize=14;b.style.marginBottom=4;
+                var units=Enum.GetValues(typeof(PlayableEntityKind)).Cast<PlayableEntityKind>()
+                    .Where(PlayableUnitRules.Supported).OrderBy(RadialActionPresentation.UnitDisplaysLast).ThenBy(PlayableUnitRules.Aircraft);
+                foreach(var kind in units){
+                    var b=Button(UnitName(kind),()=>{provingUnit=provingSide==side&&provingUnit==kind?null:(PlayableEntityKind?)kind;provingSide=side;provingStatus.text="Игрок "+(side+1)+": "+UnitName(kind)+" — укажите точку на своей половине";});b.name="proving-unit-"+side+"-"+kind;b.style.flexShrink=0;b.style.height=b.style.minHeight=34;b.style.fontSize=14;b.style.marginBottom=4;
                     b.style.paddingLeft=36;b.style.unityTextAlign=TextAnchor.MiddleLeft;
                     var icon=new OrbitalGlyph(kind.ToString().ToLowerInvariant());icon.style.position=Position.Absolute;icon.style.left=6;icon.style.top=6;icon.style.width=24;icon.style.height=20;b.Add(icon);
-                    b.RegisterCallback<PointerEnterEvent>(_=>ShowProvingUnitDetail(b,side,k));
+                    b.RegisterCallback<PointerEnterEvent>(_=>ShowProvingUnitDetail(b,side,kind));
                     b.RegisterCallback<PointerLeaveEvent>(_=>{if(provingUnitDetail!=null)provingUnitDetail.style.display=DisplayStyle.None;});list.Add(b);}
                 foreach(var action in new[]{Button("Убрать последний юнит",()=>runtime.RemoveProvingGroundUnits(side,false)),Button("Очистить юнитов стороны",()=>runtime.RemoveProvingGroundUnits(side,true))}){
                     action.style.height=action.style.minHeight=30;action.style.fontSize=13;action.style.marginBottom=4;list.Add(action);
                 }
             }else{
-                foreach(PlayableResearchKind kind in Enum.GetValues(typeof(PlayableResearchKind))){
-                    if(PlayableResearchRules.Local(kind))continue;
-                    var k=kind;string title=PlayableResearchRules.Name(k);
-                    var row=new VisualElement{name="proving-research-row-"+side+"-"+k};row.style.flexDirection=FlexDirection.Row;row.style.alignItems=Align.Center;row.style.marginBottom=4;row.style.minHeight=24;row.style.flexShrink=0;row.style.width=Length.Percent(100);list.Add(row);
-                    var toggle=new Toggle(){name="proving-research-"+side+"-"+k,tooltip=title,value=ProvingView(side)?.OwnerResearch.Any(o=>o.Kind==k&&o.Complete)==true};
-                    toggle.AddToClassList("proving-research");
-                    toggle.style.width=20;toggle.style.minWidth=20;toggle.style.maxWidth=20;toggle.style.height=toggle.style.minHeight=toggle.style.maxHeight=22;toggle.style.flexShrink=0;toggle.style.marginLeft=toggle.style.marginTop=toggle.style.marginRight=toggle.style.marginBottom=0;toggle.style.paddingLeft=toggle.style.paddingRight=0;
-                    var check=toggle.Q(className:"unity-toggle__input");check.style.paddingLeft=check.style.paddingRight=0;check.style.minWidth=0;check.style.flexGrow=1;check.style.marginLeft=check.style.marginRight=0;
-                    var mark=toggle.Q(className:"unity-toggle__checkmark");mark.style.width=mark.style.minWidth=18;mark.style.height=mark.style.minHeight=18;mark.style.marginLeft=mark.style.marginRight=0;
-                    row.Add(toggle);var label=new Label(ProvingResearchName(k)){name="proving-research-label-"+side+"-"+k};label.style.fontSize=13;label.style.marginLeft=2;label.style.marginRight=0;label.style.paddingLeft=label.style.paddingRight=0;label.style.whiteSpace=WhiteSpace.Normal;label.style.flexGrow=1;label.style.flexShrink=1;label.style.flexBasis=0;label.style.minWidth=0;row.Add(label);
-                    label.RegisterCallback<ClickEvent>(_=>{if(toggle.enabledSelf)toggle.value=!toggle.value;});
-                    row.RegisterCallback<PointerEnterEvent>(_=>ShowProvingDetail(row,side,title+"\n"+PlayableResearchRules.Description(profile,k)+(PlayableResearchRules.Previous(k).HasValue?"\nСначала исследуются предыдущие уровни.":"")+"\n\nПрименяется сразу · без зданий. Снимите галку, чтобы отменить."));
+                BindProvingResearchRuntime();
+                foreach(var chain in ProvingResearchChains)
+                {
+                    var rootKind=chain[0];
+                    if(rootKind==PlayableResearchKind.ImprovedWeaponSystems){var groupHeading=LobbyText("Общие улучшения",11,OrbitalTheme.Muted);groupHeading.style.marginTop=3;groupHeading.style.marginBottom=1;list.Add(groupHeading);}
+                    var row=new VisualElement{name="proving-research-row-"+side+"-"+rootKind};row.style.marginBottom=2;row.style.flexShrink=0;row.style.width=Length.Percent(100);list.Add(row);
+                    var button=Button("",()=>CycleProvingResearch(side,chain));button.name="proving-research-"+side+"-"+rootKind;
+                    button.style.height=button.style.minHeight=27;button.style.paddingTop=button.style.paddingBottom=0;button.style.marginTop=button.style.marginBottom=button.style.marginLeft=button.style.marginRight=0;
+                    button.style.flexDirection=FlexDirection.Row;button.style.alignItems=Align.Center;button.style.width=Length.Percent(100);row.Add(button);
+                    var artwork=new RadialArtwork();artwork.style.width=artwork.style.height=24;artwork.style.flexShrink=0;artwork.style.marginRight=6;button.Add(artwork);
+                    var label=new Label(ProvingResearchTitle(rootKind)){name="proving-research-label-"+side+"-"+rootKind,pickingMode=PickingMode.Ignore};
+                    label.style.fontSize=13;label.style.flexGrow=1;label.style.flexShrink=1;label.style.minWidth=0;label.style.whiteSpace=WhiteSpace.NoWrap;label.style.overflow=Overflow.Hidden;label.style.textOverflow=TextOverflow.Ellipsis;button.Add(label);
+                    var badge=new Label{name="proving-research-stage-"+side+"-"+rootKind,pickingMode=PickingMode.Ignore};badge.style.width=36;badge.style.height=22;badge.style.flexShrink=0;badge.style.fontSize=13;badge.style.unityFontStyleAndWeight=FontStyle.Bold;badge.style.borderTopLeftRadius=badge.style.borderTopRightRadius=badge.style.borderBottomLeftRadius=badge.style.borderBottomRightRadius=3;badge.style.unityTextAlign=TextAnchor.MiddleCenter;button.Add(badge);
+                    RefreshProvingResearchRow(side,chain);
+                    row.RegisterCallback<PointerEnterEvent>(_=>ShowProvingDetail(row,side,ProvingResearchDescription(side,chain)));
                     row.RegisterCallback<PointerLeaveEvent>(_=>{if(provingUnitDetail!=null)provingUnitDetail.style.display=DisplayStyle.None;});
-                    toggle.RegisterValueChangedCallback(e=>{if(!runtime.SetProvingGroundResearch(side,k,e.newValue))provingStatus.text="Действие сейчас недоступно";});
                 }
             }
             return panel;
         }
+        private static string ProvingResearchTitle(PlayableResearchKind root)=>root switch {
+            PlayableResearchKind.ExplorerAssaultGuns=>"Исследователь",PlayableResearchKind.ShkvalGuidance=>"Шквал: наведение",PlayableResearchKind.HawkSalvoSystems=>"Ястреб: залп",PlayableResearchKind.ImprovedWeaponSystems=>"Урон",
+            PlayableResearchKind.ImprovedDefensiveSystems=>"Здоровье",PlayableResearchKind.ReinforcedConcrete=>"Усиленный бетон",_=>ProvingResearchName(root)};
+        private static string ProvingStageLabel(int stage)=>stage==0?"—":stage==1?"I":stage==2?"II":"III";
+        private static string ProvingResearchArtwork(PlayableResearchKind kind)=>kind switch {
+            PlayableResearchKind.TankChassis=>RadialActionPresentation.UnitArtwork(PlayableEntityKind.Tank,true),
+            PlayableResearchKind.ExplorerAssaultGuns=>RadialActionPresentation.UnitArtwork(PlayableEntityKind.Explorer,true),
+            PlayableResearchKind.ShkvalGuidance=>RadialActionPresentation.UnitArtwork(PlayableEntityKind.Shkval,true),
+            PlayableResearchKind.HawkSalvoSystems=>RadialActionPresentation.UnitArtwork(PlayableEntityKind.Hawk,true),_=>OrbitalPrecision.ResearchGlyph(kind)};
+        private void CycleProvingResearch(int side,PlayableResearchKind[] chain)
+        {
+            if(runtime==null||provingGroundBusy||provingGroundBattle)return;
+            BindProvingResearchRuntime();var key=(side,chain[0]);int stage=provingResearchStages.TryGetValue(key,out var current)?current:0;
+            int next=(stage+1)%(chain.Length+1);
+            if(!runtime.SelectProvingGroundResearch(side,chain[0],next==0?null:(PlayableResearchKind?)chain[next-1])){provingStatus.text="Действие сейчас недоступно";return;}
+            provingResearchStages[key]=next;RefreshProvingResearchRow(side,chain,optimistic:true);
+        }
+        private void RefreshProvingResearchRow(int side,PlayableResearchKind[] chain,bool optimistic=false)
+        {
+            var button=provingGroundLayer?.Q<Button>("proving-research-"+side+"-"+chain[0]);if(button==null)return;
+            var key=(side,chain[0]);bool cached=provingResearchStages.TryGetValue(key,out var current);int stage=cached?current:0;
+            if(!optimistic&&(!cached||runtime?.ProvingGroundEditsPending!=true))
+            {
+                IEnumerable<PlayableResearchKind> selected=runtime!=null?runtime.ProvingGroundResearchSelection(side):provingGround.Research(side);
+                stage=0;for(int i=0;i<chain.Length;i++)if(selected.Contains(chain[i]))stage=i+1;
+            }
+            provingResearchStages[key]=stage;
+            if(button.userData is int shown&&shown==stage)return;
+            button.userData=stage;
+            var badge=button.Q<Label>("proving-research-stage-"+side+"-"+chain[0]);badge.text=ProvingStageLabel(stage);badge.style.color=stage>0?OrbitalTheme.Cyan:OrbitalTheme.Muted;badge.style.backgroundColor=stage>0?PanelColor:Color.clear;
+            button.Q<RadialArtwork>().Set(ProvingResearchArtwork(chain[Math.Max(0,stage-1)]),upgraded:true,available:stage>0);
+            button.tooltip=ProvingResearchTitle(chain[0])+" · "+ProvingStageLabel(stage)+"\nНажмите для следующей ступени; после последней цепочка выключается.";
+        }
+        private string ProvingResearchDescription(int side,PlayableResearchKind[] chain)
+        {
+            int stage=provingResearchStages.TryGetValue((side,chain[0]),out var current)?current:0;
+            var kind=chain[Math.Max(0,stage-1)];string cycle=chain.Length==2&&chain[0]==PlayableResearchKind.ExplorerAssaultGuns?"выкл. → орудия → ракеты → выкл.":"выкл. → "+string.Join(" → ",Enumerable.Range(1,chain.Length).Select(ProvingStageLabel))+" → выкл.";
+            return PlayableResearchRules.Name(kind)+" · "+ProvingStageLabel(stage)+"\n"+PlayableMenuDescriptions.ResearchDetail(profile,kind,ProvingView(side)?.OwnerResearch)+"\n\nНажатие по строке: "+cycle+"\nПредыдущие ступени включаются автоматически. Применяется сразу, без зданий.";
+        }
         private static string ProvingResearchName(PlayableResearchKind kind)=>kind switch {
-            PlayableResearchKind.TankChassis=>"Танк: шасси",PlayableResearchKind.ExplorerAssaultGuns=>"Исследователь: орудия",
-            PlayableResearchKind.ShkvalGuidance=>"Шквал: наведение",PlayableResearchKind.HawkSalvoSystems=>"Ястреб: залповый огонь",
+            PlayableResearchKind.TankChassis=>PlayableResearchRules.Name(kind),PlayableResearchKind.ExplorerAssaultGuns=>"Исследователь: орудия",
+            PlayableResearchKind.ShkvalGuidance=>PlayableResearchRules.Name(kind),PlayableResearchKind.HawkSalvoSystems=>"Ястреб: залповый огонь",
             PlayableResearchKind.UltimateWeaponSystems=>"Урон III",PlayableResearchKind.UltimateDefensiveSystems=>"Здоровье III",
             PlayableResearchKind.ImprovedWeaponSystems=>"Урон I",PlayableResearchKind.AdvancedWeaponSystems=>"Урон II",
             PlayableResearchKind.ImprovedDefensiveSystems=>"Здоровье I",PlayableResearchKind.AdvancedDefensiveSystems=>"Здоровье II",_=>PlayableResearchRules.Name(kind)
@@ -207,11 +265,11 @@ namespace Spacewars.Presentation
         // Ordinary input handles maps/camera. This is the sole preparation world-click path.
         private NavPoint ProvingPlacementPoint(Vector2 screen)
         {
-            if(provingUnit!=PlayableEntityKind.Hawk)return Ground(screen);
+            if(!provingUnit.HasValue||!PlayableUnitRules.Aircraft(provingUnit.Value))return Ground(screen);
             var ray=cameraView.ScreenPointToRay(screen);
             // The proving map is flat. Test every possible clearance plane and keep
             // the nearest valid body center, including flight above buildings.
-            double center=PlayableUnitRules.HawkBodyHeight(profile)/2;
+            double center=PlayableUnitRules.AircraftBodyHeight(profile,provingUnit.Value)/2;
             var heights=new[]{profile.HawkClearance+center}.Concat(view.Buildings.Where(b=>b.Phase!=ConstructionPhase.Pending).Select(b=>PlayableUnitRules.AirBuildingHeight(profile,b.Kind)+profile.HawkClearance+center));
             double nearest=double.PositiveInfinity;NavPoint result=new NavPoint(double.NaN,double.NaN);
             foreach(double height in heights){
@@ -257,8 +315,20 @@ namespace Spacewars.Presentation
             }else{
                 int site=building.SiteId,slot=building.SlotId;
                 if(building.Kind==PlayableBuildingKind.Factory||building.Kind==PlayableBuildingKind.Hangar){
-                    foreach(var kind in Enum.GetValues(typeof(PlayableEntityKind)).Cast<PlayableEntityKind>().Where(k=>PlayableUnitRules.Supported(k)&&(k==PlayableEntityKind.Hawk)==(building.Kind==PlayableBuildingKind.Hangar))){var k=kind;
-                        provingConstruction.Add(Button(UnitName(k)+" · произвести",()=>ProvingCommand(side,k==PlayableEntityKind.Tank?PlayableCommandKind.QueueTank:k==PlayableEntityKind.Explorer?PlayableCommandKind.QueueExplorer:k==PlayableEntityKind.Shkval?PlayableCommandKind.QueueShkval:PlayableCommandKind.QueueHawk,new[]{building.Id})));}
+                    bool hangar=building.Kind==PlayableBuildingKind.Hangar;
+                    foreach(var kind in Enum.GetValues(typeof(PlayableEntityKind)).Cast<PlayableEntityKind>()
+                        .Where(k=>PlayableUnitRules.Supported(k)&&PlayableUnitRules.Aircraft(k)==hangar).OrderBy(RadialActionPresentation.UnitDisplayOrder))
+                    {
+                        var order=Button(UnitName(kind)+" · произвести",()=>ProvingCommand(side,PlayableUnitRules.ProductionCommand(kind),new[]{building.Id}));
+                        if(kind==PlayableEntityKind.Igla||kind==PlayableEntityKind.Skat||kind==PlayableEntityKind.Cerberus)
+                        {
+                            order.name="proving-produce-"+kind;
+                            order.text=UnitName(kind)+" · бесплатно";
+                            order.userData=(side,building.Id);
+                            UpdateProvingGatedOrder(order);
+                        }
+                        provingConstruction.Add(order);
+                    }
                 }
 
                 if(building.Kind==PlayableBuildingKind.Refinery||building.Kind==PlayableBuildingKind.ScientificCenter||building.Kind==PlayableBuildingKind.Factory||building.Kind==PlayableBuildingKind.Hangar){
@@ -271,11 +341,31 @@ namespace Spacewars.Presentation
             }
             var close=Button("Закрыть",()=>{CloseProvingConstruction();root.Focus();});provingConstruction.Add(close);ProvingMouseOnly(provingConstruction);provingConstruction.BringToFront();return true;
         }
+        private void UpdateProvingGatedOrder(Button order)
+        {
+            var (side,id)=((int,int))order.userData;
+            var perspective=ProvingView(side);
+            var hangar=perspective?.Buildings.FirstOrDefault(b=>b.Id==id);
+            bool ready=hangar?.Phase==ConstructionPhase.Ready&&!hangar.SystemsDisabled&&hangar.PrivateState?.Lifecycle?.Selling!=true;
+            bool cerberus=order.name=="proving-produce-Cerberus";
+            bool science=perspective!=null&&(cerberus?OfflinePadWorldActions.CerberusAvailable(perspective):OfflinePadWorldActions.ShkvalAvailable(perspective));
+            order.SetEnabled(ready&&science);
+            order.tooltip=!ready?(cerberus||order.name=="proving-produce-Igla"?"Нужна готовая фабрика":"Нужен готовый ангар"):!science?(cerberus?"Нужен готовый улучшенный Научный центр":"Нужен готовый собственный Научный центр"):"Бесплатно";
+        }
         private PlayableSnapshot ProvingView(int side)=>runtime?.ParticipantView(side==0?"player-1":"enemy-1");
         private void ProvingCommand(int side,PlayableCommandKind kind,int[] ids=null,int site=0,int slot=0,PlayableBuildingKind buildingKind=PlayableBuildingKind.Headquarters,int parent=0,PlayableResearchKind research=PlayableResearchKind.TankChassis)
         {
             var command=new PlayableCommand(generation,++sequence,side==0?"player-1":"enemy-1",kind,ids,siteId:site,slotId:slot,buildingKind:buildingKind,parentId:parent,researchKind:research);
             if(!runtime.EditProvingGround(command))provingStatus.text="Действие сейчас недоступно";
+        }
+        private void DeleteProvingSelection()
+        {
+            if(!ProvingPreparation||KeyboardBlocksCamera||runtime==null||view==null)return;
+            var ids=view.Entities.Where(e=>e.Health>0&&(selection.Contains(e.Id)||e.Id==inspectionEntityId)).Select(e=>e.Id).ToArray();
+            if(ids.Length==0)return;
+            if(!runtime.RemoveProvingGroundSelection(ids)){provingStatus.text="Действие сейчас недоступно";return;}
+            selection.ExceptWith(ids);if(ids.Contains(inspectionEntityId))inspectionEntityId=0;
+            keyboardGroups.Observe(selection);SelectionMarkerEvent();
         }
         private void UpdateProvingGroundUi()
         {
@@ -285,10 +375,15 @@ namespace Spacewars.Presentation
                 if(label!=null)label.text="Армия: "+cost.Army.ToString("N0")+"\nИсследования: "+cost.Research.ToString("N0")+"\nВсего: "+(cost.Army+cost.Research).ToString("N0");
                 if(provingGroundBattle||provingTabs[side]!="Исследования")continue;
                 var view=ProvingView(side);
-                foreach(PlayableResearchKind kind in Enum.GetValues(typeof(PlayableResearchKind))){var toggle=provingGroundLayer?.Q<Toggle>("proving-research-"+side+"-"+kind);if(toggle==null)continue;
-                    var order=view.OwnerResearch.FirstOrDefault(o=>o.Kind==kind);toggle.SetValueWithoutNotify(order!=null);toggle.SetEnabled(true);
-                    toggle.tooltip=order?.Complete==true?"Применено · снимите галку для отмены":order?.Active==true?"Выполняется · "+(int)(order.Progress*100)+"%":order!=null?"В очереди":PlayableResearchRules.Name(kind);}
+                BindProvingResearchRuntime();
+                foreach(var chain in ProvingResearchChains)RefreshProvingResearchRow(side,chain);
             }
+            var skatOrder=provingConstruction?.Q<Button>("proving-produce-Skat");
+            if(skatOrder!=null)UpdateProvingGatedOrder(skatOrder);
+            var iglaOrder=provingConstruction?.Q<Button>("proving-produce-Igla");
+            if(iglaOrder!=null)UpdateProvingGatedOrder(iglaOrder);
+            var cerberusOrder=provingConstruction?.Q<Button>("proving-produce-Cerberus");
+            if(cerberusOrder!=null)UpdateProvingGatedOrder(cerberusOrder);
             if(runtime.ProvingGroundEditStatus!=null&&provingStatus!=null)provingStatus.text=runtime.ProvingGroundEditStatus;
         }
         private static double ProvingDistance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
@@ -299,7 +394,13 @@ namespace Spacewars.Presentation
             CloseProvingMenu();provingGroundBattle=true;paused=menuPaused=false;provingUnit=null;
             CloseMap();RestoreProvingMap();SetMatchUi(true);CreateProvingGroundUi();menuNavigation.SetScope(null);root.Focus();
         }
-        private void ResetProvingGround(){if(provingGroundBusy||provingGround==null)return;CloseProvingMenu();if(provingGroundBattle)provingGround=runtime.ProvingGroundResetSetup??provingGround;provingGroundBattle=false;paused=true;RebuildProvingGround();}
+        private void ResetProvingGround()
+        {
+            if(provingGroundBusy||provingGround==null)return;
+            CloseProvingMenu();
+            provingGround=provingGroundBattle?runtime.ProvingGroundResetSetup??provingGround:new ProvingGroundSetup(provingGround.Profile);
+            provingGroundBattle=false;provingUnit=null;CloseOrbital();CancelScanTarget();paused=true;RebuildProvingGround();
+        }
         private void ExitProvingGround()
         {
             if(provingGround==null||provingGroundBusy)return;

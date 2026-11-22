@@ -121,7 +121,7 @@ namespace Spacewars.Tests.EditMode
         {
             var planner=new AiArmyPlanner("player-1",71);planner.Rebind(P);var o=Army(3,true);
             var opening=PlayableAiOpeningComposition.Initialize(41,o.OwnerId,forcedOpening:PlayableAiOpening.GreedySafe);
-            Assert.True(AiOpponentSelector.KnownEconomicLead(o,P));var guard=planner.Propose(o,opening,P,AiProfile.Initial,Registry());Assert.NotNull(guard);Assert.AreEqual(PlayableCommandKind.Move,guard.Kind);
+            Assert.True(AiOpponentSelector.KnownEconomicLead(o,P));var guard=planner.Propose(o,opening,P,AiProfile.Initial,Registry());Assert.NotNull(guard);Assert.AreEqual(PlayableCommandKind.AttackMove,guard.Kind);
             var unknown=Army(3,possible:true);Assert.False(AiOpponentSelector.KnownEconomicLead(unknown,P));
             var attack=planner.Propose(unknown,opening,P,AiProfile.Initial,Registry());Assert.NotNull(attack);Assert.AreEqual(PlayableCommandKind.AttackMove,attack.Kind);
         }

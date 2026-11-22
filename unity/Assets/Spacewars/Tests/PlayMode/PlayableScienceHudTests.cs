@@ -59,14 +59,40 @@ public sealed class PlayableScienceHudTests
         var orders=new[]{new PlayableResearchOrderSnapshot(1,PlayableResearchKind.TankChassis,7,300,6,30,true,false),new PlayableResearchOrderSnapshot(2,PlayableResearchKind.ExplorerAssaultGuns,8,300,15,30,true,false),new PlayableResearchOrderSnapshot(3,PlayableResearchKind.ShkvalGuidance,7,0,0,0,false,false)};
         PlayableBuildingSnapshot Center(int id)=>new PlayableBuildingSnapshot(id,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,250,1,0,0,default,lifecycle:new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false),research:orders);
         Call("UpdateScienceHud",Center(7));
-        Assert.That(root.Q<Button>("research-slot-0").tooltip,Does.Contain("Шасси"));
-        Assert.That(root.Q<Button>("research-slot-1").tooltip,Does.Contain("Наведение"));
+        Assert.That(root.Q<Button>("research-slot-0").tooltip,Does.Contain("Улучшенное шасси"));
+        Assert.That(root.Q<Button>("research-slot-1").tooltip,Does.Contain("Дальнобойное наведение"));
         Assert.AreEqual("Свободный слот",root.Q<Button>("research-slot-2").tooltip);
         Assert.False(root.Q<Button>("research-ExplorerAssaultGuns").enabledSelf,"Other center's technology cannot be duplicated or cancelled here");
         Call("UpdateScienceHud",Center(8));
         Assert.That(root.Q<Button>("research-slot-0").tooltip,Does.Contain("Штурмовые орудия"));
         Assert.AreEqual("Свободный слот",root.Q<Button>("research-slot-1").tooltip);
         Assert.True(root.Q<Button>("research-ExplorerAssaultGuns").enabledSelf);Assert.False(root.Q<Button>("research-TankChassis").enabledSelf);
+    }
+    [Test] public void HiddenResearchClearsBindingsAndReopensWithCurrentCenter()
+    {
+        PlayableBuildingSnapshot Center(int id,PlayableResearchKind kind,long order)=>
+            new PlayableBuildingSnapshot(id,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,
+                250,1,0,0,default,research:new[]{new PlayableResearchOrderSnapshot(order,kind,id,300,6,30,true,false)});
+        Call("UpdateScienceHud",Center(7,PlayableResearchKind.TankChassis,31));
+        var button=root.Q<Button>("research-slot-0");
+        Assert.That(button.tooltip,Does.Contain("Улучшенное шасси"));
+        Assert.True(button.enabledSelf);
+        Call("UpdateScienceHud",new object[]{null});
+        Call("UpdateScienceHud",new object[]{null});
+        Assert.Zero((int)Get("scienceRefinery"));
+        Assert.False((bool)Get("scienceActionAllowed"));
+        Assert.False(button.enabledSelf);
+        Assert.AreEqual(DisplayStyle.None,button.style.display.value);
+        var slot=((Array)Get("researchSlots")).GetValue(0);
+        Assert.Zero((int)slot.GetType().GetField("Center").GetValue(slot));
+        Assert.Zero((long)slot.GetType().GetField("Order").GetValue(slot));
+
+        Call("UpdateScienceHud",Center(8,PlayableResearchKind.ShkvalGuidance,32));
+        Assert.AreSame(button,root.Q<Button>("research-slot-0"));
+        Assert.That(button.tooltip,Does.Contain("Дальнобойное наведение"));
+        Assert.True(button.enabledSelf);
+        Assert.AreEqual(8,slot.GetType().GetField("Center").GetValue(slot));
+        Assert.AreEqual(32L,slot.GetType().GetField("Order").GetValue(slot));
     }
     // Exercise the shipped profile and distinct authoring values: HUD text follows
     // the active profile, while cancellation/progress follows the order snapshot.

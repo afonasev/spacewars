@@ -53,13 +53,20 @@ namespace Spacewars.Runtime
             internal void Write(BinaryWriter w){w.Write(Id);w.Write(Kind);w.Write((int)Owner);WorldWire.Write(w,Position);}
             internal bool Same(Spacewars.Simulation.Ai.AiKnownContact c)=>Id==c.Id&&Kind==c.Kind&&Owner==c.Owner&&MotionExecutionBinding.Same(Position.X,c.Position.X)&&MotionExecutionBinding.Same(Position.Z,c.Position.Z);
         }
+#if UNITY_EDITOR || UNITY_INCLUDE_TESTS
+        internal Action<int,bool> PaidPathDenialForQa;
+#endif
         internal sealed class Submission
         {
             internal readonly long Id;internal string SourceIdentity;internal Input Input,Actual;
             internal KnownThreat[] Known;internal AiCombatMicroPolicy.ExecutionDescriptor[] Descriptors;
             internal AiCombatMicroExecutionPathWork[] Paths;internal AiCombatMicroExecutionPathWork.Cursor[] Staged;
             internal AiCombatMicroCoverScene Scene;internal AiCombatMicroExecutionStorage.Lease Memory;
-            internal AiCombatMicroExecutionMatch Match;internal int Index;internal Issued Permit;internal Ticket ActiveTicket;internal IAiCombatMicroNativeCommittedRecord Receipt;internal IDisposable ReceiptPin;internal AiCombatMicroExecutionMatch ReceiptMatch;
+            internal AiCombatMicroExecutionMatch Match;internal int Index;
+            // Terminal diagnostic used by the same ground preparation turn.
+            internal int RefusedReceiver;
+            internal (MotionExecutionBinding Binding,string Reason)? DeniedGroundRepairBranch;
+            internal Issued Permit;internal Ticket ActiveTicket;internal IAiCombatMicroNativeCommittedRecord Receipt;internal IDisposable ReceiptPin;internal AiCombatMicroExecutionMatch ReceiptMatch;
             internal byte[] Cold;internal bool RestoredExecuting;internal AiCombatMicroExecutionStatus State;
             internal Submission(long id){Id=id;}
         }
@@ -126,27 +133,72 @@ namespace Spacewars.Runtime
         }
         void InputCurrent(Input input){if(input==null||!input.Live||input.Registry!=this||!inputs.Contains(input))throw new ArgumentException("Unretained Native input.");SourceCurrent(input.Source);}
         bool Current(Submission s,bool after,ref long grant,out bool admitted)
+            =>Current(s,after,ref grant,out admitted,out _);
+
+        bool Current(Submission s,bool after,ref long grant,out bool admitted,out int refusedReceiver)
         {
-            admitted=false;Bound();if(s.Input==null||!s.Input.Live||!s.Input.Source.Live)return false;
+            admitted=false;refusedReceiver=0;Bound();if(s.Input==null||!s.Input.Live||!s.Input.Source.Live)return false;
             if(s.Input.NativeOperation<=operationFloors[s.SourceIdentity].Value&&!(s.State==AiCombatMicroExecutionStatus.Executing&&ReferenceEquals(s.Input.Source.InFlight,s.ActiveTicket))) {admitted=true;return false;}
             var knowledge=owner.ExecutionKnowledge;long sceneCost=checked(16L+domain.CombatExecutionBuildingCount*4L+4L*knowledge.Contacts.Count);if(grant<sceneCost)return false;grant-=sceneCost;
-            admitted=true;if(!ReferenceEquals(s.Scene.Profile,owner.ExecutionProfile)||!domain.CombatExecutionSceneCurrent(owner.OwnerId,s.Scene))return false;
+            admitted=true;
+            if(!ReferenceEquals(s.Scene.Profile,owner.ExecutionProfile))return false;
+            if(!domain.CombatExecutionSceneCurrent(owner.OwnerId,s.Scene)){
+                // A changed cover scene invalidates the old paid guard. The
+                // ground authority can rebuild with this receiver stationary
+                // while freshly validating every proposal it still intends to move.
+                if(!after&&s.SourceIdentity==NavigationSession.GroundMotionSourceIdentity)
+                    refusedReceiver=s.Descriptors[s.Index<s.Descriptors.Length?s.Index:0].Entity;
+                return false;
+            }
             int known=0;foreach(var contact in knowledge.Contacts){if(!RelevantThreat(contact))continue;if(known==s.Known.Length||!s.Known[known++].Same(contact))return false;}if(known!=s.Known.Length)return false;
-            for(int i=0;i<s.Descriptors.Length;i++)if(!owner.ExecutionCurrent(domain,s.Descriptors[i],s.Input.Proposal.Primitive(i),after,storage,ref grant,out _,out admitted))return false;
+            for(int i=0;i<s.Descriptors.Length;i++){
+                var descriptor=s.Descriptors[i];
+                var primitive=s.Input.Proposal.Primitive(i);
+                if(owner.ExecutionCurrent(domain,descriptor,primitive,after,storage,ref grant,out _,out admitted,out var repairDenial))continue;
+                if(admitted)
+                {
+                    refusedReceiver=descriptor.Entity;
+                    if(!after&&s.SourceIdentity==NavigationSession.GroundMotionSourceIdentity&&repairDenial!=null)
+                        s.DeniedGroundRepairBranch=(primitive.Binding,repairDenial);
+                }
+                return false;
+            }
             return true;
         }
-        internal bool TryDescribe(int entity,ref long grant,out AiCombatMicroPolicy.ExecutionDescriptor descriptor){Bound();if(AwaitingNativeSources){descriptor=null;return false;}return owner.DescribeExecution(domain,entity,storage,ref grant,out descriptor);}
-        internal bool TrySubmit(Input input,ref long preparationGrant,out Submission submission)=>TrySubmitCore(input,ref preparationGrant,out submission,false,false);
-        bool TrySubmitCore(Input input,ref long preparationGrant,out Submission submission,bool afterCommit,bool rebinding)
+        internal bool TryDescribe(int entity,ref long grant,out AiCombatMicroPolicy.ExecutionDescriptor descriptor,out bool admitted)
         {
-            submission=null;long control=checked(32L+4L*(sources.Count+submissions.Count+inputs.Count));if(preparationGrant<control)return false;preparationGrant-=control;InputCurrent(input);if(!rebinding&&!TryReconcileCommitted(ref preparationGrant))return false;if(AwaitingNativeSources&&!rebinding||!rebinding&&input.NativeOperation<=operationFloors[input.Source.Identity].Value)return false;if(submissions.Any(x=>ReferenceEquals(x.Input,input)||ReferenceEquals(x.Actual,input)))throw new InvalidOperationException("Native input already submitted.");var p=input.Proposal;long cost=checked(128L+16L*domain.CombatExecutionBuildingCount+32L*p.Count+4L*owner.ExecutionKnowledge.Contacts.Count+8L*p.Count*submissions.Sum(x=>x.Input?.Proposal.Count??0));if(preparationGrant<cost||!storage.TryReserve(checked(8192L+4096L*p.Count+1024L*domain.CombatExecutionBuildingCount+128L*owner.ExecutionKnowledge.Contacts.Count),out var memory))return false;
+            Bound();if(AwaitingNativeSources){descriptor=null;admitted=false;return false;}
+            return owner.DescribeExecution(domain,entity,storage,ref grant,out descriptor,out admitted);
+        }
+        internal bool TryDescribe(int entity,ref long grant,out AiCombatMicroPolicy.ExecutionDescriptor descriptor)
+            =>TryDescribe(entity,ref grant,out descriptor,out _);
+        internal bool TrySubmit(Input input,ref long preparationGrant,out Submission submission)=>TrySubmitCore(input,ref preparationGrant,out submission,false,false,false,out _,out _);
+        internal bool TrySubmitGround(Input input,ref long preparationGrant,out Submission submission,out int refusedReceiver,out (MotionExecutionBinding Binding,string Reason)? repairDenial)
+            =>TrySubmitCore(input,ref preparationGrant,out submission,false,false,true,out refusedReceiver,out repairDenial);
+        bool TrySubmitCore(Input input,ref long preparationGrant,out Submission submission,bool afterCommit,bool rebinding,bool ground,out int refusedReceiver,out (MotionExecutionBinding Binding,string Reason)? repairDenial)
+        {
+            submission=null;refusedReceiver=0;repairDenial=null;long control=checked(32L+4L*(sources.Count+submissions.Count+inputs.Count));if(preparationGrant<control)return false;preparationGrant-=control;InputCurrent(input);if(!rebinding&&!TryReconcileCommitted(ref preparationGrant))return false;if(AwaitingNativeSources&&!rebinding||!rebinding&&input.NativeOperation<=operationFloors[input.Source.Identity].Value)return false;if(submissions.Any(x=>ReferenceEquals(x.Input,input)||ReferenceEquals(x.Actual,input)))throw new InvalidOperationException("Native input already submitted.");var p=input.Proposal;long cost=checked(128L+16L*domain.CombatExecutionBuildingCount+32L*p.Count+4L*owner.ExecutionKnowledge.Contacts.Count+8L*p.Count*submissions.Sum(x=>x.Input?.Proposal.Count??0));if(preparationGrant<cost||!storage.TryReserve(checked(8192L+4096L*p.Count+1024L*domain.CombatExecutionBuildingCount+128L*owner.ExecutionKnowledge.Contacts.Count),out var memory))return false;
             var s=new Submission(checked(nextSubmission+1)){Input=input,SourceIdentity=input.Source.Identity,Memory=memory,State=AiCombatMicroExecutionStatus.Pending};
             try{
                 preparationGrant-=cost;s.Known=owner.ExecutionKnowledge.Contacts.Where(RelevantThreat).Select(c=>new KnownThreat(c)).ToArray();s.Descriptors=new AiCombatMicroPolicy.ExecutionDescriptor[p.Count];s.Paths=new AiCombatMicroExecutionPathWork[p.Count];s.Staged=new AiCombatMicroExecutionPathWork.Cursor[p.Count];
                 PlayableAiObservation observation=null;
                 for(int i=0;i<p.Count;i++){
-                    var primitive=p.Primitive(i);if(!owner.DescribeExecution(domain,checked((int)primitive.Binding.Entity),storage,ref preparationGrant,out var d))return Refuse(s);s.Descriptors[i]=d;
-                    bool current=owner.ExecutionCurrent(domain,d,primitive,afterCommit,storage,ref preparationGrant,out var patient,out var guardAdmitted);
+                    var primitive=p.Primitive(i);if(!owner.DescribeExecution(domain,checked((int)primitive.Binding.Entity),storage,ref preparationGrant,out var d,out var descriptorAdmitted)){
+                        if(ground&&descriptorAdmitted)refusedReceiver=checked((int)primitive.Binding.Entity);
+                        return Refuse(s);
+                    }
+                    s.Descriptors[i]=d;
+                    bool current=owner.ExecutionCurrent(domain,d,primitive,afterCommit,storage,ref preparationGrant,out var patient,out var guardAdmitted,out var reason);
+                    // The live guard may reject otherwise authentic movement, such as
+                    // a repair path that cannot complete before the phase expires.
+                    if((ground&&guardAdmitted||primitive.Air.HasValue)&&primitive.Binding.OwnerPolicy==d.Identity&&!current){
+                        if(ground)
+                        {
+                            refusedReceiver=d.Entity;
+                            if(reason!=null)repairDenial=(primitive.Binding,reason);
+                        }
+                        return Refuse(s);
+                    }
                     if(primitive.Binding.OwnerPolicy!=d.Identity||!current)throw new ArgumentException($"Execution proposal does not belong to the current applied policy: admitted={guardAdmitted} identity={primitive.Binding.OwnerPolicy==d.Identity} phase={d.Phase} descriptorSequence={d.Sequence} primitiveCommand={primitive.Binding.Command} primitiveGroup={primitive.Binding.Group} root={primitive.Binding.RootOrder} activation={primitive.Binding.Activation} request={primitive.Binding.Request} order={primitive.Binding.Order} tick={primitive.OwnerTick}/{domain.Tick} from={primitive.From.Position.X:R},{primitive.From.Position.Z:R}/{primitive.From.SurfaceId} heading={primitive.HeadingBefore:R}; {domain.CombatExecutionBindingReadback(primitive)}");
                     if(submissions.Any(x=>x.Input!=null&&Enumerable.Range(0,x.Input.Proposal.Count).Any(j=>x.Input.Proposal.Primitive(j).Binding.Entity==primitive.Binding.Entity)))throw new InvalidOperationException("Actor already has pending execution.");
                     s.Descriptors[i]=d;
@@ -183,11 +235,23 @@ namespace Spacewars.Runtime
         internal int Advance(Submission s,int grant,ref long currentGuardGrant)
         {
             if(grant<0)throw new ArgumentOutOfRangeException(nameof(grant));Bound();long control=checked(32L+4L*submissions.Count);if(currentGuardGrant<control)return 0;currentGuardGrant-=control;if(AwaitingNativeSources||!Owns(s)||s.Cold!=null||s.State==AiCombatMicroExecutionStatus.Executing)return 0;
-            if(!Current(s,false,ref currentGuardGrant,out var admitted)){if(admitted)Cancel(s);return 0;}int used=0;
+            if(!Current(s,false,ref currentGuardGrant,out var admitted,out int refusedReceiver)){
+                if(admitted){s.RefusedReceiver=refusedReceiver;Cancel(s);}return 0;
+            }int used=0;
             while(used<grant&&s.State==AiCombatMicroExecutionStatus.Pending){
                 if(s.Index==s.Paths.Length){s.State=AiCombatMicroExecutionStatus.Allowed;break;}var path=s.Paths[s.Index];
                 if(!path.Complete){int n=path.Advance(grant-used);used+=n;if(n==0)break;continue;}
-                if(!path.Supported||!path.Allowed){s.State=AiCombatMicroExecutionStatus.Denied;Close(s);break;}
+                if(!path.Supported||!path.Allowed){
+                    var descriptor=s.Descriptors[s.Index];
+                    s.RefusedReceiver=descriptor.Entity;
+                    if(s.SourceIdentity==NavigationSession.GroundMotionSourceIdentity&&
+                        descriptor.Phase==AiCombatMicroPhase.Repair&&path.RejectedRemainingBranch)
+                        s.DeniedGroundRepairBranch=(s.Input.Proposal.Primitive(s.Index).Binding,"unsafe-remaining-route");
+#if UNITY_EDITOR || UNITY_INCLUDE_TESTS
+                    PaidPathDenialForQa?.Invoke(s.RefusedReceiver,path.RejectedRemainingBranch);
+#endif
+                    s.State=AiCombatMicroExecutionStatus.Denied;Close(s);break;
+                }
                 // Sorting/copying the actual cursor has its own actual grant.
                 long copy=grant-used;if(!path.TryAcquireActualCursor(ref copy,out s.Staged[s.Index]))break;used+=checked((int)((grant-used)-copy));s.Index++;
             }
@@ -196,7 +260,9 @@ namespace Spacewars.Runtime
         }
         internal bool TryIssue(Submission s,ref long guardGrant,out Issued issued)
         {
-            issued=null;long control=checked(32L+4L*submissions.Count);if(guardGrant<control)return false;guardGrant-=control;if(AwaitingNativeSources||!Owns(s)||s.Cold!=null||s.State!=AiCombatMicroExecutionStatus.Allowed&&s.State!=AiCombatMicroExecutionStatus.Matching&&s.State!=AiCombatMicroExecutionStatus.Ready)return false;if(!Current(s,false,ref guardGrant,out var admitted)){if(admitted)Cancel(s);return false;}
+            issued=null;long control=checked(32L+4L*submissions.Count);if(guardGrant<control)return false;guardGrant-=control;if(AwaitingNativeSources||!Owns(s)||s.Cold!=null||s.State!=AiCombatMicroExecutionStatus.Allowed&&s.State!=AiCombatMicroExecutionStatus.Matching&&s.State!=AiCombatMicroExecutionStatus.Ready)return false;if(!Current(s,false,ref guardGrant,out var admitted,out int refusedReceiver)){
+                if(admitted){s.RefusedReceiver=refusedReceiver;Cancel(s);}return false;
+            }
             if(s.Permit==null){var value=new MotionExecutionPermit(s.Input.Proposal,checked(++nextPermit),s.Descriptors[0].Identity,"committed-actual-cursor");s.Permit=new Issued(this,s,value);}issued=s.Permit;return true;
         }
         bool IssuedCurrent(Issued issued,out Submission s){s=issued?.Submission;return issued!=null&&issued.Registry==this&&Owns(s)&&ReferenceEquals(s.Permit,issued);}
@@ -343,8 +409,8 @@ namespace Spacewars.Runtime
         internal void BindExecutionDomain(PlayableDomain domain){if(executionRevoked||executionReviewClone)throw new InvalidOperationException("Former owner execution authority was transferred.");if(!domain.Authorizes(OwnerId)){ReleaseExecutionAuthority();return;}if(executionOwner==null)executionOwner=new AiCombatMicroExecutionOwner(this);executionOwner.Bind(this,domain);}
         void ReleaseExecutionAuthority(){executionOwner?.Dispose();executionOwner=null;}
         internal void AdoptExecutionAuthority(PlayableAiOwnerLoop original,PlayableDomain domain){executionReviewClone=false;executionOwner?.Dispose();executionOwner=original.executionOwner;original.executionOwner=null;original.executionRevoked=true;if(executionOwner==null)executionOwner=new AiCombatMicroExecutionOwner(this);executionOwner.Bind(this,domain);}
-        internal bool DescribeExecution(PlayableDomain domain,int entity,AiCombatMicroExecutionStorage storage,ref long grant,out AiCombatMicroPolicy.ExecutionDescriptor descriptor)=>combatMicro.TryDescribeExecution(domain,OwnerId,profile,nativeProfile,nativeConfig.Difficulty,armies,entity,storage,ref grant,out descriptor);
-        internal bool ExecutionCurrent(PlayableDomain domain,AiCombatMicroPolicy.ExecutionDescriptor descriptor,MotionExecutionPrimitive primitive,bool committed,AiCombatMicroExecutionStorage storage,ref long grant,out PlayableEntitySnapshot patient,out bool admitted)=>combatMicro.ExecutionCurrent(domain,OwnerId,profile,nativeProfile,nativeConfig.Difficulty,armies,descriptor,primitive,committed,storage,ref grant,out patient,out admitted);
+        internal bool DescribeExecution(PlayableDomain domain,int entity,AiCombatMicroExecutionStorage storage,ref long grant,out AiCombatMicroPolicy.ExecutionDescriptor descriptor,out bool admitted)=>combatMicro.TryDescribeExecution(domain,OwnerId,profile,nativeProfile,nativeConfig.Difficulty,armies,entity,storage,ref grant,out descriptor,out admitted);
+        internal bool ExecutionCurrent(PlayableDomain domain,AiCombatMicroPolicy.ExecutionDescriptor descriptor,MotionExecutionPrimitive primitive,bool committed,AiCombatMicroExecutionStorage storage,ref long grant,out PlayableEntitySnapshot patient,out bool admitted,out string repairDenial)=>combatMicro.ExecutionCurrent(domain,OwnerId,profile,nativeProfile,nativeConfig.Difficulty,armies,descriptor,primitive,committed,storage,ref grant,out patient,out admitted,out repairDenial);
         internal bool RetainsExecutionJob(int entity,long generation,string identity,PlayableOwner owner,PlayableOrderStamp stamp)=>combatMicro.RetainsExecutionJob(entity,generation,identity,OwnerId,owner,stamp);
         void WriteExecutionState(BinaryWriter w){if(executionOwner!=null&&!executionReviewClone&&!executionOwner.ReconcileLifecycle())throw new InvalidOperationException("Execution retirement capture admission refused.");w.Write(executionOwner!=null);executionOwner?.Write(w);}
         void ReadExecutionState(BinaryReader r){if(WorldWire.Boolean(r))executionOwner=AiCombatMicroExecutionOwner.Read(r,this);}

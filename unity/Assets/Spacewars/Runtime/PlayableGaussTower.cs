@@ -26,7 +26,7 @@ namespace Spacewars.Runtime
             {
                 int id=shot.Targets[shot.Next];
                 // A disappeared unit must not turn into a hit on its newly created wreck.
-                if((units.ContainsKey(id)||buildings.ContainsKey(id))&&!TryDamageWithOwner(id,shot.Damage[shot.Next],b.Id,b.Owner))return false;
+                if((units.ContainsKey(id)||buildings.ContainsKey(id))&&!TryDamageWithOwner(id,shot.Damage[shot.Next],b.Id,b.Owner,incoming:new NavPoint(shot.End.X-shot.Start.X,shot.End.Z-shot.Start.Z)))return false;
                 shot.Next++;
             }
             return true;
@@ -65,8 +65,9 @@ namespace Spacewars.Runtime
             double damage=WeaponDamage(b.Owner,profile.GaussDamage);
             var amounts=new double[ordered.Length];for(int i=0;i<amounts.Length;i++){amounts[i]=damage;damage*=profile.GaussPierceRetention;}
             b.Gauss=new GaussShotState{Start=from,End=LerpAir(from,to,stop),VisibleSeconds=profile.GaussBeamSeconds,Targets=ordered.Select(h=>h.id).ToArray(),Damage=amounts};
+            b.LastCombatShotTarget=state.Target;
             state.ShotSequence++;state.Reload=profile.GaussReloadSeconds;
-            Sound(PlayableSoundKind.Shot,b.Position,PlayableEntityKind.Tank,b.Owner,unitId:b.Id,altitude:from.Y);
+            Sound(PlayableSoundKind.Shot,b.Position,PlayableEntityKind.Tank,b.Owner,building:true,unitId:b.Id,altitude:from.Y);
             AdvanceGaussPending(b,0);
         }
     }

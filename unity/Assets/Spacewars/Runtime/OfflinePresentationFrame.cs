@@ -21,6 +21,8 @@ namespace Spacewars.Runtime
         public long Sequence { get; }
         public long Tick { get; }
         public IReadOnlyDictionary<string,PlayableSnapshot> Views { get; }
+        // Public match status, separated from private owner perspectives for roster UI.
+        public IReadOnlyList<string> EliminatedOwners { get; }
         public IReadOnlyList<OfflineReceipt> Receipts { get; }
         public long ReceiptOrdinal { get; }
         private readonly long publishedAt=System.Diagnostics.Stopwatch.GetTimestamp();
@@ -36,6 +38,7 @@ namespace Spacewars.Runtime
             if(receipts.Any(r=>r.Receipt.AppliedTick>Tick||!views.ContainsKey(r.Receipt.OwnerId??"")))
                 throw new ArgumentException("Receipt outside frame authority.");
             Views=new ReadOnlyDictionary<string,PlayableSnapshot>(new Dictionary<string,PlayableSnapshot>(views));
+            EliminatedOwners=Array.AsReadOnly(views.Where(pair=>pair.Value.OwnerEliminated).Select(pair=>pair.Key).ToArray());
             if(previous!=null&&previous.Generation==Generation){
                 if(previous.Tick==Tick-1)previousViews=previous.Views;
                 else if(previous.Tick==Tick)previousViews=previous.previousViews;

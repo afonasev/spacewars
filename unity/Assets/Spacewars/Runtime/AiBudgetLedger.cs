@@ -264,7 +264,7 @@ namespace Spacewars.Runtime
                     ledger.SettleRepair(entry,paid,r==null?0:Math.Max(0,r.TotalCost-paid),active);continue;
                 }
                 if(entry.Action.Kind!=PlayableCommandKind.QueueResearch)throw new InvalidOperationException("Unknown deferred payment.");
-                var order=Research(owner).SingleOrDefault(x=>x.Kind==entry.Action.ResearchKind);
+                var order=Research(owner).SingleOrDefault(x=>ResearchInvoice(x,entry.Action));
                 ledger.SettlePayment(entry.Id,entry.Receipt,order!=null,(int)Math.Ceiling(order?.PaidCost??0),
                     (int)Math.Ceiling(ResearchCost(entry.Action.ResearchKind)),profile.ProfileId+"@"+profile.Revision,order!=null&&(order.Active||order.Complete));
             }
@@ -285,17 +285,19 @@ namespace Spacewars.Runtime
         }
         internal void BindAiRepairPayment(PlayableAiAction action,AiReceiptIdentity identity)
         {if(action.Kind==PlayableCommandKind.StartBuildingRepair&&buildings.TryGetValue(action.EntityIds.Single(),out var b)&&b.Repair!=null)b.Repair.AllocationReceipt=identity.Id;}
+        private static bool ResearchInvoice(ResearchOrder order,PlayableAiAction action)=>
+            order.Kind==action.ResearchKind&&(!PlayableResearchRules.Local(order.Kind)||order.CenterId==action.EntityIds.SingleOrDefault());
         internal bool AiCommandPaid(PlayableAiAction action)
         {
             if(action.Kind==PlayableCommandKind.StartBuildingRepair)return false;
             if(action.Kind!=PlayableCommandKind.QueueResearch)return true;
-            return Research(OwnerFor(action.PlayerId)).Any(x=>x.Kind==action.ResearchKind&&x.Active);
+            return Research(OwnerFor(action.PlayerId)).Any(x=>ResearchInvoice(x,action)&&x.Active);
         }
         internal void ValidateAiBudget(AiBudgetLedger ledger)
         {
             var owner=OwnerFor(ledger.OwnerId);
             foreach(var entry in ledger.AwaitingPayments)
-                AiStateWire.Require(entry.Action.Kind==PlayableCommandKind.StartBuildingRepair?buildings.TryGetValue(entry.Action.EntityIds.Single(),out var b)&&b.Owner==owner&&b.Repair!=null&&b.Repair.AllocationReceipt==entry.Receipt.Id&&entry.Terms==Terms(b.Repair.TermsRevision).ProfileId+"@"+b.Repair.TermsRevision&&Math.Abs(entry.ExactSettled-b.Repair.TotalCost*b.Repair.PaidSeconds/b.Repair.Duration)<1e-7&&entry.Amount==(int)Math.Ceiling(b.Repair.TotalCost-entry.ExactSettled):entry.Action.Kind==PlayableCommandKind.QueueResearch&&Research(owner).Any(x=>x.Kind==entry.Action.ResearchKind),"orphan deferred payment");
+                AiStateWire.Require(entry.Action.Kind==PlayableCommandKind.StartBuildingRepair?buildings.TryGetValue(entry.Action.EntityIds.Single(),out var b)&&b.Owner==owner&&b.Repair!=null&&b.Repair.AllocationReceipt==entry.Receipt.Id&&entry.Terms==Terms(b.Repair.TermsRevision).ProfileId+"@"+b.Repair.TermsRevision&&Math.Abs(entry.ExactSettled-b.Repair.TotalCost*b.Repair.PaidSeconds/b.Repair.Duration)<1e-7&&entry.Amount==(int)Math.Ceiling(b.Repair.TotalCost-entry.ExactSettled):entry.Action.Kind==PlayableCommandKind.QueueResearch&&Research(owner).Any(x=>ResearchInvoice(x,entry.Action)),"orphan deferred payment");
         }
     }
 }

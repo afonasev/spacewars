@@ -9,7 +9,8 @@ namespace Spacewars.Simulation
         public RecastAuthorityGeometry Geometry{get;}
         public string Binding=>Geometry.Binding;
         public RecastNavigationMap(RecastAuthorityGeometry geometry,Func<bool> cancelled=null):this(geometry,cancelled,null){}
-        internal RecastNavigationMap(RecastAuthorityGeometry geometry,Func<bool> cancelled,NavOwnedStorage payload)
+        internal RecastNavigationMap(RecastAuthorityGeometry geometry,Func<bool> cancelled,NavOwnedStorage payload,
+            bool reuseTiles=false,RecastNavigationMap previous=null)
         {
             Geometry=geometry??throw new ArgumentNullException(nameof(geometry));
             if(RecastNative.sw_recast_abi()!=1)throw new NotSupportedException("Recast native ABI mismatch.");
@@ -18,9 +19,30 @@ namespace Spacewars.Simulation
             Exception cancellationError=null;
             RecastNative.Cancelled cancellation=()=>{try{return cancelled?.Invoke()==true?1:0;}catch(Exception error){cancellationError=error;return 1;}};
             if(geometry.IsLayered&&RecastNative.sw_recast_layer_abi()!=1)throw new NotSupportedException("Recast layer ABI mismatch.");
-            Handle=new RecastMapHandle(geometry.IsLayered?RecastNative.sw_recast_build_layered(geometry.Vertices,geometry.Vertices.Length/3,geometry.Triangles,geometry.Areas,geometry.Areas.Length,geometry.Directed,geometry.CellSize,geometry.CellHeight,geometry.Radius,Math.Max(geometry.CellHeight*2,geometry.RasterClimb),geometry.RasterClimb,89,cancellation,geometry.Links,geometry.LinkAreas,geometry.LinkDirections,geometry.LinkIds,geometry.LinkIds.Length):RecastNative.sw_recast_build(geometry.Vertices,geometry.Vertices.Length/3,geometry.Triangles,geometry.Areas,geometry.Areas.Length,geometry.Directed,geometry.CellSize,geometry.CellHeight,geometry.Radius,Math.Max(geometry.CellHeight*2,geometry.RasterClimb),geometry.RasterClimb,89,cancellation),payload);
+            Handle=new RecastMapHandle(Build(geometry,cancellation,reuseTiles,previous),payload);
             if(Handle.IsInvalid){Handle.Dispose();RecastNative.CheckCapacity();if(cancellationError!=null)throw new InvalidOperationException("Recast cancellation callback failed.",cancellationError);if(cancelled?.Invoke()==true)throw new OperationCanceledException();throw new InvalidOperationException("Recast map resource/preparation failure.");}
         }
+        private static IntPtr Build(RecastAuthorityGeometry g,RecastNative.Cancelled cancelled,bool reuseTiles,RecastNavigationMap previous)
+        {
+            float height=Math.Max(g.CellHeight*2,g.RasterClimb);
+            if(g.IsLayered)
+                return RecastNative.sw_recast_build_layered(g.Vertices,g.Vertices.Length/3,g.Triangles,g.Areas,g.Areas.Length,g.Directed,
+                    g.CellSize,g.CellHeight,g.Radius,height,g.RasterClimb,89,cancelled,g.Links,g.LinkAreas,g.LinkDirections,g.LinkIds,g.LinkIds.Length);
+            if(!reuseTiles)
+                return RecastNative.sw_recast_build(g.Vertices,g.Vertices.Length/3,g.Triangles,g.Areas,g.Areas.Length,g.Directed,
+                    g.CellSize,g.CellHeight,g.Radius,height,g.RasterClimb,89,cancelled);
+
+            var source=previous?.Handle;
+            bool pinned=false;
+            try
+            {
+                source?.DangerousAddRef(ref pinned);
+                return RecastNative.sw_recast_build_reusing_tiles(g.Vertices,g.Vertices.Length/3,g.Triangles,g.Areas,g.Areas.Length,g.Directed,
+                    g.CellSize,g.CellHeight,g.Radius,height,g.RasterClimb,89,cancelled,source?.DangerousGetHandle()??IntPtr.Zero);
+            }
+            finally{if(pinned)source.DangerousRelease();}
+        }
+
         public RecastNavigationQuery Query(NavLocation start,NavLocation goal){
             RecastPayload payload=null;
             try{var r=RecastNative.CurrentMemoryOwner;if(r!=null)payload=RecastPayload.Allocate(r,checked(NavStorageLayout.ObjectBytesBound(typeof(RecastNavigationQuery))+NavStorageLayout.ObjectBytesBound(typeof(RecastQueryHandle))+512+4L*(start.SurfaceId.Length+goal.SurfaceId.Length)));return new RecastNavigationQuery(this,start,goal,payload);}
@@ -46,6 +68,25 @@ namespace Spacewars.Simulation
             if(iterations<1||iterations>4096)throw new ArgumentOutOfRangeException(nameof(iterations));
             if(Status!=RecastQueryStatus.Pending)return Status;
             Status=RecastNative.sw_recast_step(handle,iterations,out int consumed);Iterations+=consumed;return Status;
+        }
+        internal const int MaxCheckpointWords = 15 + 10 * 16384;
+        internal uint[] CaptureFrontier()
+        {
+            if (disposed || Status != RecastQueryStatus.Pending) throw new InvalidOperationException("No live Recast query.");
+            int size = RecastNative.sw_recast_capture_query(handle, null, 0);
+            if (size < 1 || size > MaxCheckpointWords) throw new InvalidOperationException("Invalid Recast checkpoint size.");
+            var words = new uint[size];
+            if (RecastNative.sw_recast_capture_query(handle, words, size) != size)
+                throw new InvalidOperationException("Recast query changed during capture.");
+            return words;
+        }
+        internal void RestoreFrontier(uint[] words, long iterations)
+        {
+            if (disposed || Status != RecastQueryStatus.Pending || Iterations != 0 || iterations < 0 ||
+                words == null || words.Length > MaxCheckpointWords ||
+                RecastNative.sw_recast_restore_query(handle, words, words.Length) != 1)
+                throw new ArgumentException("Recast checkpoint does not match this query.");
+            Iterations = iterations;
         }
         public RecastRoutePoint[] CopyTypedRoute()
         {

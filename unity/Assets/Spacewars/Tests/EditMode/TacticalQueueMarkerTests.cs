@@ -30,6 +30,108 @@ namespace Spacewars.Tests.EditMode
         }
         PlayableSnapshot View(PlayableOwner owner=PlayableOwner.Player,bool paused=false)=>(PlayableSnapshot)Call("PlayerSnapshot",seq,RuntimeStatus.Running,paused,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,owner);
         PlayableCommandReceipt Apply(PlayableCommand command){var args=new object[]{command,null};var status=(PlayableCommandStatus)D.GetMethod("Apply",F).Invoke(domain,args);return new PlayableCommandReceipt(command.Sequence,(long)D.GetProperty("Tick",F).GetValue(domain),status,(string)args[1],0,command.PlayerId);}
+        [Test]public void LocalInputPulsePrecedesAuthorityAndCannotTrackHiddenTargets()
+        {
+            int id=Spawn(-14,-14),hidden=Spawn(26,26,PlayableOwner.Enemy);
+            var model=new PlayableOrderMarkers(new EnvironmentArtProfile());var view=View();
+            var goal=new NavPoint(-8,-14);
+            var move=new PlayableCommand(1,0,"player-1",PlayableCommandKind.Move,new[]{id},goal);
+            var pulse=model.InputPulse(view,move,10);
+            Assert.AreEqual(goal,pulse.Locations(view).Single().Position);
+            Assert.Greater(pulse.Ends,10);
+            Assert.Zero(model.Visible(view,new[]{id},10).Count,"Local feedback is not an Applied Vector.");
+            var attack=new PlayableCommand(1,0,"player-1",PlayableCommandKind.Attack,new[]{id},goal,targetId:hidden);
+            Assert.IsEmpty(model.InputPulse(view,attack,10).Locations(view));
+            var hold=new PlayableCommand(1,0,"player-1",PlayableCommandKind.Hold,new[]{id});
+            Assert.AreEqual(view.Entities.Single(u=>u.Id==id).Position,model.InputPulse(view,hold,10).Locations(view).Single().Position);
+        }
+
+        [Test]
+        public void RepeatFilterKeepsTheAcceptedPointAndAllowsNewOrdersAfterHold()
+        {
+            int tank = Spawn(-14, -14);
+            int peer = Spawn(-18, -14);
+            var type = typeof(PlayableOrderMarkers).Assembly.GetType("Spacewars.Presentation.PlayerOrderRepeatFilter", true);
+            object filter = Activator.CreateInstance(type);
+            object Evaluate(string method, params object[] args) => type.GetMethod(method).Invoke(filter, args);
+            PlayableCommand Move(double x, int[] ids = null) =>
+                new PlayableCommand(1, 1, "player-1", PlayableCommandKind.Move, ids ?? new[] { tank }, new NavPoint(x, -14));
+            bool Repeat(PlayableCommand command, string surface = "deck") =>
+                (bool)Evaluate("IsRepeat", View(), command, 0, surface);
+
+            var accepted = Move(-8);
+            Evaluate("Enqueued", accepted, 0, "deck");
+            Assert.True(Repeat(Move(-7.25)));
+            Assert.False(Repeat(Move(-7), "deck"), "one metre admits a new order");
+            Assert.False(Repeat(Move(-8), "lower"), "identical coordinates on another surface");
+            Assert.False(Repeat(Move(-7.1, new[] { tank, peer })), "changed selection");
+            Assert.False(Repeat(Move(-6.75)), "the discarded click did not move the reference point");
+
+            Evaluate("Submitted", accepted, accepted);
+            Evaluate("ProjectionFinished", accepted);
+            Assert.True(Repeat(Move(-8)), "awaiting the authority receipt");
+            seq = 1;
+            Evaluate("Observe", View(), new[] { Apply(accepted) });
+            seq++;
+            Assert.True(Repeat(Move(-8)), "the authority still exposes the pending order");
+            Send(new[] { tank }, default, PlayableCommandKind.Hold);
+            Assert.False(Repeat(Move(-8)), "completed cancellation allows the same destination");
+        }
+
+        [Test]
+        public void ShiftRepeatFollowsTheQueueTailAndObjectIdentity()
+        {
+            int tank = Spawn(-14, -14);
+            int enemy = Spawn(-12, -14, PlayableOwner.Enemy);
+            int other = Spawn(-10, -14, PlayableOwner.Enemy);
+            var type = typeof(PlayableOrderMarkers).Assembly.GetType("Spacewars.Presentation.PlayerOrderRepeatFilter", true);
+            var filter = Activator.CreateInstance(type);
+            object Invoke(string method, params object[] args) => type.GetMethod(method).Invoke(filter, args);
+            PlayableCommand Attack(int target, NavPoint point, PlayableOrderMode mode = PlayableOrderMode.Append) =>
+                new PlayableCommand(1, ++seq, "player-1", PlayableCommandKind.Attack, new[] { tank }, point, targetId: target, mode: mode);
+            bool Repeat(PlayableCommand click) => (bool)Invoke("IsRepeat", View(), click, 0, "ground");
+
+            Send(new[] { tank }, new NavPoint(-8, -14));
+            var accepted = Attack(enemy, new NavPoint(-12, -14));
+            Invoke("Enqueued", accepted, 0, "ground");
+            Invoke("Submitted", accepted, accepted);
+            Invoke("ProjectionFinished", accepted);
+            var receipt = Apply(accepted);
+            Assert.AreEqual(PlayableCommandStatus.Applied, receipt.Status);
+            Invoke("Observe", View(), new[] { receipt });
+            var moved = Attack(enemy, new NavPoint(-8, -10));
+            Assert.AreEqual(accepted.Sequence, QueueOf(tank).Deferred.Last().CommandSequence);
+            Assert.True(Repeat(moved), "a click on the same moving enemy repeats the tail order");
+            Assert.False(Repeat(Attack(other, moved.Target)));
+            Assert.False(Repeat(Attack(enemy, moved.Target, PlayableOrderMode.Replace)));
+            Send(new[] { tank }, new NavPoint(-7, -14), append: true);
+            Assert.False(Repeat(moved), "an earlier queued order is no longer the tail");
+        }
+
+        [Test]
+        public void ActiveAttackStopsBeforeTheNextStepWhenTheTargetLeavesFog()
+        {
+            int attacker = Spawn(-14, -14);
+            int target = Spawn(-10, -10, PlayableOwner.Enemy);
+            Send(new[] { attacker }, default, PlayableCommandKind.Attack, target: target);
+            var routeGoal = new NavPoint(-11, -14);
+            Assert.True(nav.Crowd.SetRoute(attacker, routeGoal, new[] { routeGoal }));
+            var tank = nav.Crowd.Units.Single(u => u.Id == attacker);
+            var enemy = nav.Crowd.Units.Single(u => u.Id == target);
+            var before = tank.Position;
+            var hidden = new NavPoint(26, 26);
+            typeof(NavUnit).GetProperty("Position").SetValue(enemy, hidden);
+            typeof(NavUnit).GetProperty("Location").SetValue(enemy, new NavLocation(hidden, NavLocation.FlatSurface));
+            Call("RefreshVision");
+            Assert.False(View().Entities.Any(u => u.Id == target));
+
+            Call("Step", 1d / 30);
+            Assert.AreEqual(before, tank.Position);
+            Assert.False(tank.Moving);
+            Assert.IsNull(View().Entities.Single(u => u.Id == attacker).CurrentOrder);
+            Assert.IsNull(QueueOf(attacker).Active);
+        }
+
         [Test]public void VectorTimingRequiresAppliedIssuanceAndDoesNotRenewOrReplayOnSelection()
         {
             int a=Spawn(-14,-14),b=Spawn(-18,-14);var model=new PlayableOrderMarkers();

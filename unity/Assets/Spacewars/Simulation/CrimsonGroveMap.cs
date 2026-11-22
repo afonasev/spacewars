@@ -71,7 +71,7 @@ namespace Spacewars.Simulation
                 var edge=new List<NavPoint>();double a=i*22.5;Arc(edge,a,a+22.5,153);edge.Add(Polar(a+22.5,240));edge.Add(Polar(a,240));
                 border.Add(new NavObstacle(Shape(edge).Footprint,0,TerraceHeight+RidgeHeight));
             }
-            Supports=supports.AsReadOnly();WoodedRidges=rocks.AsReadOnly();Border=border.AsReadOnly();Solids=rocks.Concat(border).ToArray();
+            Supports=supports.AsReadOnly();WoodedRidges=rocks.AsReadOnly();Border=border.AsReadOnly();Solids=Array.AsReadOnly(rocks.Concat(border).ToArray());
             var links=new List<NavSurfaceTransition>();for(int i=0;i<supports.Count;i++)for(int j=i+1;j<supports.Count;j++)links.Add(new NavSurfaceTransition(supports[i].SurfaceId+"~"+supports[j].SurfaceId,supports[i].SurfaceId,supports[j].SurfaceId));
             var partition=new TerrainLocations(new NavGeometry(HalfExtent,Solids.ToArray(),Revision),Supports,links);
             var blockers=Solids.ToList();const double epsilon=.0001;

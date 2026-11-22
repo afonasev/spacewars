@@ -17,17 +17,20 @@ namespace Spacewars.Runtime
         private Building[] SaleGroup(Building b)=>new[]{b}.Concat(TerritoryRules.Center(b.Kind)?buildings.Values.Where(c=>c.ParentId==b.Id&&c.Sale==null).OrderBy(c=>c.Id):Enumerable.Empty<Building>()).ToArray();
         private string SaleBlocked(Building b)
         {
+            if(BoostRemaining(b.Id)>0)return BoostBlockedMessage;
             if(SystemsDisabled(b.Id))return "Сбой систем";
             if(!b.Ready||b.Health<=0)return "Здание не готово";
             if(b.Sale!=null)return "Демонтаж необратим";
             if(CombatLocked(b,profile.BuildingSaleCombatLockoutSec))return "Продажа запрещена: здание находится в бою";
             if(TerritoryRules.Center(b.Kind))foreach(var c in buildings.Values)
-                if(c.ParentId==b.Id&&c.Sale==null&&SystemsDisabled(c.Id))return "Сбой систем: дочернее здание недоступно для продажи";
+                if(c.ParentId==b.Id&&c.Sale==null&&BoostRemaining(c.Id)>0)return BoostBlockedMessage;
+                else if(c.ParentId==b.Id&&c.Sale==null&&SystemsDisabled(c.Id))return "Сбой систем: дочернее здание недоступно для продажи";
                 else if(c.ParentId==b.Id&&c.Sale==null&&CombatLocked(c,profile.BuildingSaleCombatLockoutSec))return "Продажа запрещена: здание находится в бою";
             return null;
         }
         private string RepairBlocked(Building b)
         {
+            if(BoostRemaining(b.Id)>0)return BoostBlockedMessage;
             if(SystemsDisabled(b.Id))return "Сбой систем";
             if(!b.Ready||b.Health<=0||b.Sale!=null)return "Здание недоступно";
             if(b.Repair!=null)return "Ремонт уже активен";
@@ -68,19 +71,40 @@ namespace Spacewars.Runtime
             if(!buildings.TryGetValue(id,out var b)||b.Owner!=owner||b.Repair==null)return PlayableCommandStatus.InvalidEntity;
             b.Repair=null;Sound(PlayableSoundKind.RepairCancelled,b.Position,PlayableEntityKind.Tank,owner,true);message="Ремонт отменён";return PlayableCommandStatus.Applied;
         }
+        private void CompletePaidRepair(Building building)
+        {
+            building.Repair = null;
+            boostWear.Remove(building.Id);
+            Sound(PlayableSoundKind.RepairComplete,building.Position,PlayableEntityKind.Tank,building.Owner,true);
+        }
+
         private readonly List<Building> lifecycleWork=new List<Building>();
+        private readonly List<Building> dueDemolitions=new List<Building>();
+        private static bool DemolitionDue(SaleState sale,double dt)=>sale.Elapsed+dt+1e-9>=sale.Duration;
         private void AdvanceBuildingLifecycle(double dt)
         {
-            bool removed=false;lifecycleWork.Clear();
-            foreach(var item in buildings.Values)if(item.Sale!=null||item.Repair!=null)lifecycleWork.Add(item);
+            lifecycleWork.Clear();dueDemolitions.Clear();
+            foreach(var item in buildings.Values)
+            {
+                if(item.Sale!=null||item.Repair!=null)lifecycleWork.Add(item);
+                if(item.Sale!=null&&DemolitionDue(item.Sale,dt))dueDemolitions.Add(item);
+            }
+            // Publish the prospective footprint removal before consuming any
+            // demolition. A busy route host leaves the due sales retryable.
+            bool demolish=dueDemolitions.Count>0&&TryRebuildGeometry(removals:dueDemolitions);
+            dueDemolitions.Clear();
             lifecycleWork.Sort((a,b)=>a.Id.CompareTo(b.Id));
             foreach(var b in lifecycleWork)
             {
                 if(!buildings.ContainsKey(b.Id))continue;
                 if(b.Sale!=null)
                 {
-                    b.Sale.Elapsed+=dt;
-                    if(b.Sale.Elapsed+1e-9>=b.Sale.Duration){Sound(PlayableSoundKind.Demolished,b.Position,PlayableEntityKind.Tank,b.Owner,true);RemoveBuilding(b,false);removed=true;}
+                    if(!DemolitionDue(b.Sale,dt))b.Sale.Elapsed+=dt;
+                    else if(demolish)
+                    {
+                        Sound(PlayableSoundKind.Demolished,b.Position,PlayableEntityKind.Tank,b.Owner,true);
+                        RemoveBuilding(b,false);
+                    }
                     continue;
                 }
                 var r=b.Repair;if(r==null||SystemsDisabled(b.Id))continue;
@@ -91,18 +115,21 @@ namespace Spacewars.Runtime
                     r.SettlementElapsed=Math.Max(0,r.SettlementElapsed-1);
                     double remaining=r.Duration-r.PaidSeconds,slice=Math.Min(1,remaining);
                     bool terminal=slice>=remaining-1e-9;
-                    double cost=terminal?Math.Max(0,r.TotalCost-r.TotalCost*Math.Min(1,r.PaidSeconds/r.Duration)):r.TotalCost*slice/r.Duration;
+                    double plannedCost=terminal?Math.Max(0,r.TotalCost-r.TotalCost*Math.Min(1,r.PaidSeconds/r.Duration)):r.TotalCost*slice/r.Duration;
+                    double maximum=BuildingMaximumHealth(b.Owner,b.Kind);
+                    double plannedHealth=r.MissingHealth*maximum/TerritoryRules.Health(profile,b.Kind)*slice/r.Duration;
+                    double restored=Math.Min(plannedHealth,Math.Max(0,maximum-b.Health));
+                    double cost=restored<plannedHealth-1e-9?plannedCost*restored/plannedHealth:plannedCost;
                     if(!FreeProvingGround&&Balance(b.Owner)+1e-9<cost){r.Waiting=true;continue;}
                     AddCredits(b.Owner,-cost);
-                    double maximum=BuildingMaximumHealth(b.Owner,b.Kind);
-                    b.Health=Math.Min(maximum,b.Health+r.MissingHealth*maximum/TerritoryRules.Health(profile,b.Kind)*slice/r.Duration);
+                    b.Health=Math.Min(maximum,b.Health+restored);
                     // Settle sub-nanohitpoint accumulation before the integer HUD ceiling.
                     if(terminal)b.Health=Math.Round(b.Health,9);
                     r.PaidSeconds+=slice;r.Waiting=false;
-                    if(terminal||b.Health>=maximum-1e-9){b.Repair=null;Sound(PlayableSoundKind.RepairComplete,b.Position,PlayableEntityKind.Tank,b.Owner,true);}
+                    if(terminal||b.Health>=maximum-1e-9)CompletePaidRepair(b);
                 }
             }
-            if(removed)RebuildGeometry();
+            if(demolish)ReconcileWreckRoutes();
         }
         private double LocalCenterUpgradeInvestment(Building b)=>research.TryGetValue(b.Owner,out var orders)?orders.Where(o=>o.CenterId==b.Id&&PlayableResearchRules.Local(o.Kind)&&(o.Active||o.Complete)).Sum(o=>o.PaidCost):0;
         private int SaleRefund(Building b)=>(int)Math.Floor((b.PaidCost+(b.Upgrade?.PaidCost??0)+(b.ProducerUpgrade?.PaidCost??0)+b.Orders.Where(o=>o.IsUpgrade&&o.Active).Sum(o=>o.PaidCost)+LocalCenterUpgradeInvestment(b))*profile.BuildingSaleRefundRatio*Math.Max(0,b.Health)/BuildingMaximumHealth(b.Owner,b.Kind));
@@ -118,7 +145,9 @@ namespace Spacewars.Runtime
             return new PlayableBuildingLifecycleSnapshot(b.Sale!=null,b.Sale==null?0:b.Sale.Elapsed/b.Sale.Duration,b.Repair!=null,b.Repair?.Waiting??false,
                 b.Repair?.PaidSeconds??0,b.Repair?.Duration??0,SaleBlocked(b),RepairBlocked(b),count,refund,lastCenter,
                 b.Repair==null?TerritoryRules.Cost(profile,b.Kind)*profile.BuildingRepairCostRatio*Math.Max(0,1-b.Health/BuildingMaximumHealth(b.Owner,b.Kind)):
-                    Math.Max(0,b.Repair.TotalCost-b.Repair.TotalCost*Math.Min(1,b.Repair.PaidSeconds/b.Repair.Duration)),b.Repair?.TermsRevision??profile.Revision);
+                    Math.Min(b.Repair.TotalCost*Math.Max(0,1-b.Repair.PaidSeconds/b.Repair.Duration),
+                        b.Repair.TotalCost*Math.Max(0,1-b.Health/BuildingMaximumHealth(b.Owner,b.Kind))*
+                        TerritoryRules.Health(profile,b.Kind)/b.Repair.MissingHealth),b.Repair?.TermsRevision??profile.Revision);
         }
     }
 }

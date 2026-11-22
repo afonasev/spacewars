@@ -35,7 +35,10 @@ namespace Spacewars.Runtime
             }
         }
         private static bool Tower(PlayableBuildingSnapshot b,PlayableOwner owner)=>b.Owner==owner&&b.Kind==PlayableBuildingKind.RepairTower&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true;
-        internal static bool IsAction(PlayableAiObservation o,PlayableAiAction a)=>a.Kind==PlayableCommandKind.Move&&a.EntityIds.Count==1&&o.Buildings.Any(b=>b.Id==a.ParentId&&Tower(b,o.Owner));
+        // The existing serialized building-kind term marks the selected repair
+        // contract. Ordinary retreat/regroup Move may use the same tower anchor,
+        // including the army leader, without detaching an individual client.
+        internal static bool IsAction(PlayableAiObservation o,PlayableAiAction a)=>a.Kind==PlayableCommandKind.Move&&a.BuildingKind==PlayableBuildingKind.RepairTower&&a.EntityIds.Count==1&&o.Buildings.Any(b=>b.Id==a.ParentId&&Tower(b,o.Owner));
         internal static bool Pending(IReadOnlyDictionary<string,long> memory,PlayableAiAction action,long localAction,out long started)
         {
             started=0;
@@ -43,7 +46,8 @@ namespace Spacewars.Runtime
                 memory.TryGetValue(Prefix+action.EntityIds[0]+":"+action.ParentId+":"+localAction,out started);
         }
         internal static bool GuardMission(AiArmyState army)=>army!=null&&army.Role==AiArmyRole.MobileDefense&&AiArmyPlanner.IsArmyPolicy(army.TacticalOwner)&&
-            army.Objective!=null&&army.Objective.StartsWith(((int)PlayableRouteTargetKind.FriendlyAnchor)+":",StringComparison.Ordinal);
+            army.Objective!=null&&(army.Objective.StartsWith(((int)PlayableRouteTargetKind.FriendlyAnchor)+":",StringComparison.Ordinal)||
+                army.Objective.StartsWith(((int)PlayableRouteTargetKind.TerritorialPosition)+":",StringComparison.Ordinal));
         internal static bool QuietGuard(AiArmyState army)=>GuardMission(army)&&(army.Phase==AiArmyPhase.Staging||army.Phase==AiArmyPhase.Advancing);
         private static bool Eligible(AiArmyState army)=>army.Phase==AiArmyPhase.Advancing||army.Phase==AiArmyPhase.Engaging||QuietGuard(army)||
             army.Phase==AiArmyPhase.Staging&&AiArmyPlanner.IsArmyPolicy(army.TacticalOwner)&&
@@ -144,7 +148,7 @@ namespace Spacewars.Runtime
                     .Select(x=>new{x.Route,x.Tower,Seconds=Length(x.Route)/Math.Max(double.Epsilon,PlayableUnitRules.Speed(p,u.Kind))+(p.RepairTowerHealthPerSecond>0?Math.Max(0,(ai.Value("positionDevelopment.repairReturnHealth")-PlayableUnitRules.HealthRatio(p,u))*u.MaxHealth)/p.RepairTowerHealthPerSecond:double.PositiveInfinity)})
                     .Where(x=>x.Seconds<=ai.Value("positionDevelopment.repairWaitSeconds")).OrderBy(x=>x.Seconds).ThenBy(x=>x.Tower.Id).FirstOrDefault();
                 if(routes==null)continue;
-                return new PlayableAiAction(actionId,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.Move,new[]{u.Id},routes.Route.Goal,parentId:routes.Tower.Id,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+                return new PlayableAiAction(actionId,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.Move,new[]{u.Id},routes.Route.Goal,parentId:routes.Tower.Id,buildingKind:PlayableBuildingKind.RepairTower,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
             }
             return null;
         }

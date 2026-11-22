@@ -10,8 +10,19 @@ namespace Spacewars.Runtime
             using var carryTiming=PerformanceProfile.Measure(ProfileStage.WreckCarry);
             if(!c.GeometryChange||c.GeometryDomain==null||!compatible)return false;
             var oldGeometry=(NavGeometry)c.SourceCore.NavigationGeometry.Facade;
-            if(InstalledGeometryCertificateV2.WreckDelta(oldGeometry,basis)){
-                PrepareWreckGeometryCarry(c,oldGeometry,basis,r);
+            long bytes=checked(NavStorageLayout.ObjectBytesBound(typeof(InstalledGeometryCertificateV2.WreckGeometryDelta))+
+                NavigationCaptureDtoStorage.ArrayBytes<NavObstacle>(basis.Obstacles.Count));
+            if(NavStorageScratch.TryReserve(r,bytes,out var scratch)){
+                using(scratch){
+                    var delta=new InstalledGeometryCertificateV2.WreckGeometryDelta(oldGeometry,basis);
+                    if(delta.Valid){
+                        PrepareWreckGeometryCarry(c,oldGeometry,basis,r,delta);
+                        CountGeometryCarry(c);
+                        return true;
+                    }
+                }
+            }else if(InstalledGeometryCertificateV2.WreckDelta(oldGeometry,basis)){
+                PrepareWreckGeometryCarry(c,oldGeometry,basis,r,null);
                 CountGeometryCarry(c);
                 return true;
             }
@@ -55,7 +66,8 @@ namespace Spacewars.Runtime
             for(int i=0;i<c.Retries.Length;i++)c.Retries[i].GeometryCarried=c.Actors[c.Retries[i].ActorIndex].Preserve;
             foreach(var row in c.Actors)if(!c.Removes(row.Id)&&row.Installed!=null)PerformanceProfile.Add(row.Preserve?ProfileWork.WreckCarriedRoutes:ProfileWork.WreckResetRoutes,1);
         }
-        private void PrepareWreckGeometryCarry(PreparedRebind c,NavGeometry before,NavGeometry basis,INavStorageReservation r)
+        private void PrepareWreckGeometryCarry(PreparedRebind c,NavGeometry before,NavGeometry basis,INavStorageReservation r,
+            InstalledGeometryCertificateV2.WreckGeometryDelta delta)
         {
             for(int i=0;i<c.Actors.Length;i++){
                 ref var row=ref c.Actors[i];var d=row.Installed?.Corridor.Corridor;
@@ -67,7 +79,7 @@ namespace Spacewars.Runtime
                     member=InstalledGeometryMemberV2.Create(row.Installed.Request,row.Installed.Corridor,row.Installed.Route,local,row.Position,r);
                     member.RemainingIndex=row.Actor.routeIndex;member.RemainingLocalIndex=row.Actor.localIndex;
                     members=NavRetainedArray<NavOwnedStorage>.Copy(new NavOwnedStorage[]{member},r.TryReserve);
-                    certificate=InstalledGeometryCertificateV2.TryCreate(row.Version,before,basis,members,r,wreckChanges:true);
+                    certificate=InstalledGeometryCertificateV2.TryCreate(row.Version,before,basis,members,r,wreckChanges:true,delta:delta);
                     if(certificate==null)continue;
                     row.NextInstalled=NavigationInstalledExecutionOwner.CarryOwned(row.Installed,certificate,r);row.Preserve=true;
                 }finally{certificate?.Release();members?.Release();member?.Release();empty?.Release();}

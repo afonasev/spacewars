@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Spacewars.Simulation;
@@ -11,7 +12,7 @@ namespace Spacewars.Runtime
         internal void WriteState(BinaryWriter w)
         {
             lock(gate){
-                if(stopping||failure!=null||jobs.Any(j=>!j.Done))throw new InvalidOperationException("Observed capture requires a settled worker.");
+                if(stopping||failure!=null||unfinished!=0)throw new InvalidOperationException("Observed capture requires a settled worker.");
                 var geometries=jobs.Select(j=>j.Work.Geometry).Distinct().ToArray();
                 WorldWire.Array(w,geometries,g=>WorldWire.Write(w,new NavigationGeometryState{HalfExtent=g.HalfExtent,Revision=g.Revision,Obstacles=g.Obstacles.ToArray()}));
                 w.Write(use);w.Write(jobs.Count);
@@ -28,6 +29,7 @@ namespace Spacewars.Runtime
             if(geometries.Length>WorldWire.MaxItems)throw new ArgumentException("Observed geometry capacity.");
             long use=r.ReadInt64();int count=r.ReadInt32();if(use<0||count<0||count>WorldWire.MaxItems)throw new ArgumentException("Observed query capacity/clock.");
             var entries=new Job[count];
+            var keys=new HashSet<(PlayableOwner,int,int,PlayableRouteTargetKind,int)>();
             for(int i=0;i<count;i++){
                 var owner=(PlayableOwner)r.ReadInt32();int actor=r.ReadInt32(),target=r.ReadInt32();var kind=(PlayableRouteTargetKind)r.ReadInt32();int candidate=r.ReadInt32();long used=r.ReadInt64();int geometry=r.ReadInt32();
                 string profileId=String(r);int revision=r.ReadInt32();var profile=NavigationProfile.FromWireValues(profileId,revision,WorldWire.Array(r,()=>Number(r)));
@@ -37,10 +39,10 @@ namespace Spacewars.Runtime
                 var work=new ObservedPathWork(owner,geometries[geometry],profile,radius,speed,turn,origin,goal);
                 var from=origin;foreach(var point in path){if(!work.Geometry.SegmentFree(from,point,radius))throw new ArgumentException("Unsafe observed saved path.");from=point;}
                 if(path.Length>0&&!path[path.Length-1].Equals(goal))throw new ArgumentException("Observed saved goal mismatch.");
-                if(entries.Take(i).Any(j=>j.Work.Owner==owner&&j.Actor==actor&&j.Target==target&&j.Kind==kind&&j.Candidate==candidate))throw new ArgumentException("Duplicate observed query.");
+                if(!keys.Add((owner,actor,target,kind,candidate)))throw new ArgumentException("Duplicate observed query.");
                 entries[i]=new Job{Work=work,Actor=actor,Target=target,Kind=kind,Candidate=candidate,Used=used,Path=path,Done=true};
             }
-            var lane=new ObservedPathLane(false);lock(lane.gate){lane.use=use;lane.jobs.AddRange(entries);foreach(var job in entries)lane.lookup.Add(Key(job),job);}return lane;
+            var lane=new ObservedPathLane(false);lock(lane.gate){lane.use=use;foreach(var job in entries)lane.Append(job);}return lane;
         }
     }
 }

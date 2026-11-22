@@ -68,6 +68,23 @@ namespace Spacewars.Tests.EditMode
             var proposal=NavCrowdMotion.Select(bodies,0,neighbors,2,PlayableProfile.Default.Navigation,1d/30,new FlatRankingClearance(bodies,true));
             Assert.AreEqual(bodies[0].Position,proposal.Position);Assert.AreEqual(default(NavPoint),proposal.Velocity);Assert.True(proposal.Blocked);Assert.False(proposal.StaticNoWinner||proposal.Overflow);
         }
+        [Test] public void MovingTurnAddsOnlyASweptCappedForwardStep()
+        {
+            const double dt=1d/30;
+            var profile=PlayableProfile.Default.Navigation;
+            var start=new NavPoint(0,0);var goal=new NavPoint(5,2.5);
+            var bodies=new[]{new NavMotionBody{Id=1,Active=true,Position=start,Target=goal,Radius=.58,Speed=7,TurnSpeed=7.5}};
+            var flat=new RowClearance(bodies,new NavGeometry(30,Array.Empty<NavObstacle>(),1));
+            NavMotionProposal Select(INavMotionClearance clearance)=>NavCrowdMotion.Select(bodies,0,Array.Empty<int>(),0,profile,dt,clearance,goal);
+            var before=Select(flat);Assert.AreEqual(start,before.Position);
+            bodies[0].MovingTurn=true;
+            var after=Select(flat);
+            Assert.AreEqual(before.Heading,after.Heading);
+            Assert.That(NavCrowdMotion.Length(after.Velocity),Is.GreaterThan(0).And.LessThan(7));
+            Assert.True(NavCrowdMotion.ImprovesGoal(start,after.Position,goal));
+            Assert.AreEqual(start,Select(new StationaryOnlyClearance()).Position);
+        }
+
         [TestCase(0d)][TestCase(-1d)]
         public void NonPositiveComposedSpeedPreservesInactiveSelectDisposition(double speed)
         {
@@ -187,6 +204,27 @@ namespace Spacewars.Tests.EditMode
             var bodies=new[]{new NavMotionBody{Id=1,Position=new NavPoint(-1,0),Radius=.72,Active=true},new NavMotionBody{Id=2,Position=new NavPoint(1,0),Radius=.72,Active=true}};
             var proposals=new[]{new NavMotionProposal{Position=new NavPoint(0,0),Velocity=new NavPoint(1,0)},new NavMotionProposal{Position=new NavPoint(0,0),Velocity=new NavPoint(-1,0)}};
             NavCrowdMotion.ResolveJoint(bodies,proposals,1);for(int i=0;i<2;i++){Assert.AreEqual(bodies[i].Position,proposals[i].Position);Assert.AreEqual(new NavPoint(0,0),proposals[i].Velocity);Assert.False(proposals[i].Blocked);}
+        }
+        [Test] public void DefaultMovementKeepsTheSweptHullClearOfAHeldNeighbor()
+        {
+            var crowd = new NavCrowd(new NavGeometry(20, Array.Empty<NavObstacle>(), 1), NavigationProfile.Default);
+            var mover = crowd.Add(1, new NavPoint(-3, 0));
+            var held = crowd.Add(2, new NavPoint(0, 0));
+            crowd.Stop(held.Id, true);
+            var goal = new NavPoint(4, 0);
+            Assert.True(crowd.SetRoute(mover.Id, goal, new[] { goal }));
+            bool moved = false;
+            for (int tick = 0; tick < 180 && mover.Moving; tick++)
+            {
+                var start = mover.Position;
+                crowd.Step(1d / 30);
+                moved |= !start.Equals(mover.Position);
+                Assert.AreEqual(default(NavPoint), held.Position);
+                var delta = new NavPoint(mover.Position.X - start.X, mover.Position.Z - start.Z);
+                Assert.GreaterOrEqual(SweptSeparationSquared(start, delta, 1),
+                    Math.Pow(mover.Radius + held.Radius, 2) - 1e-9);
+            }
+            Assert.True(moved);
         }
         [Test] public void EnclosingHeldActorsKeepWholePoseAndTheOriginalMoveTimesOut()
         {

@@ -14,7 +14,12 @@ namespace Spacewars.Presentation
             pages=1;
             if(gestures.Mode=="groupWheel"||gestures.Mode=="groupAssign"){
                 var units=PadUnits(1);v.GroupSlots??=v.Groups.SlotCount(units);bool assign=gestures.Mode=="groupAssign";
-                return v.Groups.Actions(units,v.Selection,assign,v.GroupSlots.Value).Select(a=>new OfflinePadAction(a.Id,"Группа "+a.Id,a.Enabled,assign?"RT: отпустить — заменить; держать — добавить":"Отпустите RB")).ToArray();
+                return v.Groups.Actions(units,v.Selection,assign,v.GroupSlots.Value).Select(sector=>
+                {
+                    sector.Enabled|=sector.CanAssign;
+                    string detail=sector.CanAssign?"Удерживайте A, чтобы назначить":sector.RecallEnabled?"Нажмите A, чтобы выбрать":"Группа пуста";
+                    return new OfflinePadAction(sector.Id,"Группа "+sector.Id,sector.Enabled,detail){Sector=sector};
+                }).ToArray();
             }
             v.GroupSlots=null;
             if(gestures.Mode=="baseWheel"){
@@ -24,16 +29,30 @@ namespace Spacewars.Presentation
             if(gestures.Mode=="buildingWheel")return v.Anchor!=0?OfflinePadWorldActions.Building(v.View,profile,v.Anchor):OfflinePadWorldActions.Build(v.View,profile,v.Site,v.Slot);
             return Array.Empty<OfflinePadAction>();
         }
+        private int[] padGroupAwaitingFocus;
+
         private bool PadMenuIntent(OfflinePadIntent intent,OfflinePadAction[] actions,Viewport v)
         {
             if(intent.Kind=="assignGroup"||intent.Kind=="addGroup"){
                 if(actions.Any(a=>a.Sector.Id==intent.Id&&a.Sector.Enabled)&&int.TryParse(intent.Id,out var slot)){v.Groups.Assign(slot,v.Selection,PadUnits(1),intent.Kind=="addGroup");session.RecordHumanAction(session.Seats[1].Id);}return true;
             }
+            if(intent.Kind=="focusCycledGroup")
+            {
+                var ids=padGroupAwaitingFocus;padGroupAwaitingFocus=null;
+                if(ids!=null&&v.Selection.SetEquals(ids))
+                {
+                    var point=OfflinePadGroups.Focus(ids,PadUnits(1),v.CameraState.X,v.CameraState.Z,padProfile.controlGroupFocusRadius);
+                    if(point.HasValue){Focus(1,new NavPoint(point.Value.X,point.Value.Z));v.Cursor=Center(1);}
+                }
+                return true;
+            }
             if(intent.Kind=="cycleGroup"||intent.Kind=="recallGroup"){
                 var selected=intent.Kind=="cycleGroup"?v.Groups.Cycle(PadUnits(1),v.Selection):int.TryParse(intent.Id,out var slot)?v.Groups.Recall(slot,PadUnits(1)):null;
-                if(selected!=null){session.RecordHumanAction(session.Seats[1].Id);v.Selection.Clear();foreach(var id in selected)v.Selection.Add(id);SelectionMarkerEvent(1);if(intent.Kind=="cycleGroup"){var point=OfflinePadGroups.Focus(selected,PadUnits(1),v.CameraState.X,v.CameraState.Z,padProfile.controlGroupFocusRadius);if(point.HasValue){Focus(1,new NavPoint(point.Value.X,point.Value.Z));v.Cursor=Center(1);}}}return true;
+                padGroupAwaitingFocus=intent.Kind=="cycleGroup"?selected:null;
+                if(selected!=null){session.RecordHumanAction(session.Seats[1].Id);v.Selection.Clear();foreach(var id in selected)v.Selection.Add(id);SelectionMarkerEvent(1);}
+                return true;
             }
-            if(intent.Kind=="selectAllArmy"){session.RecordHumanAction(session.Seats[1].Id);v.Selection.Clear();v.Anchor=v.Site=v.Slot=v.Parent=0;v.Groups.ClearActive();foreach(var unit in v.View.Entities.Where(e=>e.Owner==v.View.Owner))v.Selection.Add(unit.Id);SelectionMarkerEvent(1);return true;}
+            if(intent.Kind=="selectAllArmy"){padGroupAwaitingFocus=null;session.RecordHumanAction(session.Seats[1].Id);v.Selection.Clear();v.Anchor=v.Site=v.Slot=v.Parent=0;v.Groups.ClearActive();foreach(var unit in v.View.Entities.Where(e=>e.Owner==v.View.Owner))v.Selection.Add(unit.Id);SelectionMarkerEvent(1);return true;}
             if(intent.Kind=="cycleBase"||intent.Kind=="selectBase"){
                 var point=intent.Kind=="cycleBase"?v.Groups.CycleBase(PadBases(v),v.OriginalHq):actions.FirstOrDefault(a=>a.Sector.Id==intent.Id&&a.Sector.Enabled)?.Point is NavPoint p?new OfflinePadBase(0,p.X,p.Z):(OfflinePadBase?)null;
                 if(point.HasValue){Focus(1,new NavPoint(point.Value.X,point.Value.Z));v.Cursor=new NavPoint(point.Value.X,point.Value.Z);}return true;

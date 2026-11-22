@@ -3,8 +3,10 @@
 Both platforms, signed metadata, packages, installers and current public Unity source are published with one command from a clean committed task checkout:
 
 ```sh
-SPACEWARS_REMOTE_NSIS=1 python3 tools/native-release/publish.py --version 0.6.6 --sequence 7 --channel test --publish
+SPACEWARS_REMOTE_NSIS=1 python3 tools/native-release/publish.py --version VERSION --sequence SEQUENCE --channel test --notes tools/native-release/notes/VERSION.json --publish
 ```
+
+Each shipping Player contains one complete balance and AI profile for its release. `NativeLabBuildCatalog` derives it from the latest marked Default; intermediate revisions, historical releases and experiments stay in the authoring store. Balance and AI share the same profile ID and revision. `native-build.json` records that identity, the game release version and the catalog SHA-256. Update notes cover balance and AI together.
 
 Use a new unpublished version and strictly increasing sequence on every subsequent release. Test means GitHub prerelease, never latest. Production requires the separately authorized `--channel production --production-approved`. Never promote the same already published tag or overwrite assets; rebuild a new version with production-pinned helpers. Without `--publish`, the command builds/packages/verifies locally only. `--reuse-builds` still verifies exact source/version/byte inventories. `--resume` also retains completed packaging, source export and signing for the identical recorded release, verifying checkpoint file hashes before reuse.
 
@@ -34,7 +36,7 @@ Affected publication checks: `PYTHONPATH=tools python3 -m unittest tools.test_gi
 
 ## Publication checklist and evidence
 
-1. Start from a clean committed task branch. Choose a never-published version and a sequence greater than the latest signed sequence in the selected channel; the example above follows test 0.6.5/6. Inspect current releases before using it. Production requires its own new version, production-pinned helpers and explicit approval.
+1. Start from a clean committed task branch. Choose a never-published version and a sequence greater than the latest signed sequence in the selected channel. Inspect current releases before substituting the version and sequence. Production requires its own new version, production-pinned helpers and explicit approval.
 2. Run the single command above. Both Players must bind to the exact source/version; packaging signs platform metadata and the complete release inventory with the external pinned key.
 3. Verify exact local source/byte inventories and both signed packages before upload. All assets go to an owned draft; exact asset names, uploaded state, sizes, optional GitHub SHA256 digests and channel must pass before publication. Preserve `upload.json`, `release-state.json` and `publication.json` with signed manifests and source identity.
 4. User policy 2026-11-02: do not download installers/update packages after upload, from either draft or public GitHub URLs. Do not run routine CDN/range or installed-client download checks. They are NotRun by policy; upload metadata is not a claim of end-to-end delivery. Actual install/update/device acceptance is a separate explicitly requested scenario. This does not change the game client's download/hash/signature checks during a real update.
@@ -54,31 +56,51 @@ macOS: `"/Applications/Spacewars Test.app/Contents/MacOS/Spacewars" -noaudio -mu
 
 The Windows installer stages its payload in its own temporary directory and invokes `--install-payload` for signed inventory validation, host/apply locking, free-space checks, transactional repair/activation and downgrade rejection before changing the active version. Windows 10 x64 or newer is required. macOS packaging declares macOS 11+ and Universal architecture; Intel/Apple Silicon hardware acceptance is separate. No installer is built by focused source checks.
 
-Release descriptions are generated on publication from the previous channel release's source identity and the exact Git range, in matching Russian and English sections. `release-notes-source.json` records the source provenance for review. Missing source history stops generation rather than inventing changes. Historical release descriptions lacking a Russian section are shown as unavailable; this source task does not edit already published releases.
+Every new release uses reviewed Russian and English notes committed at the exact source revision. The publisher selects the latest published release in the chosen channel and records both source commits and their Git range in `release-notes-source.json`. Missing source history or a stale comparison tag stops preparation. The comparison tag is checked again before making the draft public.
 
 ### Release from committed playable assets
 
 Set `SPACEWARS_RELEASE_COMMITTED_ASSETS=1` when publishing the saved Playable scene and native Resources already committed in the selected clean revision. Both release builds retain the normal version/date/icon configuration, source/byte binding and signed production packaging; only asset/scene regeneration is skipped. The default build still regenerates assets. This is appropriate when shipping the existing playable content, and does not repair the separate material-catalog regeneration failure. The build log records `RELEASE_ASSETS committed`.
 
-### Illustrated release notes
+### Patch notes and illustrations
 
-Pass `--notes tools/native-release/notes/<name>.json` to `publish.py` when preparing an illustrated release. The manifest and screenshot files must be committed in the exact source revision being released. Preparation reads Git blobs, so unrelated local files cannot silently enter a release. Without `--notes`, the existing conservative Git-range summary remains available. Author concrete player-facing changes, one bullet per item, with matching RU/EN categories and meaning:
+Pass `--notes tools/native-release/notes/VERSION.json` with a schema 2 manifest. Review the actual game changes between the previous release source and the candidate. Check effective Balance Lab defaults, shipped profile selections and gameplay rules in code. Record each player-facing change in its own categorized item. Set `balance_reviewed` to true after that review, including when balance stayed the same. The publisher checks the manifest and comparison tag, while the author checks coverage and values against the release sources. Use `"baseline": null` only for the first published release in the channel.
+
+For a numeric balance item, use the same numbers in both languages by storing them once in `balance.before` and `balance.after`. Give units in both languages. Use `null` on one side for a new or removed parameter. For a rule without numbers, use `{"ru": "...", "en": "..."}` on both sides and describe how it worked before and after. Set `"highlight": true` on the most useful changes in a large patch. They appear first, with the remaining items grouped under «Всё остальное» / “Other changes”. Short patches can use categories alone.
+
+The example uses the values from the Explorer production-time change in release profile revision 4. Substitute the actual comparison tag for the release being prepared.
 
 ```json
 {
-  "schema": 1,
-  "entries": [{
-    "category_ru": "Интерфейс", "category_en": "Interface",
-    "ru": "История версий показывает иллюстрации рядом с изменениями.",
-    "en": "Release history shows illustrations beside their changes.",
-    "images": [{
-      "path": "tools/native-release/notes/media/history.png",
-      "source_commit": "<exact 40-character game revision captured>",
-      "ru": "История версий с иллюстрациями", "en": "Illustrated release history"
-    }]
-  }]
+  "schema": 2,
+  "baseline": "v0.6.18",
+  "balance_reviewed": true,
+  "entries": [
+    {
+      "category_ru": "Баланс · юниты",
+      "category_en": "Balance · units",
+      "ru": "Исследователь — время производства",
+      "en": "Explorer production time",
+      "highlight": true,
+      "balance": {"before": 15, "after": 12, "unit": {"ru": "с", "en": "s"}}
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "История версий показывает иллюстрации рядом с изменениями.",
+      "en": "Release history shows illustrations beside their changes.",
+      "images": [{
+        "path": "tools/native-release/notes/media/history.png",
+        "source_commit": "<exact 40-character game revision captured>",
+        "ru": "История версий с иллюстрациями",
+        "en": "Illustrated release history"
+      }]
+    }
+  ]
 }
 ```
+
+Existing schema 1 manifests document historical releases. Use schema 2 for new preparation. The manifest and images must be committed in the exact source revision being released.
 
 Use real screenshots of the identified revision. Images are optional for text-only fixes; add two ordered images captioned before/after when useful. PNG inputs must be noninterlaced 8-bit grayscale/RGB/RGBA, at most 4096 pixels per side and 8 MiB. Paths must be relative to the repository; the source revision must be an ancestor of the release. Missing, corrupt, oversized or uncommitted assets reject preparation. Caption/text fields are plain single lines.
 

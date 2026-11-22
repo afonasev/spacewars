@@ -1,0 +1,20 @@
+{
+  "id": "6000.3.23f1-arm64-mono-pthread-v1",
+  "runtime_tag": "9d7c9afd-pthread",
+  "stock_editor_sha256": "dc79d1f00ba18e1a243c19916415aca7d7c5ea5b08d1558ea9c2d35b52e8cc2e",
+  "stock_mono_sha256": "0fae115b5a92a1392ae2dd53f36d82b586e182114c31784629ff1d2ee8d690f1",
+  "runtime_sha256": "22b750f87451ca41962d01339955e080e73dde07e10a5975df701d4adc78efed",
+  "artifact": "stabilize-early-scout-navigation/f3-mono-repair/runtime/pthread/libmonobdwgc-2.0.dylib",
+  "sources": {
+    "mono": "9d7c9afd266e523029fb0cab48e944e528e61e68",
+    "bdwgc": "1113fefc4ba0e895767ac780d84e9e456fd624db",
+    "libatomic_ops": "7e44a3b8dcf457207d6394e4e52e327189155e4f",
+    "corefx": "5b4edb9b0a721aed60c9c8ddeed441bdd7451e42",
+    "archives": {
+      "mono.tar.gz": "02d1743131e3f816dd95a24aa362336aabf2b3c72eb058129379918d262364d7",
+      "atomic.tar.gz": "254663acf34e96ee536150aaf400b81ccfe714cafb348ac53f4fbd481f024dc4",
+      "bdwgc.tar.gz": "23df518aaf8bea4105dd1bbf6557b2b09d8e9b443d1a0121ad00109d9a9740a6",
+      "corefx.tar.gz": "ef255449406f343466769cce5346e052fab5df645a8f1e28ddf6a6469cd90eaa"
+    }
+  }
+}

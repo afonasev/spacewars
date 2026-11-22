@@ -58,13 +58,77 @@ namespace Spacewars.Simulation
         {var p=route.RecastPlan;double s=p.Spine.Station(p.Join);return new NavRecastStepState(0,0,s,s);}
         private static ILayeredNavigationProvider Provider(NavTypedRoute route)=>route.Legs[0].RecastAuthorityProvider;
         private static NavClearanceProfile Clearance(NavTypedRoute r)=>new NavClearanceProfile("ground",1,"ground",(int)r.Subscription.MobilityRevision,r.RecastPlan.Spine.Radius);
-        private static int NextPortal(NavTypedRoute r,int cursor){for(int i=Math.Max(0,cursor);i<r.Legs.Count;i++)if(r.Legs[i].Kind==NavTypedLegKind.Portal)return i;return r.Legs.Count;}
+        internal static int NextPortal(NavTypedRoute r,int cursor){for(int i=Math.Max(0,cursor);i<r.Legs.Count;i++)if(r.Legs[i].Kind==NavTypedLegKind.Portal)return i;return r.Legs.Count;}
         private static int PreviousPortal(NavTypedRoute r,int cursor){for(int i=Math.Min(cursor-1,r.Legs.Count-1);i>=0;i--)if(r.Legs[i].Kind==NavTypedLegKind.Portal)return i;return -1;}
         private static bool SameDirection(NavTypedLeg accepted,NavTypedLeg actual,bool forward)=>accepted.PortalId==actual.PortalId&&actual.From.SurfaceId==(forward?accepted.From:accepted.To).SurfaceId&&actual.To.SurfaceId==(forward?accepted.To:accepted.From).SurfaceId;
         private static bool Trace(NavTypedRoute route,NavRecastStepState before,NavLocation from,NavPoint to,INavStorageReservation reservation,out NavLocation reached,out int stage,out NavRecastSweepReceipt receipt,INavRecastSweepAuthority authority=null,int actor=0,int exclusivePortal=-1)
         {
+            if(CanObserveTrace(route,reservation,authority))return ObserveTrace(route,before,from,to,reservation,out reached,out stage,out receipt,authority,actor,exclusivePortal);
             bool result=TryTraceOwned(route,before,from,to,reservation,out reached,out stage,out receipt,out var trace,authority,actor,exclusivePortal);
             (trace as NavOwnedStorage)?.ReleaseOwner();return result;
+        }
+#if UNITY_INCLUDE_TESTS
+        [ThreadStatic] internal static bool DisableTraceObservationForTests;
+        [ThreadStatic] internal static long SectionObservationsForTests;
+        [ThreadStatic] internal static int TraceObservationsForTests;
+        [ThreadStatic] internal static int SurfaceConnectionsForTests;
+#endif
+        private static bool CanObserveTrace(NavTypedRoute route,INavStorageReservation r,INavRecastSweepAuthority authority)
+        {
+#if UNITY_INCLUDE_TESTS
+            if(DisableTraceObservationForTests)return false;
+#endif
+            return authority is NavCrowd crowd&&crowd.StableSelectClearance&&route.IsImmutableCaptureRoot&&Provider(route) is PartitionNavigationProvider provider&&provider.StorageRoot!=null&&provider.StorageRoot.IsImmutableCaptureRoot&&r is INavStorageLedgerIdentity ledger&&ledger.Owns(route)&&ledger.Owns(provider.StorageRoot);
+        }
+        private sealed class TraceObservation
+        {
+            internal readonly NavTypedRoute Route;internal readonly int ExclusivePortal;
+            private readonly PartitionNavigationProvider provider;private readonly INavStorageReservation reservation;
+            internal int Stage;internal NavRecastSweepReceipt Receipt;internal bool Accepted=true;
+            internal TraceObservation(NavTypedRoute route,int stage,NavRecastSweepReceipt receipt,int exclusive,PartitionNavigationProvider provider,INavStorageReservation reservation){Route=route;Stage=stage;Receipt=receipt;ExclusivePortal=exclusive;this.provider=provider;this.reservation=reservation;}
+            internal void Segment(NavLocation from,NavLocation to,double cost,NavTypedLegKind kind,string portal)
+            {
+                // Keep the same selector/portal admission as CreateOwned; only
+                // the immediately discarded physical container is omitted.
+                provider.CanonicalTraceSegment(ref from,ref to,ref portal,reservation);
+                if(Accepted&&kind==NavTypedLegKind.Portal)Accepted=AcceptPortal(Route,from,to,portal,ExclusivePortal,ref Stage,ref Receipt);
+            }
+        }
+        private static bool ObserveTrace(NavTypedRoute route,NavRecastStepState before,NavLocation from,NavPoint to,INavStorageReservation r,out NavLocation reached,out int stage,out NavRecastSweepReceipt receipt,INavRecastSweepAuthority authority,int actor,int exclusivePortal)
+        {
+            reached=default;stage=before.Cursor;receipt=new NavRecastSweepReceipt{Before=before,From=from.Position,To=to,FromSurface=from.SurfaceId,FirstPortalLeg=-1,LastPortalLeg=-1};
+            if(!authority.AllowsRecastSweep(actor,from,to,route.RecastPlan.Spine.Radius))return false;
+            var provider=(PartitionNavigationProvider)Provider(route);if(stage<0||stage>=route.Legs.Count||route.Legs[stage].From.SurfaceId!=from.SurfaceId)return false;
+            if(route.TrySection(provider,from,to,out reached)){
+                receipt.Verified=true;receipt.ToSurface=reached.SurfaceId;
+#if UNITY_INCLUDE_TESTS
+                SectionObservationsForTests++;
+#endif
+                return true;
+            }
+            using(NavStorageScratch.Reserve(r,checked(NavStorageLayout.ObjectBytesBound(typeof(TraceObservation))+256))){
+                var observation=new TraceObservation(route,stage,receipt,exclusivePortal,provider,r);
+                if(!provider.TryObserveTrace(from,to,Clearance(route),r,observation.Segment,out reached))return false;
+                stage=observation.Stage;receipt=observation.Receipt;
+#if UNITY_INCLUDE_TESTS
+                TraceObservationsForTests++;
+#endif
+                if(!observation.Accepted)return false;
+                receipt.ToSurface=reached.SurfaceId;receipt.Verified=true;return true;
+            }
+        }
+        private static bool AcceptPortal(NavTypedRoute route,NavLocation from,NavLocation to,string portal,int exclusivePortal,ref int stage,ref NavRecastSweepReceipt receipt)
+        {
+            int next=NextPortal(route,stage),previous=PreviousPortal(route,stage),matched;
+            bool Direction(int i,bool forward){var accepted=route.Legs[i];return accepted.PortalId==portal&&from.SurfaceId==(forward?accepted.From:accepted.To).SurfaceId&&to.SurfaceId==(forward?accepted.To:accepted.From).SurfaceId;}
+            if(next<route.Legs.Count&&Direction(next,true)){matched=next;stage=Math.Min(route.Legs.Count-1,next+1);}
+            // After reversing a seam its accepted origin is the physical
+            // surface. The preceding leg may itself be a different portal.
+            else if(previous>=0&&Direction(previous,false)){matched=previous;stage=previous;}
+            else return false;
+            if(exclusivePortal>=0&&matched>=exclusivePortal)return false;
+            if(receipt.PortalCount==0){receipt.FirstPortalLeg=matched;receipt.FirstSeam=portal;receipt.FirstCrossing=from.Position;}
+            receipt.PortalCount++;receipt.LastPortalLeg=matched;receipt.LastSeam=portal;receipt.LastCrossing=from.Position;return true;
         }
         // Transfers the actual authority trace to the caller. The same ordered
         // seam checks serve movement and its retained execution transcript.
@@ -78,17 +142,7 @@ namespace Spacewars.Simulation
             if(provider is PartitionNavigationProvider partition){if(!partition.TryTraceOwned(from,to,Clearance(route),out reached,out trace,reservation))return false;}
             else if(!(authority is INavLayerSweepAuthority layered)||!layered.TraceLayerSweep(provider,from,to,route.RecastPlan.Spine.Radius,route,before.Cursor,reservation,out reached,out trace))return false;
             try{
-                foreach(var leg in trace)if(leg.Kind==NavTypedLegKind.Portal){
-                    int next=NextPortal(route,stage),previous=PreviousPortal(route,stage),matched;
-                    if(next<route.Legs.Count&&SameDirection(route.Legs[next],leg,true)){matched=next;stage=Math.Min(route.Legs.Count-1,next+1);}
-                    else if(previous>=0&&SameDirection(route.Legs[previous],leg,false)){matched=previous;stage=Math.Max(0,previous-1);}
-                    else return false;
-                    // A staged prefix may cross earlier accepted ramps, never
-                    // its passage entry (in either direction) before admission.
-                    if(exclusivePortal>=0&&matched>=exclusivePortal)return false;
-                    if(receipt.PortalCount==0){receipt.FirstPortalLeg=matched;receipt.FirstSeam=leg.PortalId;receipt.FirstCrossing=leg.From.Position;}
-                    receipt.PortalCount++;receipt.LastPortalLeg=matched;receipt.LastSeam=leg.PortalId;receipt.LastCrossing=leg.From.Position;
-                }
+                foreach(var leg in trace)if(leg.Kind==NavTypedLegKind.Portal&&!AcceptPortal(route,leg.From,leg.To,leg.PortalId,exclusivePortal,ref stage,ref receipt))return false;
                 receipt.ToSurface=reached.SurfaceId;receipt.Verified=true;owned=trace;trace=null;return true;
             }finally{(trace as NavOwnedStorage)?.ReleaseOwner();}
         }
@@ -97,31 +151,86 @@ namespace Spacewars.Simulation
             if(authority!=null&&!authority.AllowsRecastSweep(actor,from,target.Position,route.RecastPlan.Spine.Radius))return false;
             if(from.Equals(target))return true;var provider=Provider(route);
             if(!(provider is PartitionNavigationProvider partition))return provider.CanSweep(from,target,Clearance(route));
+            if(CanObserveTrace(route,r,authority)){
+                // The traversal records every seam crossing, including a trip
+                // that returns to the starting surface. This boolean query
+                // consumes no leg values, so only the paid sweep scratch is needed.
+#if UNITY_INCLUDE_TESTS
+                SurfaceConnectionsForTests++;
+#endif
+                from.RequireName(r);
+                return partition.ConnectsWithoutPortal(from,target,Clearance(route),r);
+            }
             if(!partition.TryTraceOwned(from,target.Position,Clearance(route),out var reached,out var trace,r))return false;
             try{if(!reached.Equals(target))return false;foreach(var l in trace)if(l.Kind==NavTypedLegKind.Portal)return false;return true;}
             finally{(trace as NavOwnedStorage)?.ReleaseOwner();}
+        }
+        internal static bool CanTraceRemaining(NavTypedRoute route,INavStorageReservation r,INavRecastSweepAuthority authority)
+            =>authority is NavCrowd crowd&&crowd.StableSelectClearance&&Provider(route) is PartitionNavigationProvider provider&&
+              provider.StorageRoot!=null&&provider.StorageRoot.IsImmutableCaptureRoot&&route.IsImmutableCaptureRoot&&
+              r is INavStorageLedgerIdentity ledger&&ledger.Owns(provider.StorageRoot)&&ledger.Owns(route);
+        // After the actual motor's CanTarget, a transcript only needs ordered
+        // seams and the full physical trace. Projection chooses a surface leg
+        // BETWEEN the same previous/next portals; its station/phase/high-water
+        // are neither consumed nor published by this fixed suffix. Keep the
+        // terminal-fan cursor jump, which can change that portal interval.
+        // This is not a cached acceptance: every edge rechecks live geometry
+        // and HOLD through TryTraceOwned. Unknown/hooked inputs use Advance.
+        internal static bool TryTraceRemainingOwned(NavTypedRoute route,int cursor,NavLocation from,NavPoint to,INavStorageReservation r,out NavLocation reached,out int nextCursor,out IReadOnlyList<NavTypedLeg> owned,INavRecastSweepAuthority authority,int actor)
+        {
+            reached=default;nextCursor=cursor;owned=null;if(!CanTraceRemaining(route,r,authority))return false;
+            var before=new NavRecastStepState(0,cursor,0,0);
+            if(!TryTraceOwned(route,before,from,to,r,out reached,out nextCursor,out _,out var trace,authority,actor))return false;
+            try{
+                nextCursor=RemainingCursor(route,reached,nextCursor,r,authority,actor);
+                owned=trace;trace=null;return true;
+            }finally{(trace as NavOwnedStorage)?.ReleaseOwner();}
+        }
+        internal static int RemainingCursor(NavTypedRoute route,NavLocation reached,int cursor,
+            INavStorageReservation r,INavRecastSweepAuthority authority,int actor)
+        {
+            if(InTerminalFan(route,reached)&&Trace(route,new NavRecastStepState(0,cursor,0,0),reached,
+                route.Subscription.AssignedEndpoint.Position,r,out var end,out _,out _,authority,actor)&&
+                end.Equals(route.Subscription.AssignedEndpoint))
+                return Math.Max(route.RecastPlan.TerminalLeg,PreviousPortal(route,cursor)+1);
+            return cursor;
         }
         internal static bool InTerminalFan(NavTypedRoute route,NavLocation location)
         {
             var p=route.RecastPlan;var s=p.Spine;
             if(location.SurfaceId!=s.Node(p.Exit).SurfaceId)return false;
-            // The analytically constructed fan boundary itself is an accepted
-            // closed point even if its squared-distance computation rounds out.
-            if(location.Equals(s.Node(s.FanNode)))return true;
+            var boundary=s.Node(s.FanNode);
+            if(location.Equals(boundary))return true;
             double x=location.Position.X-s.FanCenter.X,z=location.Position.Z-s.FanCenter.Z;
-            return x*x+z*z<=s.FanRadius*s.FanRadius;
+            if(x*x+z*z<=s.FanRadius*s.FanRadius)return true;
+            // Integrating a step to the stored fan entry can leave its position
+            // a few binary64 rounding errors away. Recognize that same entry
+            // without expanding the fan elsewhere or skipping the terminal trace.
+            const double rounding=8*2.2204460492503131e-16;
+            return Math.Abs(location.Position.X-boundary.Position.X)<=rounding*Math.Max(s.FanRadius,Math.Abs(boundary.Position.X))&&
+                Math.Abs(location.Position.Z-boundary.Position.Z)<=rounding*Math.Max(s.FanRadius,Math.Abs(boundary.Position.Z));
         }
         internal static int FirstTargetSurface(NavTypedRoute route,NavRecastStepState state)
         {int first=PreviousPortal(route,state.Cursor)+1,count=0;for(int i=0;i<first;i++)if(route.Legs[i].Kind==NavTypedLegKind.Surface)count++;return count;}
         internal static bool CanTarget(NavTypedRoute route,NavRecastStepState state,NavLocation from,int surfaceIndex,INavStorageReservation r,INavRecastSweepAuthority authority=null,int actor=0)
+            =>CanTarget(route,state,from,surfaceIndex,r,out _,authority,actor);
+        internal static bool CanTarget(NavTypedRoute route,NavRecastStepState state,NavLocation from,int surfaceIndex,INavStorageReservation r,out NavPoint sweptTarget,INavRecastSweepAuthority authority=null,int actor=0,bool singleMoveDirect=false)
         {
+            sweptTarget=default;
             int typed=-1,seen=0;for(int i=0;i<route.Legs.Count;i++)if(route.Legs[i].Kind==NavTypedLegKind.Surface&&seen++==surfaceIndex){typed=i;break;}
             if(typed<0){if(surfaceIndex!=seen)return false;typed=route.Legs.Count-1;}
             // Targets may advance only through the accepted interval. A consumed
             // seam cannot make an earlier bank target the next own destination.
             int start=PreviousPortal(route,state.Cursor)+1;if(typed<start)return false;
-            if(typed>=route.RecastPlan.TerminalLeg&&state.Phase!=2&&!InTerminalFan(route,from))return false;
-            if(!Trace(route,state,from,route.Legs[typed].To.Position,r,out var reached,out _,out var receipt,authority,actor))return false;
+            if(typed>=route.RecastPlan.TerminalLeg&&state.Phase!=2&&!InTerminalFan(route,from)){
+                // A solo order may enter its exact endpoint directly on the final
+                // surface. The same full physical and HOLD sweep below must pass.
+                var end=route.Subscription.AssignedEndpoint;
+                if(!singleMoveDirect||!route.Legs[typed].To.Equals(end)||from.SurfaceId!=end.SurfaceId||
+                    NextPortal(route,state.Cursor)!=route.Legs.Count)return false;
+            }
+            sweptTarget=route.Legs[typed].To.Position;
+            if(!Trace(route,state,from,sweptTarget,r,out var reached,out _,out var receipt,authority,actor))return false;
             if(reached.Equals(route.Legs[typed].To))return true;
             // The physical sweep may cross an accepted seam AT its endpoint.
             // That coordinate is still the current surface leg's target; its
@@ -139,31 +248,92 @@ namespace Spacewars.Simulation
         }
         internal static bool TryContinuationRejoin(NavTypedRoute route,NavRecastStepState before,NavLocation from,IReadOnlyList<NavPoint> local,int localIndex,IReadOnlyList<NavPoint> global,int currentIndex,NavLocation goal,INavStorageReservation r,out int selected,NavCrowd authority,ref RepairSuffixMemo memo,int actor=0,bool exactTarget=false)
         {
+            selected=currentIndex;
+            if(!TryPrepareContinuationPrefix(route,before,from,local,localIndex,r,authority,actor,out var at,out var state))return false;
+            return TryContinuationRejoinFromPrefix(route,state,at,global,currentIndex,goal,r,out selected,authority,ref memo,actor,exactTarget);
+        }
+        internal static bool TryPrepareContinuationPrefix(NavTypedRoute route,NavRecastStepState before,NavLocation from,
+            IReadOnlyList<NavPoint> local,int localIndex,INavStorageReservation r,NavCrowd authority,int actor,
+            out NavLocation at,out NavRecastStepState state)
+        {
+            at=from;
+            state=before;
+            if(authority==null)return false;
+            double radius=route.RecastPlan.Spine.Radius;
+            for(int i=localIndex;i<local.Count;i++)
+                if(!LinkContinuation(route,ref state,ref at,local[i],radius,r,authority,actor))return false;
+            return true;
+        }
+        private static bool LinkContinuation(NavTypedRoute route,ref NavRecastStepState state,ref NavLocation at,
+            NavPoint target,double radius,INavStorageReservation r,NavCrowd authority,int actor)
+        {
+            if(!Advance(route,state,at,target,r,out var receipt,authority,actor)||
+                !authority.ContinuationTraverse(route,state,at,target,radius,r,out var physical)||
+                physical.SurfaceId!=receipt.ToSurface||!physical.Position.Equals(target))return false;
+            at=physical;
+            state=receipt.After;
+            return true;
+        }
+        internal struct RepairRejoinFallback
+        {
+            internal bool Scanned;
+            internal int Selected;
+        }
+
+        internal static bool TryContinuationRejoinFromPrefix(NavTypedRoute route,NavRecastStepState state,NavLocation at,
+            IReadOnlyList<NavPoint> global,int currentIndex,NavLocation goal,INavStorageReservation r,
+            out int selected,NavCrowd authority,ref RepairSuffixMemo memo,int actor=0,bool exactTarget=false)
+        {
+            var fallback=default(RepairRejoinFallback);
+            return TryContinuationRejoinFromPrefix(route,state,at,global,currentIndex,goal,r,out selected,authority,
+                ref memo,ref fallback,actor,exactTarget);
+        }
+
+        // A repair may propose several exits from the same certified prefix.
+        // Try the proposed exit first, then share the descending fallback scan.
+        internal static bool TryContinuationRejoinFromPrefix(NavTypedRoute route,NavRecastStepState state,NavLocation at,
+            IReadOnlyList<NavPoint> global,int currentIndex,NavLocation goal,INavStorageReservation r,
+            out int selected,NavCrowd authority,ref RepairSuffixMemo memo,ref RepairRejoinFallback fallback,
+            int actor,bool exactTarget=false)
+        {
             var suffix=memo;
             try{
-                selected=currentIndex;if(authority==null)return false;var at=from;var state=before;double radius=route.RecastPlan.Spine.Radius;
-                bool Link(ref NavRecastStepState current,ref NavLocation location,NavPoint target){
-                    if(!Advance(route,current,location,target,r,out var receipt,authority,actor)||!authority.ContinuationTraverse(route,current,location,target,radius,r,out var physical)||physical.SurfaceId!=receipt.ToSurface||!physical.Position.Equals(target))return false;
-                    location=physical;current=receipt.After;return true;
-                }
-                for(int i=localIndex;i<local.Count;i++)if(!Link(ref state,ref at,local[i]))return false;
+                selected=currentIndex;double radius=route.RecastPlan.Spine.Radius;
                 bool Qualified(int index){
                     if(!CanTarget(route,state,at,index,r,authority,actor))return false;
                     var point=at;var next=state;
-                    if(!Link(ref next,ref point,global[index]))return false;
+                    if(!LinkContinuation(route,ref next,ref point,global[index],radius,r,authority,actor))return false;
                     var linkedPoint=point;var linkedState=next;
                     if(suffix.Matches(route,global,goal,r,authority,actor,index,point,next)&&
                         authority.RecheckContinuationSuffix(actor,point.Position,global,index+1,goal.Position,radius)){suffix.Hits++;return true;}
-                    for(int i=index+1;i<global.Count;i++)if(!Link(ref next,ref point,global[i]))return false;
-                    if(!point.Equals(goal)&&point.Position.Equals(goal.Position)&&!Link(ref next,ref point,goal.Position))return false;
+                    for(int i=index+1;i<global.Count;i++)if(!LinkContinuation(route,ref next,ref point,global[i],radius,r,authority,actor))return false;
+                    if(!point.Equals(goal)&&point.Position.Equals(goal.Position)&&!LinkContinuation(route,ref next,ref point,goal.Position,radius,r,authority,actor))return false;
                     bool valid=point.Equals(goal)&&authority.CompatibleArrival(point,goal,radius);
                     if(valid)suffix.Store(route,global,goal,r,authority,actor,index,linkedPoint,linkedState);
                     return valid;
                 }
                 int first=FirstTargetSurface(route,state);
-                if(currentIndex>=first&&currentIndex<global.Count&&Qualified(currentIndex))return true;
+                if(fallback.Scanned)
+                {
+                    // Every higher exit was already rejected. A lower exit
+                    // can still win because the caller gave it first priority.
+                    if(currentIndex>=first&&currentIndex<fallback.Selected&&Qualified(currentIndex))return true;
+                    if(fallback.Selected>=0&&currentIndex==fallback.Selected)return true;
+                    if(exactTarget||fallback.Selected<0)return false;
+                    selected=fallback.Selected;
+                    return true;
+                }
+                bool triedCurrent=currentIndex>=first&&currentIndex<global.Count;
+                if(triedCurrent&&Qualified(currentIndex))return true;
                 if(exactTarget)return false;
-                for(int i=global.Count-1;i>=first;i--)if(Qualified(i)){selected=i;return true;}
+                for(int i=global.Count-1;i>=first;i--)
+                    if((!triedCurrent||i!=currentIndex)&&Qualified(i))
+                    {
+                        fallback=new RepairRejoinFallback{Scanned=true,Selected=i};
+                        selected=i;
+                        return true;
+                    }
+                fallback=new RepairRejoinFallback{Scanned=true,Selected=-1};
                 return false;
             }finally{memo=suffix;}
         }
@@ -175,12 +345,29 @@ namespace Spacewars.Simulation
         {
             receipt=default;
             if(!Trace(route,before,from,to,r,out var reached,out int cursor,out receipt,authority,actor,exclusivePortal))return false;
+            FinishAdvance(route,before,to,r,reached,cursor,ref receipt,authority,actor,exclusivePortal,nearestPrecheck);return true;
+        }
+        // The caller may retain the very trace that established this step.
+        // Projection/terminal checks below are unchanged; this avoids tracing
+        // the same chord again merely to emit its execution transcript.
+        internal static bool AdvanceOwned(NavTypedRoute route,NavRecastStepState before,NavLocation from,NavPoint to,INavStorageReservation r,out NavRecastSweepReceipt receipt,out NavLocation reached,out IReadOnlyList<NavTypedLeg> owned,INavRecastSweepAuthority authority=null,int actor=0,int exclusivePortal=-1,bool nearestPrecheck=true)
+        {
+            owned=null;
+            receipt=default;
+            if(!TryTraceOwned(route,before,from,to,r,out reached,out int cursor,out receipt,out var actual,authority,actor,exclusivePortal))return false;
+            try{
+                FinishAdvance(route,before,to,r,reached,cursor,ref receipt,authority,actor,exclusivePortal,nearestPrecheck);
+                owned=actual;actual=null;return true;
+            }finally{(actual as NavOwnedStorage)?.ReleaseOwner();}
+        }
+        private static void FinishAdvance(NavTypedRoute route,NavRecastStepState before,NavPoint to,INavStorageReservation r,NavLocation reached,int cursor,ref NavRecastSweepReceipt receipt,INavRecastSweepAuthority authority,int actor,int exclusivePortal,bool nearestPrecheck)
+        {
             var p=route.RecastPlan;int lo=PreviousPortal(route,cursor)+1,hi=NextPortal(route,cursor);
             double station=p.Spine.Station(p.Join);int phase=0,chosen=cursor;
             // The final fan is derived once from accepted slots and footprints.
             // Entering it still needs a safe own accepted terminal rejoin.
             bool terminal=false;
-            if(InTerminalFan(route,reached)){
+            if(InTerminalFan(route,reached)&&route.Legs[Math.Max(p.TerminalLeg,lo)].From.SurfaceId==reached.SurfaceId){
                 if(Trace(route,new NavRecastStepState(before.Phase,cursor,before.Station,before.HighWater),reached,route.Subscription.AssignedEndpoint.Position,r,out var terminalEnd,out _,out _,authority,actor,exclusivePortal)&&terminalEnd.Equals(route.Subscription.AssignedEndpoint))terminal=true;
             }
             if(terminal){phase=2;station=p.Spine.Station(p.Exit);chosen=Math.Max(p.TerminalLeg,lo);}
@@ -224,7 +411,7 @@ namespace Spacewars.Simulation
                 }
                 if(found)phase=1;else{chosen=cursor;phase=cursor>=p.OriginLegs?1:0;station=phase==0?p.Spine.Station(p.Join):p.Spine.Station(Math.Min(p.Exit,p.Join+Math.Max(0,lo-p.OriginLegs)));}
             }
-            receipt.After=new NavRecastStepState(phase,chosen,station,Math.Max(before.HighWater,station));return true;
+            receipt.After=new NavRecastStepState(phase,chosen,station,Math.Max(before.HighWater,station));
         }
     }
 }

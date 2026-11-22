@@ -28,20 +28,33 @@ namespace Spacewars.Runtime
             int actors=checked(Crowd.Units.Count+1),attempts=arrivalAttempts.Count,leases=arrivalProjectionLeases.Count,groupCount=groups.Count;
             long bytes=checked(NavStorageLayout.Charge(NavigationPreparedReady.Layout(actors,attempts,leases))+NavStorageLayout.Charge(PreparedResultBatch.Layout(1,actors,attempts,1,groupCount))+
                 NavStorageScratch.LeaseBytes+Math.Max(RebindStagingScratchBound(actors,Math.Max(1,retainedGoals.Count),navigationGeometry.Obstacles.Count),8192L+4096L*actors+1024L*attempts+512L*leases));
+            if(motionAuthority!=null){
+                // Composed preparation keeps the crowd and its receiver proof
+                // live alongside the result carrier. The terrain trace uses a
+                // separate scratch lease while it emits the physical suffix.
+                long traceScratch=Crowd.ParallelSelectScratchBound;
+                foreach(var execution in installedExecutions.Values)
+                    if(execution.StorageOwner?.Corridor.ProviderOwner.Provider is PartitionNavigationProvider provider)
+                        traceScratch=Math.Max(traceScratch,provider.TraceScratchBound);
+                // One sequential detour lattice can be needed before any poses
+                // are published, even when the result FIFO is empty.
+                bytes=checked(bytes+NavPreparedCrowdStep.StorageBytesForFrame(actors)+NavMotionTranscript.ReceiverHeadroom(actors)+
+                    NavStorageScratch.LeaseBytes+traceScratch+NavLocalRepairWorkspace.StorageBytesFor(profile));
+            }
             long Root(object value)=>(value as NavOwnedStorage)?.StorageBytes??0;
             long Pages(NavPagedList<NavOwnedStorage> values)=>values==null?0:checked(values.ForkReserveBytes+values.AppendGrowthBytes(8,Math.Max(1,values.Count)));
             if(groupCommandBacking!=null)bytes=checked(bytes+Root(groupCommandBacking.Pending)+Root(groupCommandBacking.Ledger)+Root(groupCommandBacking.Failures));
             if(liveArrivalTables!=null)bytes=checked(bytes+Root(liveArrivalTables)+Root(liveArrivalTables.Attempts)+Root(liveArrivalTables.References)+Root(liveArrivalTables.Ids));
             if(admissionOwner!=null){
                 bytes=checked(bytes+Root(admissionOwner)+Pages(admissionOwner.Groups)+Pages(admissionOwner.Requests)+NavStorageScratch.LeaseBytes+64L+8L*(groupCount+pending.Count+probes.Count)+NavStorageLayout.Charge(96L+8L*groupCount)+NavStorageLayout.Charge(96L+8L*(pending.Count+probes.Count)));
-                for(int g=0;g<admissionOwner.Groups.Count;g++){var group=(NavigationAdmissionGroupStorage)admissionOwner.Groups[g];bytes=checked(bytes+Root(group)+Pages(group.Members));for(int m=0;m<group.Members.Count;m++)bytes=checked(bytes+Root(group.Members[m]));}
+                for(int g=0;g<admissionOwner.Groups.Count;g++){var group=(NavigationAdmissionGroupStorage)admissionOwner.Groups[g];bytes=checked(bytes+Root(group)+Pages(group.Members));bytes=checked(bytes+group.Members.Count*NavigationAdmissionMemberStorage.MemberCharge);}
             }
             if(groupCommandBacking!=null)for(int slot=0;slot<groupCommandBacking.Groups.Capacity;slot++){
                 if(!groupCommandBacking.Groups.TryReadSlot(slot,out long key,out _))continue;
                 var version=((NavigationLiveGroup)groupCommandBacking.Groups.OwnerFor(key)).ImmutableVersion;
                 bytes=checked(bytes+version.StorageBytes+NavStorageLayout.Charge(NavStorageLayout.ObjectBytesBound(typeof(NavigationPreparedGroupWrite)))+NavStorageScratch.LeaseBytes+NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+NavStorageLayout.ObjectBytesBound(typeof(GroupMemberState)));
                 if(version.Members is NavPagedList<NavOwnedStorage> pages)bytes=checked(bytes+Pages(pages));else bytes=checked(bytes+NavPagedList<NavOwnedStorage>.InitialStorageBytes+((NavOwnedStorage)version.Members).StorageBytes);
-                for(int m=0;m<version.Members.Count;m++)bytes=checked(bytes+version.Members[m].StorageBytes);
+                bytes=checked(bytes+version.Members.Count*NavigationAuthorityMember.MemberCharge);
             }
             return bytes;
         }
@@ -87,12 +100,63 @@ namespace Spacewars.Runtime
                 observed=new NavigationAdmissionPin(admissionOwner,admission);return true;
             }
         }
+        // Called inside the host-root publication. The request retains its authority
+        // and mailbox owner while other requests take their turn at ingress.
+        private void DeferPhysicalRecastIngress(NavigationRequest request)
+        {
+            if(accruedCreditsEnabled&&commandGroup==null&&admissionBatchDepth==0&&UsesRecastGroundRoutes&&
+                QuantumIngressAllowed(request)&&Admission.Contains(request))
+                Requests.TryRotateOwnedHead(request);
+        }
+        internal bool RotateRecordedGroundIngress(NavigationRequest expected)
+        {
+            using (EnterTransport())
+                return !TickQuantaEnabled && commandGroup == null && admissionBatchDepth == 0 &&
+                    Admission.Contains(expected) && Requests.TryRotateOwnedHead(expected);
+        }
+        internal void PrioritizePhysicalRecastIngress()
+        {
+            using (EnterTransport())
+            {
+                if (!UsesRecastGroundRoutes || !accruedCreditsEnabled || commandGroup != null ||
+                    admissionBatchDepth != 0 || committedHostRoot?.QuantumRunnable != true) return;
+                // Each alternate grant starts with the oldest eligible request. The
+                // intervening grants can advance an urgent request past moving units.
+                bool oldestFirst = (committedHostRoot.QuantumSerial & 1) == 0;
+                PrioritizeGroundIngressLocked(oldestFirst, committedHostRoot.AdmissionPrefix);
+            }
+        }
+
+        internal void PrioritizeGroundIngressLocked(bool oldestFirst, long admittedThrough)
+        {
+            Requests.ObserveState(out var revision, out int count);
+            if (count < 2) return;
+            var first = Requests.ReadPreparedAt(revision, 0);
+            if (first.Request > admittedThrough || !Admission.Contains(first) || IsArrivalRequest(first)) return;
+            int selected = 0;
+            long oldest = first.Request;
+            if (!oldestFirst && IsUrgentGroundRequest(first)) return;
+            for (int i = 1; i < count; i++)
+            {
+                var other = Requests.ReadPreparedAt(revision, i);
+                if (other.Request > admittedThrough || !Admission.Contains(other) || IsArrivalRequest(other)) continue;
+                if (oldestFirst ? other.Request >= oldest : !IsUrgentGroundRequest(other)) continue;
+                selected = i;
+                oldest = other.Request;
+                if (!oldestFirst) break;
+            }
+            if (selected != 0) Requests.TryPromoteOwned(revision, selected);
+        }
+
+        private bool IsUrgentGroundRequest(NavigationRequest request) =>
+            Crowd.TryGet(request.Entity, out var actor) &&
+            (!actor.Moving || actor.blockedSeconds > 0 || PendingRouteRequiresBraking(actor, request));
         // Scope.Attach and all preparation happen before entering transportGate.
         // The callback is a short, validated authority transition: ingress
         // removal/registration and root installation become capture-visible at
         // the same boundary. The old root and births release after the gate.
         internal void PublishPhysicalHostRoot(NavigationRetentionBudget.Scope scope,
-            NavigationHostRoot expected,NavigationHostRoot candidate,Action publishAuthority)
+            NavigationHostRoot expected,NavigationHostRoot candidate,Action publishAuthority,NavigationRequest deferred=null)
         {
             using var measured=PerformanceProfile.Measure(ProfileStage.HostPublish);
             if(scope==null||candidate==null||publishAuthority==null||!candidate.IsImmutableCaptureRoot)
@@ -105,6 +169,7 @@ namespace Spacewars.Runtime
                        !ReferenceEquals(committedHostRoot,expected))
                         throw new PhysicalIngressRefused("Physical host publication lost its source root.");
                     publishAuthority();
+                    if(deferred!=null)DeferPhysicalRecastIngress(deferred);
                     candidate.Retain();retired=committedHostRoot;
                     committedHostRoot=candidate;
                 }

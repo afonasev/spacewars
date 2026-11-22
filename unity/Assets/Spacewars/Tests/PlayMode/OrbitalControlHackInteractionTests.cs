@@ -18,7 +18,7 @@ namespace Spacewars.Input.Tests
         [UnityTest] public IEnumerator HackPadTargetCancelAndCaptureRespectLocalViews()=>HackInteraction(true);
         private IEnumerator HackInteraction(bool pad)
         {
-            yield return StartOrdinary(2,configureRoster:d=>{if(!pad)d.Participants[0].DeviceId=0;},mapName:"Переправа (4)");
+            yield return StartOrdinary(2,configureRoster:d=>{if(!pad)d.Participants[0].DeviceId=0;},mapName:"Переправа (2)");
             var seat=Seats[0];var other=Seats[1];Runtime.RequestPause(true);yield return Wait(()=>Runtime.Latest.Paused,"arrange hack pause");
             var initial=Get<PlayableSnapshot>(seat,"view");var enemy=Get<PlayableSnapshot>(other,"view").Owner;
             var domain=typeof(PlayableRuntime).GetField("domain",F).GetValue(Runtime);var type=domain.GetType();

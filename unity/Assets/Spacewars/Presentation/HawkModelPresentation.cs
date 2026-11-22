@@ -15,11 +15,24 @@ namespace Spacewars.Presentation
         long lastShot=-1,generation=long.MinValue; bool bound; Material flashMaterial;
         public HawkVisualProfile Profile {get;private set;}
         public bool Upgraded {get;private set;}
+        internal Bounds PickBounds {get;private set;}
         public void Bind()
         {
             if(bound)return;bound=true;Profile=HawkVisualProfile.Load();
             var nodes=GetComponentsInChildren<Transform>(true);
             Transform Node(string n)=>nodes.FirstOrDefault(x=>x.name==n);
+            var bounds=new Bounds(Vector3.zero,Vector3.zero);
+            foreach(var filter in GetComponentsInChildren<MeshFilter>(true))
+            {
+                if(!filter.sharedMesh)continue;
+                var local=filter.sharedMesh.bounds;
+                var toModel=transform.worldToLocalMatrix*filter.transform.localToWorldMatrix;
+                for(int x=-1;x<=1;x+=2)
+                for(int y=-1;y<=1;y+=2)
+                for(int z=-1;z<=1;z+=2)
+                    bounds.Encapsulate(toModel.MultiplyPoint3x4(local.center+Vector3.Scale(local.extents,new Vector3(x,y,z))));
+            }
+            PickBounds=bounds;
             baseGroup=Node("baseOnly");upgradeGroup=Node("upgradedOnly");mainRotor=Node("mainRotor");tailRotor=Node("tailRotor");
             if(!baseGroup||!upgradeGroup) return; // Original comparison asset has no new articulation.
             flashMaterial=new Material(Shader.Find("Universal Render Pipeline/Unlit"));flashMaterial.SetColor("_BaseColor",new Color(1,.63f,.16f));

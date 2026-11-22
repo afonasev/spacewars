@@ -89,6 +89,8 @@ namespace Spacewars.Presentation
             }
             if(pad.buttonNorth.wasPressedThisFrame&&North?.Invoke(pad)==true)return;
             if(pad.buttonSouth.wasPressedThisFrame)Activate();
+            // A submit callback can close the menu and hand focus back to the field.
+            if(scope==null)return;
             var focused=root.focusController?.focusedElement as VisualElement;
             if(UsingGamepad&&(!Visible(focused)||!scope.Contains(focused)))Focus(Controls().FirstOrDefault(x=>x.name==lastFocus)??Controls().FirstOrDefault());
         }
@@ -129,7 +131,7 @@ namespace Spacewars.Presentation
             finally{dispatching=false;}
         }
         public void Back(){armed=false;if(ScopeNavigation?.Cancel()==true){UpdateHints();return;}back?.Invoke();}
-        private bool Adjust(VisualElement element,int step)
+        internal bool Adjust(VisualElement element,int step)
         {
             if(element?.userData is Action<int> custom){custom(step);return true;}
             if(element is Slider slider){slider.value=Mathf.Clamp(slider.value+step*(slider.highValue-slider.lowValue)/20f,slider.lowValue,slider.highValue);return true;}
@@ -137,19 +139,19 @@ namespace Spacewars.Presentation
             if(element is Toggle toggle){toggle.value=step>0;return true;}
             return false;
         }
-        private VisualElement Current(List<VisualElement> controls)
+        internal VisualElement Current(List<VisualElement> controls)
         {
             var focused=root.focusController?.focusedElement as VisualElement;
             return controls.FirstOrDefault(x=>x==focused)??controls.FirstOrDefault(x=>x.Contains(focused))??controls.FirstOrDefault();
         }
-        private List<VisualElement> Controls()=>scope==null?new List<VisualElement>():scope.Query<VisualElement>().ToList().Where(x=>(x.ClassListContains("result-focusable")||x is LobbyColorField||x is Button&&x.GetFirstAncestorOfType<LobbyColorField>()==null||x is Toggle||x is Slider||x is SliderInt||x is DropdownField||x is TextField||x is ScrollView&&(x.name=="controls-scroll"||x.name=="history-scroll"))&&Visible(x)&&(ScopeNavigation?.IncludesControl(x)??true)).ToList();
+        internal List<VisualElement> Controls()=>scope==null?new List<VisualElement>():scope.Query<VisualElement>().ToList().Where(x=>(x.ClassListContains("result-focusable")||x is LobbyColorField||x is Button&&x.GetFirstAncestorOfType<LobbyColorField>()==null||x is Toggle||x is Slider||x is SliderInt||x is DropdownField||x is TextField||x is ScrollView&&(x.name=="controls-scroll"||x.name=="history-scroll"))&&Visible(x)&&(ScopeNavigation?.IncludesControl(x)??true)).ToList();
         public static bool Visible(VisualElement element)
         {
             if(element==null||!element.enabledInHierarchy||!element.focusable)return false;
             for(var e=element;e!=null;e=e.parent)if(e.style.display.value==DisplayStyle.None||e.resolvedStyle.display==DisplayStyle.None||e.resolvedStyle.visibility==Visibility.Hidden)return false;
             return true;
         }
-        private void Focus(VisualElement element)
+        internal void Focus(VisualElement element)
         {
             if(element==null)return;element.Focus();lastFocus=element.name;
             for(var parent=element.parent;parent!=null;parent=parent.parent)if(parent is ScrollView scroll){scroll.ScrollTo(element);break;}UpdateHints();

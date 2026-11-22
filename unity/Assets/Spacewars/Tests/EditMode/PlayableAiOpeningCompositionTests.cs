@@ -15,7 +15,7 @@ namespace Spacewars.Tests.EditMode
 
         [Test] public void NativeDescriptorUsesFiveExecutableOpenings()
         {
-            CollectionAssert.AreEqual(new[]{PlayableAiOpening.Safe,PlayableAiOpening.GreedySafe,PlayableAiOpening.GreedyMine,PlayableAiOpening.BlindRush,PlayableAiOpening.ExplorerAllIn},PlayableAiOpeningComposition.Supported);
+            CollectionAssert.AreEqual(new[]{PlayableAiOpening.Safe,PlayableAiOpening.GreedySafe,PlayableAiOpening.BlindRush,PlayableAiOpening.ExplorerAllIn,PlayableAiOpening.Air},PlayableAiOpeningComposition.Supported);
             Assert.AreEqual(PlayableAiOpeningComposition.ProfileBinding(AiProfile.Initial),PlayableAiOpeningComposition.SourceProfileIdentity);
             Assert.AreEqual("native-strategic-ai:opening-v1",PlayableAiOpeningComposition.SourceIdentity);
             Assert.Throws<ArgumentException>(()=>PlayableAiOpeningComposition.Initialize(1,"player-1","foreign@1"));
@@ -35,6 +35,25 @@ namespace Spacewars.Tests.EditMode
             var selected=new HashSet<PlayableAiOpening>();
             for(var seed=0;seed<10000&&selected.Count<PlayableAiOpeningComposition.Supported.Count;seed++)selected.Add(PlayableAiOpeningComposition.Initialize(seed,"player-1").Opening);
             CollectionAssert.AreEquivalent(PlayableAiOpeningComposition.Supported,selected);
+        }
+
+        [Test] public void TunedExpertAndCheaterChooseTheEarlyFactoryAndForcedOpeningsStillWork()
+        {
+            var data=AiProfile.Initial.CopyData();
+            var field=AiProfileMetadata.Field("difficulty.expert.opening.earlyGroundShare");
+            Assert.Contains(field,NativeBalanceFields.AiLabFields.ToList());
+            NativeBalanceFields.Write(field,data,1);
+            var profile=new AiProfile(data);
+            for(int seed=0;seed<20;seed++)
+            {
+                var expert=PlayableAiOpeningComposition.Initialize(seed,"player-1",aiProfile:profile,difficulty:AiDifficulty.Expert);
+                var cheater=PlayableAiOpeningComposition.Initialize(seed,"player-1",aiProfile:profile,difficulty:AiDifficulty.Cheater);
+                var veteran=PlayableAiOpeningComposition.Initialize(seed,"player-1",aiProfile:profile,difficulty:AiDifficulty.Veteran);
+                Assert.AreEqual(PlayableAiOpening.BlindRush,expert.Opening);
+                Assert.True(expert.SemanticallyEquals(cheater));
+                Assert.True(veteran.SemanticallyEquals(PlayableAiOpeningComposition.Initialize(seed,"player-1",aiProfile:profile)));
+                Assert.AreEqual(PlayableAiOpening.Air,PlayableAiOpeningComposition.Initialize(seed,"player-1",aiProfile:profile,forcedOpening:PlayableAiOpening.Air,difficulty:AiDifficulty.Expert).Opening);
+            }
         }
 
         [Test] public void AuthorityCaptureAndRestoreRetainOwnerIntentWithoutRerolling()

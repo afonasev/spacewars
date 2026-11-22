@@ -8,6 +8,10 @@ namespace Spacewars.Presentation
     public sealed partial class PlayableBootstrap
     {
         private readonly Dictionary<int,GameObject> impactMarkers=new Dictionary<int,GameObject>(),impactEffects=new Dictionary<int,GameObject>();
+        // Bridge the launch from the displayed weapon pose to the simulation flight.
+        private const int DirectLaunchBlendTicks=3;
+        private readonly Dictionary<int,(Vector3 Offset,long ObservedTick)> directLaunchOffsets=
+            new Dictionary<int,(Vector3 Offset,long ObservedTick)>();
         private Material artilleryTransparent;
         private ShkvalArtProfile shkvalArt;
         private ShkvalArtProfile ShkvalArt=>shkvalArt??(shkvalArt=ShkvalArtProfile.Load());
@@ -31,8 +35,26 @@ namespace Spacewars.Presentation
         }
         private void ClearArtilleryEffects()
         {
-            ClearDirectContacts();observedShkvalLaunches.Clear();shkvalLaunchFrames.Clear();
+            ClearDirectContacts();directLaunchOffsets.Clear();observedShkvalLaunches.Clear();shkvalLaunchFrames.Clear();
             foreach(var g in impactMarkers.Values)Destroy(g);impactMarkers.Clear();foreach(var g in impactEffects.Values)Destroy(g);impactEffects.Clear();
+        }
+        private void ApplyDirectLaunch(PlayableProjectileSnapshot shot,Transform shell,bool created)
+        {
+            long launchTick=shot.DirectLaunchTick.Value;
+            long age=view.Tick-launchTick;
+            if(age>=DirectLaunchBlendTicks){directLaunchOffsets.Remove(shot.Id);return;}
+            // A newly visible shot already in flight must not jump back to its source.
+            if(created&&age>=0&&age<=1&&world.Actors.TryGetValue(shot.OwnerId,out var source)&&source.Root.gameObject.activeInHierarchy)
+            {
+                var start=world.DirectMuzzle(source,shot.Kind,shot.DirectBarrel);
+                if(shot.Kind==PlayableEntityKind.Explorer)start+=shell.right*shell.localScale.x/2;
+                directLaunchOffsets[shot.Id]=(start-shell.position,view.Tick);
+            }
+            if(directLaunchOffsets.TryGetValue(shot.Id,out var launch))
+            {
+                float progress=(float)(view.Tick-launch.ObservedTick)/(launchTick+DirectLaunchBlendTicks-launch.ObservedTick);
+                shell.position+=launch.Offset*(1-Mathf.Clamp01(progress));
+            }
         }
         private void RenderProjectiles()
         {
@@ -51,9 +73,10 @@ namespace Spacewars.Presentation
                     marker.transform.localScale=Vector3.one*(float)p.Marker.Radius;
                 }
                 if(!p.Visible)continue;live.Add(p.Id);
-                if(!shells.TryGetValue(p.Id,out var shell))
+                bool created=!shells.TryGetValue(p.Id,out var shell);
+                if(created)
                 {
-                    if(p.Kind==PlayableEntityKind.Hawk)
+                    if((p.Kind==PlayableEntityKind.Hawk||p.Rocket))
                     {shell=projectileVisuals.HawkRocket(transform,(float)profile.HawkMissileRadius,(float)profile.HawkMissileLength,ShotColor(p.Faction));}
                     else if(p.Kind==PlayableEntityKind.Shkval)
                     {
@@ -66,8 +89,9 @@ namespace Spacewars.Presentation
                 }
                 shell.transform.position=new Vector3((float)p.Position.X,(float)p.Height,(float)p.Position.Z);
                 shell.transform.rotation=Quaternion.Euler(0,-(float)p.Heading*Mathf.Rad2Deg,0)*Quaternion.Euler(0,0,(float)p.Pitch*Mathf.Rad2Deg);
-                if(p.Kind==PlayableEntityKind.Hawk)shell.transform.localScale=Vector3.one*(float)profile.HawkMissileVisualScale;
-                if(p.Kind==PlayableEntityKind.Hawk)
+                if(p.DirectLaunchTick.HasValue)ApplyDirectLaunch(p,shell.transform,created);
+                if((p.Kind==PlayableEntityKind.Hawk||p.Rocket))shell.transform.localScale=Vector3.one*(float)profile.HawkMissileVisualScale;
+                if((p.Kind==PlayableEntityKind.Hawk||p.Rocket))
                 {hawkVisual=hawkVisual??HawkVisualProfile.Load();projectileVisuals.Exhaust(shell,(float)profile.HawkMissileLength*hawkVisual.exhaustLength,(float)profile.HawkMissileRadius*hawkVisual.exhaustWidth,(float)profile.WeaponMuzzleCoreRatio,hawkVisual.exhaustOpacity);}
                 if(p.Kind==PlayableEntityKind.Shkval)
                 {
@@ -78,7 +102,7 @@ namespace Spacewars.Presentation
                     UpdateShkvalExhaustClip(p,shell);
                 }
             }
-            foreach(var id in shells.Keys.Where(id=>!live.Contains(id)).ToArray()){Destroy(shells[id]);shells.Remove(id);observedShkvalLaunches.Remove(id);shkvalLaunchFrames.Remove(id);}
+            foreach(var id in shells.Keys.Where(id=>!live.Contains(id)).ToArray()){Destroy(shells[id]);shells.Remove(id);directLaunchOffsets.Remove(id);observedShkvalLaunches.Remove(id);shkvalLaunchFrames.Remove(id);}
             foreach(var id in impactMarkers.Keys.Where(id=>!markerIds.Contains(id)).ToArray()){Destroy(impactMarkers[id]);impactMarkers.Remove(id);}
             var effects=new HashSet<int>();foreach(var p in view.Impacts)
             {

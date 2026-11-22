@@ -38,7 +38,7 @@ namespace Spacewars.Presentation
         private string evidencePath;
         private string manualEvidencePath;
         private float startTime;
-        private string notice = "ЛКМ — выбрать танк";
+        private string notice = "ЛКМ — выбрать Вепря";
         private readonly List<string> actions = new List<string>();
         private int smokeStage;
         private long moveTick;
@@ -168,12 +168,12 @@ namespace Spacewars.Presentation
         private void StartSession()
         {
             runtime=new MatchRuntime(profile,++generation,19092026);sequence=0;selected=false;pauseIntent=false;restarting=false;
-            notice="ЛКМ — выбрать танк";Record("start generation="+generation);
+            notice="ЛКМ — выбрать Вепря";Record("start generation="+generation);
         }
         private void Select(Vector2 point)
         {
             selected=Physics.Raycast(mainCamera.ScreenPointToRay(point),out var hit) && hit.transform.IsChildOf(tank);
-            notice=selected?"Танк выбран. ПКМ — назначить цель":"Танк не выбран";Record("selected="+selected);
+            notice=selected?"Вепрь выбран. ПКМ — назначить цель":"Вепрь не выбран";Record("selected="+selected);
         }
         private void Move(Vector2 point)
         {
@@ -220,7 +220,7 @@ namespace Spacewars.Presentation
             tank.position=new Vector3((float)snapshot.Entity.X,0,(float)snapshot.Entity.Z);
             var props=new MaterialPropertyBlock();props.SetColor("_BaseColor",selected?new Color(.65f,.97f,.83f):new Color(.2f,.68f,.75f));body.SetPropertyBlock(props);
             foreach(var receipt in runtime.DrainReceipts()) { Record(receipt.ToString()); }
-            status.text=(restarting && Time.realtimeSinceStartup-shutdownStarted>ShutdownWarningSeconds ? "Остановка симуляции задерживается. Новый матч ещё не запущен.\n" : "")+(pauseIntent?"Пауза":"Танк "+(snapshot.Entity.Moving?"движется":"ожидает"))+"\n"+notice+(string.IsNullOrEmpty(snapshot.Failure)?"":"\nОшибка: "+snapshot.Failure);
+            status.text=(restarting && Time.realtimeSinceStartup-shutdownStarted>ShutdownWarningSeconds ? "Остановка симуляции задерживается. Новый матч ещё не запущен.\n" : "")+(pauseIntent?"Пауза":"Вепрь "+(snapshot.Entity.Moving?"движется":"ожидает"))+"\n"+notice+(string.IsNullOrEmpty(snapshot.Failure)?"":"\nОшибка: "+snapshot.Failure);
             if(evidencePath!=null)RunDiagnostic(snapshot);
         }
         private void RunDiagnostic(FoundationSnapshot snapshot)

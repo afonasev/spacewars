@@ -33,22 +33,25 @@ namespace Spacewars.Runtime
             int start=at;long number=0;while(at<value.Length&&value[at]>='0'&&value[at]<='9'){int digit=value[at++]-'0';if(number>(long.MaxValue-digit)/10)return false;number=number*10+digit;}
             if(at==start||at-start>1&&value[start]=='0'||number!=expected)return false;if(last)return at==value.Length;return at<value.Length&&value[at++]==':';
         }
-        internal bool TryDescribeExecution(PlayableDomain domain,string owner,PlayableProfile p,AiProfile ai,AiDifficulty difficulty,AiArmyRegistry registry,int entity,AiCombatMicroExecutionStorage storage,ref long grant,out ExecutionDescriptor descriptor)
+        internal bool TryDescribeExecution(PlayableDomain domain,string owner,PlayableProfile p,AiProfile ai,AiDifficulty difficulty,AiArmyRegistry registry,int entity,AiCombatMicroExecutionStorage storage,ref long grant,out ExecutionDescriptor descriptor,out bool admitted)
         {
-            descriptor=null;
+            descriptor=null;admitted=false;
             if(!clients.TryGetValue(entity,out var client)||!certificates.TryGetValue(entity,out var certificate)||client.Sequence<=0||certificate.Sequence!=client.Sequence||certificate.ActionId!=client.ActionId||certificate.Army!=client.Army)return false;
             if(grant<64||!storage.TryReserve(8192,out var memory))return false;grant-=64;
             try{
             var identity=string.Join(":",new[]{"micro-execution",certificate.Generation.ToString(CultureInfo.InvariantCulture),entity.ToString(CultureInfo.InvariantCulture),client.Sequence.ToString(CultureInfo.InvariantCulture),client.ActionId.ToString(CultureInfo.InvariantCulture),client.Started.ToString(CultureInfo.InvariantCulture),((int)client.Phase).ToString(CultureInfo.InvariantCulture)});
             var value=new ExecutionDescriptor(entity,client.Tower,certificate.Target,client.Army,client.Started,client.Sequence,client.ActionId,certificate.Generation,client.Phase,identity,memory);
-            if(!ExecutionCurrent(domain,owner,p,ai,difficulty,registry,value,null,false,storage,ref grant,out _,out _)){value.Dispose();return false;}descriptor=value;return true;
+            if(!ExecutionCurrent(domain,owner,p,ai,difficulty,registry,value,null,false,storage,ref grant,out _,out admitted)){value.Dispose();return false;}descriptor=value;return true;
             }catch{memory.Dispose();throw;}
         }
         // All scans are explicitly paid before reading live scalars. This method
         // does no Covers/terrain/model work and never calls PlayerSnapshot.
         internal bool ExecutionCurrent(PlayableDomain domain,string owner,PlayableProfile p,AiProfile ai,AiDifficulty difficulty,AiArmyRegistry registry,ExecutionDescriptor d,MotionExecutionPrimitive primitive,bool committed,AiCombatMicroExecutionStorage storage,ref long grant,out PlayableEntitySnapshot patient,out bool admitted)
+            =>ExecutionCurrent(domain,owner,p,ai,difficulty,registry,d,primitive,committed,storage,ref grant,out patient,out admitted,out _);
+
+        internal bool ExecutionCurrent(PlayableDomain domain,string owner,PlayableProfile p,AiProfile ai,AiDifficulty difficulty,AiArmyRegistry registry,ExecutionDescriptor d,MotionExecutionPrimitive primitive,bool committed,AiCombatMicroExecutionStorage storage,ref long grant,out PlayableEntitySnapshot patient,out bool admitted,out string repairDenial)
         {
-            admitted=false;patient=null;int members=0,reinforcements=0;
+            admitted=false;patient=null;repairDenial=null;int members=0,reinforcements=0;
             bool groupFound=registry.TryReadGuard(d.Army,out var group);if(groupFound){members=group.MemberCount;reinforcements=group.ReinforcementCount;}
             long cost=checked(128L+(primitive==null?0:PlayableDomain.CombatExecutionNativeGroupReadWork(domain.CombatExecutionUnitCount))+domain.CombatExecutionUnitCount*(16L+members+reinforcements)+domain.CombatExecutionBuildingCount*4L+2L*clients.Count+(long)members*(8L+members+reinforcements)+fire.Count*(16L+2L*(primitive?.RemainingBranch?.Count??0)));
             if(grant<cost||!storage.TryReserve(checked(8192L+2048L*(domain.CombatExecutionUnitCount+(long)fire.Count)),out var scratch))return false;grant-=cost;admitted=true;using(scratch){
@@ -66,19 +69,28 @@ namespace Spacewars.Runtime
                 if(neighbors<V(ai,difficulty,"returnCoreUnits"))return false;
             }
             if(d.Phase==AiCombatMicroPhase.Repair){
-                if(!domain.CombatExecutionRepairReady(d.Tower,own,d.Entity))return false;
-                foreach(var pair in clients)if(pair.Key!=d.Entity&&pair.Value.Phase==AiCombatMicroPhase.Repair&&pair.Value.Tower==d.Tower)return false;
-                var tower=domain.CombatExecutionBuildingPoint(d.Tower);double range=p.TurretRange;
-                foreach(var other in domain.CombatExecutionActors(own))if(other.Id!=d.Entity&&other.Health>0&&PlayableUnitRules.HealthRatio(p,other)<1&&Distance(other.Position,tower)<=range)return false;
+                if(!domain.CombatExecutionRepairReady(d.Tower,own,d.Entity))
+                {repairDenial="tower-unavailable";return false;}
+                foreach(var pair in clients)if(pair.Key!=d.Entity&&pair.Value.Phase==AiCombatMicroPhase.Repair&&pair.Value.Tower==d.Tower)
+                {repairDenial="tower-reserved";return false;}
+                var tower=domain.CombatExecutionBuildingPoint(d.Tower);double range=p.RepairTowerRange;
+                foreach(var other in domain.CombatExecutionActors(own))if(other.Id!=d.Entity&&other.Health>0&&PlayableUnitRules.HealthRatio(p,other)<1&&Distance(other.Position,tower)<=range)
+                    {repairDenial="tower-occupied";return false;}
                 if(primitive!=null){
-                    var branch=primitive.RemainingBranch;if(!primitive.Air.HasValue&&branch==null||!primitive.AssignedEndpoint.HasValue||Distance(primitive.AssignedEndpoint.Value.Position,tower)>range)return false;
+                    var branch=primitive.RemainingBranch;
+                    if(!primitive.Air.HasValue&&branch==null)return false;
+                    if(!primitive.AssignedEndpoint.HasValue||Distance(primitive.AssignedEndpoint.Value.Position,tower)>range)
+                    {repairDenial="route-ends-outside-repair-range";return false;}
                     double length=primitive.Air.HasValue?Distance(primitive.From.Position,primitive.AssignedEndpoint.Value.Position):0;for(int i=0;i<(branch?.Count??0);i++)length+=Distance(branch.Leg(i).From.Position,branch.Leg(i).To.Position);
-                    if(!RepairTimeAllowed(p,ai,difficulty,patient,length)||RepairSeconds(p,ai,difficulty,patient,length)>(T(ai,difficulty,"maxPhaseSeconds")-(domain.Tick-d.Started))/30d)return false;
+                    if(!RepairFitsPhase(p,ai,difficulty,patient.Kind,patient.ExactHealth??patient.Health,
+                        PlayableUnitRules.MaximumHealth(p,patient),length,T(ai,difficulty,"maxPhaseSeconds")-(domain.Tick-d.Started)))
+                    {repairDenial="actual-travel-and-healing-exceed-phase";return false;}
                     if(samples.TryGetValue(d.Entity,out var sample)&&sample.Loss>0&&sample.DamageTick>=0&&domain.Tick-sample.DamageTick<=T(ai,difficulty,"safeSeconds")){
                         var currentPatient=patient;
                         IEnumerable<PlayableEntitySnapshot> Attackers(){foreach(var f in fire){if(f.Victim!=d.Entity)continue;var enemy=domain.CombatExecutionVisibleActor(f.Source,own);if(enemy!=null&&enemy.Health>0&&AiRosterCatalog.Initial.Targets(enemy.Kind,currentPatient.Kind==PlayableEntityKind.Hawk?"air":"ground")&&Distance(enemy.Position,currentPatient.Position)<=PlayableUnitRules.Range(p,enemy.Kind,enemy.Upgraded)+PlayableUnitRules.Radius(p,currentPatient.Kind)+PlayableUnitRules.Radius(p,enemy.Kind))yield return enemy;}}
                         IEnumerable<NavPoint> Ends(){if(primitive.Air.HasValue){yield return primitive.To.Position;yield return primitive.AssignedEndpoint.Value.Position;}else for(int i=0;i<branch.Count;i++)yield return branch.Leg(i).To.Position;}
-                        if(!RepairEscapeAllowed(p,patient,sample.Loss,Attackers(),Ends()))return false;
+                        if(!RepairEscapeAllowed(p,patient,sample.Loss,Attackers(),Ends()))
+                        {repairDenial="actual-route-exceeds-survival-time";return false;}
                     }
                 }
             }
@@ -101,6 +113,12 @@ namespace Spacewars.Runtime
             var b=primitive.Binding;if(!TryActor(checked((int)b.Entity),out var n)||n.Incarnation!=b.Incarnation||n.MobilityRevision!=b.Mobility||n.Held)return false;
             if(!b.HasOwnIntent)return false;
             if(b.OwnIntent==MotionOwnIntentKind.Air)return primitive.Air.HasValue&&units.TryGetValue(checked((int)b.Entity),out var aircraft)&&aircraft.Air!=null&&aircraft.LastOrder!=null&&aircraft.LastOrder.Revision==b.Order&&aircraft.LastOrder.Sequence==b.Command;
+            return CombatExecutionGroundBindingCurrent(b,n);
+        }
+        private bool CombatExecutionGroundBindingCurrent(MotionExecutionBinding b,NavUnit n)
+        {
+            if(b.OwnIntent!=MotionOwnIntentKind.Standalone&&b.OwnIntent!=MotionOwnIntentKind.Grouped||
+                n.Incarnation!=b.Incarnation||n.MobilityRevision!=b.Mobility||n.Held)return false;
             if(b.OwnIntent==MotionOwnIntentKind.Grouped){var group=navigation.GroupFor(checked((int)b.Entity));if(group==null||group.WorldGeneration!=b.World||group.GroupId!=b.Group||group.OrderRevision!=b.RootOrder||group.MembershipRevision!=b.Membership||group.CommandSequence!=b.Command)return false;}
             if(tacticalQueues.TryGetValue(checked((int)b.Entity),out var q)&&q.Pending!=null){var e=q.Pending;return e.Issuance.GroupId==b.Group&&e.Incarnation==b.Incarnation&&e.Stamp.Revision==b.Activation&&e.AttemptRequest==b.Request&&e.AttemptOrder==b.Order&&e.Issuance.Command.Sequence==b.Command;}
             // Follow and continuation/repath requests use the ordinary Native

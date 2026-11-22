@@ -11,7 +11,7 @@ namespace Spacewars.Presentation
     {
         PreparedSceneInstance preparedScene;
         public bool PreparationCacheHit{get;private set;}
-        static readonly string[] PreparedMaterials={"material","dockMaterial","dockSpaceMaterial","groveMaterial","meridianMaterial","mossTerrainMaterial","basaltTerrainMaterial"};
+        static readonly string[] PreparedMaterials={"material","cityMaterial","dockMaterial","dockSpaceMaterial","groveMaterial","meridianMaterial","mossTerrainMaterial","basaltTerrainMaterial"};
         static readonly string[] PreparedTextures={"groveSurfaceMask","meridianRoadMask","mossPaintMask","mossAccentMask","mossTransitionMask","basaltPaintMask","basaltAccentMask","foundryRoadMask","foundryLavaHeat","foundryRouteMask"};
         static FieldInfo PreparedField(string name)=>typeof(PlayableWorld).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic);
         IEnumerator PrepareTerrainAndDetail(MossHighlandArtProfile art,NullDockArtProfile dockArt)
@@ -29,10 +29,15 @@ namespace Spacewars.Presentation
                 if(data.hasCrossings)surfaceMaterials=ThreeCrossingsMaterials.RestorePrepared(data.crossings,preparedScene.Textures,profile);
                 if(!string.IsNullOrEmpty(data.dockMetrics))DockMetrics=JsonUtility.FromJson<NullDockMeshMetrics>(data.dockMetrics);
                 if(data.gate>=0)campaignGateVisual=preparedScene.Nodes[data.gate].gameObject;
-                sceneryDetail.AddRange((data.worldLods??Array.Empty<int>()).Select(i=>preparedScene.Nodes[i].GetComponent<ModelDetailLod>()));PreparationCacheHit=true;data=null;yield break;
+                sceneryDetail.AddRange((data.worldLods??Array.Empty<int>()).Select(i=>preparedScene.Nodes[i].GetComponent<ModelDetailLod>()));PreparationCacheHit=true;data=null;
+                ApplyPublicPadFog();
+                ApplyDockRelayCaptureRadius();
+                PrepareRelayGround();
+                yield break;
             }
             PreparedMapCache.PrimeResources(group);
             yield return GenerateTerrainAndDetail(art,dockArt);
+            ApplyPublicPadFog();
             try{
                 data=PreparedSceneCodec.Capture(root,material,Fog.Texture,(scene,textureId,materialId)=>{
                     scene.worldLods=sceneryDetail.Select(l=>Array.FindIndex(root.GetComponentsInChildren<Transform>(true),t=>t==l.transform)).ToArray();
@@ -45,6 +50,12 @@ namespace Spacewars.Presentation
                 PreparedMapCache.Write(group,key,PreparedSceneCodec.Encode(key,data));
             }catch(Exception e)when(e is IOException||e is InvalidDataException||e is FormatException||e is ArgumentException||e is UnityException){Debug.LogWarning("Environment prepared without persistent cache: "+e.Message);}
             finally{data=null;foreach(string name in PreparedTextures)PreparedMapCache.ForgetPixels(PreparedField(name).GetValue(this) as Texture2D);}
+            PrepareRelayGround();
+        }
+        void ApplyPublicPadFog()
+        {
+            if(profile.AuthoredMap is FoundryMap)
+                material.SetFloat("_FoundryMineFogLimit",(float)profile.FogExploredOpacity);
         }
         void ForgetPreparedFields()
         {

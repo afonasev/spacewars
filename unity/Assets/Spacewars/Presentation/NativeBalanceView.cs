@@ -21,13 +21,11 @@ namespace Spacewars.Presentation
         private PlayableProfileData draft,original;
         private AiProfileData aiDraft,aiOriginal;
         private GameplayAudioProfile audioDraft,audioOriginal;
-        private ModelDetailProfile detailDraft,detailOriginal;
-        private const string LodGroup="Детализация (LOD)";
         private readonly Dictionary<string,string> invalid=new Dictionary<string,string>();
         private bool dirty;
-        private string section="Юниты",entity="Танк",expanded="Юниты";
+        private string section="Юниты",entity=OfflinePadWorldActions.VeprName,expanded="Юниты";
         private const string Changes="Изменения";
-        private static readonly string[] Categories={Changes,"Юниты","Здания",NativeBalanceLabels.Research,"Экономика",NativeBalanceLabels.Escalation,NativeBalanceLabels.Mechanics,"ИИ",NativeBalanceLabels.Graphics,"Звук"};
+        private static readonly string[] Categories={Changes,"Юниты","Здания",NativeBalanceLabels.Research,"Экономика",NativeBalanceLabels.Escalation,NativeBalanceLabels.Mechanics,"ИИ","Звук"};
         private readonly Label context,status,help;
         private readonly TextField search;
         private readonly ScrollView fields;
@@ -76,7 +74,7 @@ namespace Spacewars.Presentation
             if(draft==null||invalid.Count>0)throw new ArgumentException("Исправьте ошибки параметров перед запуском полигона.");
             var snapshot=PlayableProfile.Create(NativeBalanceFields.Copy(draft),new ProvingGroundMap(),selected.DisplayName+" · полигон");
             var audio=JsonUtility.FromJson<GameplayAudioProfile>(JsonUtility.ToJson(audioDraft));
-            audio.Validate();detailDraft.Validate();ModelDetailProfile.UseSession(detailDraft);openProvingGround(snapshot,audio);
+            audio.Validate();ModelDetailProfile.UseSession(store.SelectedModelDetail);openProvingGround(snapshot,audio);
         }
         private void Refresh()
         {
@@ -89,34 +87,70 @@ namespace Spacewars.Presentation
         }
         private void Load()
         {
-            try{selected=store.Selected;original=selected.CopyData();draft=selected.CopyData();aiOriginal=store.SelectedAiProfile.CopyData();aiDraft=store.SelectedAiProfile.CopyData();detailOriginal=store.SelectedModelDetail;detailDraft=detailOriginal.Copy();audioOriginal=store.SelectedAudio;audioDraft=JsonUtility.FromJson<GameplayAudioProfile>(JsonUtility.ToJson(audioOriginal));invalid.Clear();dirty=false;Refresh();RenderFields();}
+            try{selected=store.Selected;original=selected.CopyData();draft=selected.CopyData();aiOriginal=store.SelectedAiProfile.CopyData();aiDraft=store.SelectedAiProfile.CopyData();audioOriginal=store.SelectedAudio;audioDraft=JsonUtility.FromJson<GameplayAudioProfile>(JsonUtility.ToJson(audioOriginal));invalid.Clear();dirty=false;Refresh();RenderFields();}
             catch(Exception e){draft=null;original=null;invalid.Clear();dirty=false;Refresh();grid.Clear();status.text="Версия недоступна: "+e.Message+". Продолжает действовать: "+store.ActiveIdentity+". Исходные данные сохранены; выберите другую версию или релизный Default.";}
         }
-        private static string Number(double value)=>value.ToString("0.###",CultureInfo.InvariantCulture);
-        private static string AiRangeUnit(AiProfileField field)=>field.Unit switch{"orders/min"=>"пр./мин","ratio/s"=>"доля/с","toggle"=>"0/1","weight"=>"баллов","buildings"=>"зданий","units"=>"юнитов","changes"=>"смен",_=>NativeBalanceLabels.Unit(field.Unit)};
-        private static string AiUnit(AiProfileField field,double value)=>field.Unit switch
+        private static string Number(double value)=>value.ToString("0.######",CultureInfo.InvariantCulture);
+        private static string Value(double stored,string unit)=>Number(stored*NativeBalanceLabels.DisplayScale(unit));
+        private static string WithUnit(string value,string unit)=>value+" "+NativeBalanceLabels.Unit(unit);
+        private static bool TryNumber(string input,out double value)=>
+            double.TryParse(input?.Replace(',','.'),NumberStyles.Float,CultureInfo.InvariantCulture,out value)
+            && !double.IsNaN(value)&&!double.IsInfinity(value);
+        private static double ReadGameplayValue(string input,PlayableProfileField field,double origin)
         {
-            "orders/min"=>"пр./мин","ratio/s"=>"доля/с","toggle"=>"0/1",
-            "weight"=>CountForm(value,"балл","балла","баллов"),"buildings"=>CountForm(value,"здание","здания","зданий"),
-            "units"=>CountForm(value,"юнит","юнита","юнитов"),"changes"=>CountForm(value,"смена","смены","смен"),
-            _=>NativeBalanceLabels.Unit(field.Unit)
-        };
-        private static string CountForm(double value,string one,string few,string many)
-        {if(value!=Math.Truncate(value))return many;long number=Math.Abs((long)value);long lastTwo=number%100;if(lastTwo>=11&&lastTwo<=14)return many;switch(number%10){case 1:return one;case 2:case 3:case 4:return few;default:return many;}}
+            if(!TryNumber(input,out var displayed))throw new ArgumentException("Введите число.");
+            double scale=NativeBalanceLabels.DisplayScale(field.Unit),stored=displayed/scale;
+            NativeBalanceStore.CheckStep(stored,origin,field.Step,field.Path);
+            if(scale==1)return stored;
+            // The displayed angular value is rounded. Recover the authored step without
+            // introducing fractional storage values (in particular for integer milliseconds).
+            double steps=Math.Round((stored-origin)/field.Step);
+            if(steps==0)return origin;
+            double stepped=origin+steps*field.Step;
+            if(Math.Abs(stepped-field.Minimum)<1e-9)return field.Minimum;
+            if(Math.Abs(stepped-field.Maximum)<1e-9)return field.Maximum;
+            return Math.Round(stepped,12);
+        }
+        private static string ParameterHelp(string description,string path,string unit,double min,double max,double step)=>
+            description.TrimEnd().TrimEnd('.')+".\nДиапазон: "+WithUnit(Value(min,unit)+"–"+Value(max,unit),unit)+
+            " · Шаг: "+WithUnit(Value(step,unit),unit)+"\nПрименение: следующая игра.\n"+path;
+        private void BindParameterHelp(VisualElement row,TextField field,string tip,string id)
+        {
+            row.tooltip=field.tooltip=tip;
+            field.RegisterCallback<FocusInEvent>(_=>ShowHelp(row,tip));
+            field.RegisterCallback<FocusOutEvent>(_=>help.style.display=DisplayStyle.None);
+            var info=new Button(){text="?",name="lab-info-"+id,tooltip=tip};
+            info.AddToClassList("lab-info");
+            row.Add(info);
+            info.clicked+=()=>{info.Focus();ShowHelp(row,tip);};
+            info.RegisterCallback<PointerEnterEvent>(_=>ShowHelp(row,tip));
+            info.RegisterCallback<PointerLeaveEvent>(_=>{if(help.parent==row&&Page.focusController?.focusedElement!=info)help.style.display=DisplayStyle.None;});
+            info.RegisterCallback<FocusInEvent>(_=>ShowHelp(row,tip));
+            info.RegisterCallback<FocusOutEvent>(_=>{if(help.parent==row)help.style.display=DisplayStyle.None;});
+        }
+        private bool CompactEscalation=>draft?.orbitalProgressionVersion==OrbitalAbilities.CompactProgressionVersion;
+        private bool VisibleGameplayField(PlayableProfileField field)=>NativeBalanceFields.LabEditable(field)&&
+            (!CompactEscalation||field.FieldName!=nameof(PlayableProfileData.orbitalThreshold5));
+        private string GameplayLabel(PlayableProfileField field)=>CompactEscalation&&field.FieldName==nameof(PlayableProfileData.orbitalThresholdMax)
+            ?"Урон от IV до MAX":NativeBalanceLabels.Label(field);
+        private string GameplayHelp(PlayableProfileField field)=>CompactEscalation&&field.FieldName==nameof(PlayableProfileData.orbitalThresholdMax)
+            ?"Урон по противникам для перехода с IV до MAX. Порог не зависит от предыдущих ступеней.":NativeBalanceLabels.Help(field);
         private bool Changed(PlayableProfileField field)=>field.Read(original)!=field.Read(draft)||invalid.ContainsKey(field.Path);
         private bool Changed(AiProfileField field)=>aiOriginal!=null&&aiDraft!=null&&(aiOriginal.fields.Single(v=>v.path==field.Path).value!=aiDraft.fields.Single(v=>v.path==field.Path).value||invalid.ContainsKey(field.Path));
-        private static IEnumerable<SurfaceParameter> DetailFields(ModelDetailProfile profile)=>profile.Parameters().Select(f=>{float scale=f.Unit=="screen height"?100:1;return new SurfaceParameter(f.Path,f.Group,f.Label,f.Description,scale==100?"%":f.Unit,f.Minimum*scale,f.Maximum*scale,f.Step*scale,()=>f.Read()*scale,v=>f.Write(v/scale));});
-        private bool DetailChanged(SurfaceParameter field)=>field.Read()!=DetailFields(detailOriginal).Single(f=>f.Path==field.Path).Read()||invalid.ContainsKey(field.Path);
         private IEnumerable<string> Differences()
         {
-            foreach(var f in PlayableProfileMetadata.Fields.Where(f=>NativeBalanceFields.Editable(f)&&Changed(f)))yield return NativeBalanceLabels.Label(f)+" ["+f.Path+"]: "+Number(f.Read(original))+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(f.Read(draft)));
-            foreach(var f in NativeBalanceFields.AiOpeningFields.Where(Changed))yield return f.Label+" ["+f.Path+"]: "+Number(aiOriginal.fields.Single(v=>v.path==f.Path).value)+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(aiDraft.fields.Single(v=>v.path==f.Path).value));
-            foreach(var f in DetailFields(detailDraft).Where(DetailChanged))yield return NativeBalanceLabels.Graphics+" / "+f.Group+" / "+f.Label+" ["+f.Path+"]: "+Number(DetailFields(detailOriginal).Single(v=>v.Path==f.Path).Read())+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(f.Read()))+" "+f.Unit;
-            foreach(var f in GameplayAudioMetadata.Fields.Where(f=>f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path)))yield return "Звук / "+f.Label+" ["+f.Path+"]: "+Number(f.Read(audioOriginal))+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(f.Read(audioDraft)));
+            string Difference(string label,string path,string unit,double before,double after)=>
+                label+" ["+path+"]: "+Value(before,unit)+" → "+WithUnit(invalid.TryGetValue(path,out var raw)?raw:Value(after,unit),unit);
+            foreach(var f in PlayableProfileMetadata.Fields.Where(f=>VisibleGameplayField(f)&&Changed(f)).OrderBy(NativeBalanceLabels.Order))
+                yield return Difference(GameplayLabel(f),f.Path,f.Unit,f.Read(original),f.Read(draft));
+            foreach(var f in NativeBalanceFields.AiLabFields.Where(Changed))
+                yield return Difference(f.Label,f.Path,f.Unit,aiOriginal.fields.Single(v=>v.path==f.Path).value,aiDraft.fields.Single(v=>v.path==f.Path).value);
+            foreach(var f in GameplayAudioMetadata.Fields.Where(f=>f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path)))
+                yield return Difference("Звук / "+f.Label,f.Path,f.Unit,f.Read(audioOriginal),f.Read(audioDraft));
         }
         private int ChangeCount=>original==null?0:Differences().Count();
         private void SetDirty(){dirty=ChangeCount>0;save.SetEnabled(dirty&&store.CanEdit);RenderTree();if(section==Changes&&string.IsNullOrEmpty(search.value))Page.schedule.Execute(()=>{string key=(Page.focusController?.focusedElement as VisualElement)?.name;var offset=fields.scrollOffset;RenderFields();fields.scrollOffset=offset;if(key!=null)Page.Q(key)?.Focus();});}
-        private void Save()=>Try(()=>{if(invalid.Count>0)throw new ArgumentException("Исправьте ввод: "+string.Join(", ",invalid.Keys));store.Save(draft,audioDraft,aiDraft,detailDraft);Load();status.text="Версия сохранена в "+store.StoragePath+". Следующая игра: "+store.ActiveIdentity+". Git commit/push не выполнялись кнопкой сохранения.";});
+        private void Save()=>Try(()=>{if(invalid.Count>0)throw new ArgumentException("Исправьте ввод: "+string.Join(", ",invalid.Keys));store.Save(draft,audioDraft,aiDraft);Load();status.text="Версия сохранена в "+store.StoragePath+". Следующая игра: "+store.ActiveIdentity+". Git commit/push не выполнялись кнопкой сохранения.";});
         private void Try(Action action){try{action();}catch(StoreConflictException){store.Reload();Refresh();status.text="История изменилась в другом процессе. Черновик сохранён; проверьте новую базу перед повтором.";}catch(Exception e){status.text=e.Message;}}
         private void Back()=>Guard(()=>{Page.RemoveFromHierarchy();closed();});
         private void Guard(Action action)
@@ -150,21 +184,38 @@ namespace Spacewars.Presentation
         private bool TwoColumns=>Page.resolvedStyle.width>=1120&&!(section==Changes&&string.IsNullOrWhiteSpace(search.value));
         private IEnumerable<string> Objects(string category)
         {
-            var gameplay=PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).Where(f=>NativeBalanceLabels.Section(f)==category).Select(NativeBalanceLabels.Entity);
-            var extra=category=="ИИ"?NativeBalanceFields.AiOpeningFields.Select(NativeBalanceLabels.AiEntity):category==NativeBalanceLabels.Graphics?DetailFields(detailDraft).Select(f=>f.Group):Array.Empty<string>();
-            return extra.Concat(gameplay).Distinct();
+            var gameplay=PlayableProfileMetadata.Fields.Where(VisibleGameplayField).Where(f=>NativeBalanceLabels.Section(f)==category).Select(NativeBalanceLabels.Entity);
+            var extra=category=="ИИ"?NativeBalanceFields.AiLabFields.Select(NativeBalanceLabels.AiEntity):Array.Empty<string>();
+            var objects=extra.Concat(gameplay).Distinct().ToList();
+            string cerberus=OfflinePadWorldActions.Name(PlayableEntityKind.Cerberus);
+            if(category=="Юниты"&&objects.Remove(cerberus))
+                objects.Add(cerberus);
+            if(category==NativeBalanceLabels.Research&&objects.Contains("Штурмовые орудия")&&objects.Remove("Ракетная установка"))
+                objects.Insert(objects.IndexOf("Штурмовые орудия")+1,"Ракетная установка");
+            return objects;
         }
         private bool ObjectChanged(string category,string obj=null)
         {
-            return PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).Any(f=>NativeBalanceLabels.Section(f)==category&&(obj==null||NativeBalanceLabels.Entity(f)==obj)&&Changed(f))||
-                category=="ИИ"&&NativeBalanceFields.AiOpeningFields.Any(f=>(obj==null||NativeBalanceLabels.AiEntity(f)==obj)&&Changed(f))||
-                category==NativeBalanceLabels.Graphics&&DetailFields(detailDraft).Any(f=>(obj==null||f.Group==obj)&&DetailChanged(f));
+            return PlayableProfileMetadata.Fields.Where(VisibleGameplayField).Any(f=>NativeBalanceLabels.Section(f)==category&&(obj==null||NativeBalanceLabels.Entity(f)==obj)&&Changed(f))||
+                category=="ИИ"&&NativeBalanceFields.AiLabFields.Any(f=>(obj==null||NativeBalanceLabels.AiEntity(f)==obj)&&Changed(f));
         }
         private void OpenObject(string category,string obj,bool clearSearch=false)
         {
             section=expanded=category;entity=obj;
             if(clearSearch)search.SetValueWithoutNotify("");
             RenderFields();navigation.SetScope(Page,Back,fields.Query<TextField>().First());
+        }
+        private static bool UnitUpgradePortrait(string glyph)=>glyph is "tankHybridUpgraded" or "explorerUpgraded" or "shkval-guidance-3" or "hawkUpgraded";
+        private static VisualElement ObjectIcon(string glyph)
+        {
+            VisualElement icon;
+            if(UnitUpgradePortrait(glyph))
+            {
+                var artwork=new RadialArtwork();artwork.Set(glyph,upgraded:true);icon=artwork;
+            }
+            else icon=new OrbitalGlyph(glyph);
+            icon.pickingMode=PickingMode.Ignore;icon.style.width=24;icon.style.height=24;icon.style.flexShrink=0;icon.style.marginRight=6;
+            return icon;
         }
         private void RenderTree()
         {
@@ -187,7 +238,7 @@ namespace Spacewars.Presentation
                 {
                     string obj=item;var action=OrbitalTheme.Action("",()=>OpenObject(choice,obj),"lab-object-"+obj.Replace('/','-').Replace(' ','-'),obj==entity&&choice==section);
                     string glyph=NativeBalanceLabels.Glyph(obj);
-                    if(glyph!=null){var icon=new OrbitalGlyph(glyph){pickingMode=PickingMode.Ignore};icon.style.width=24;icon.style.height=24;icon.style.marginRight=6;action.Add(icon);}
+                    if(glyph!=null)action.Add(ObjectIcon(glyph));
                     action.style.height=StyleKeyword.Auto;var label=new Label(obj){pickingMode=PickingMode.Ignore};label.AddToClassList("lab-tree-label");label.style.fontSize=14;label.style.flexShrink=1;label.style.whiteSpace=WhiteSpace.Normal;action.Add(label);action.EnableInClassList("lab-dirty",ObjectChanged(choice,obj));children.Add(action);
 
                 }
@@ -196,18 +247,17 @@ namespace Spacewars.Presentation
         private void RenderFields()
         {
             if(draft==null){grid.Clear();return;}
-            var available=PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).ToArray();var aiAvailable=NativeBalanceFields.AiOpeningFields;RenderTree();
+            var available=PlayableProfileMetadata.Fields.Where(VisibleGameplayField).OrderBy(NativeBalanceLabels.Order).ToArray();var aiAvailable=NativeBalanceFields.AiLabFields;RenderTree();
             grid.Clear();fields.scrollOffset=Vector2.zero;string query=search.value?.Trim()??"";
-            var visible=available.Where(f=>query.Length==0?(section==Changes?Changed(f):NativeBalanceLabels.Section(f)==section&&NativeBalanceLabels.Entity(f)==entity):(NativeBalanceLabels.Section(f)+" "+f.Path+" "+NativeBalanceLabels.Label(f)+" "+NativeBalanceLabels.Help(f)+" "+NativeBalanceLabels.Entity(f)).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
+            var visible=available.Where(f=>query.Length==0?(section==Changes?Changed(f):NativeBalanceLabels.Section(f)==section&&NativeBalanceLabels.Entity(f)==entity):(NativeBalanceLabels.Section(f)+" "+f.Path+" "+GameplayLabel(f)+" "+GameplayHelp(f)+" "+NativeBalanceLabels.Entity(f)).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
             context.style.display=section==Changes&&query.Length==0?DisplayStyle.None:DisplayStyle.Flex;
             context.text=query.Length>0?"Поиск по всем разделам · "+visible.Length+" параметров":section==Changes?Changes+" · "+ChangeCount:section+" / "+entity+" · "+visible.Length+" параметров";
             var aiVisible=aiAvailable.Where(f=>query.Length==0?(section=="ИИ"&&NativeBalanceLabels.AiEntity(f)==entity||section==Changes&&Changed(f)):("ИИ "+f.Group+" "+f.Path+" "+f.Label+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
             var audioVisible=GameplayAudioMetadata.Fields.Where(f=>query.Length==0?(section=="Звук"||section==Changes&&(f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path))):("Звук "+f.Label+" "+f.Path+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
-            var detailVisible=DetailFields(detailDraft).Where(f=>query.Length==0?(section==NativeBalanceLabels.Graphics&&entity==f.Group||section==Changes&&DetailChanged(f)):(NativeBalanceLabels.Graphics+" LOD детализация "+f.Group+" "+f.Path+" "+f.Label+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
-            context.text=query.Length>0?"Поиск по всем разделам · "+(visible.Length+aiVisible.Length+audioVisible.Length+detailVisible.Length)+" параметров":section==Changes?Changes+" · "+ChangeCount:section=="Звук"?"Звук / Игровой микс · "+audioVisible.Length+" параметров":section+" / "+entity+" · "+(visible.Length+detailVisible.Length+aiVisible.Length)+" параметров";
+            context.text=query.Length>0?"Поиск по всем разделам · "+(visible.Length+aiVisible.Length+audioVisible.Length)+" параметров":section==Changes?Changes+" · "+ChangeCount:section=="Звук"?"Звук / Игровой микс · "+audioVisible.Length+" параметров":section+" / "+entity+" · "+(visible.Length+aiVisible.Length)+" параметров";
 
             help.style.display=DisplayStyle.None;
-            if(visible.Length==0&&aiVisible.Length==0&&audioVisible.Length==0&&detailVisible.Length==0)grid.Add(OrbitalTheme.Text(query.Length==0&&section==Changes?"Нет несохранённых изменений.":"Параметры не найдены. Попробуйте другое название.","orbital-muted"));
+            if(visible.Length==0&&aiVisible.Length==0&&audioVisible.Length==0)grid.Add(OrbitalTheme.Text(query.Length==0&&section==Changes?"Нет несохранённых изменений.":"Параметры не найдены. Попробуйте другое название.","orbital-muted"));
             if(query.Length==0&&(section=="Юниты"||section=="Здания"))
             {
                 var related=NativeBalanceLabels.RelatedResearch(entity);
@@ -216,88 +266,74 @@ namespace Spacewars.Presentation
                     var links=new VisualElement(){name="lab-related-research"};links.style.width=Length.Percent(100);links.style.flexShrink=0;links.style.flexDirection=FlexDirection.Row;links.style.flexWrap=Wrap.Wrap;grid.Add(links);
                     foreach(var target in related)
                     {
-                        string research=target;var link=OrbitalTheme.Action("Исследования → "+research,()=>OpenObject(NativeBalanceLabels.Research,research,true),"lab-research-link-"+research.Replace(' ','-'));
+                        string research=target;
+                        string glyph=NativeBalanceLabels.Glyph(research);
+                        bool portraitLink=glyph==ModelPortrait.RocketLauncherArtwork||UnitUpgradePortrait(glyph);
+                        string label="Исследования → "+research;
+                        var link=OrbitalTheme.Action(portraitLink?"":label,()=>OpenObject(NativeBalanceLabels.Research,research,true),"lab-research-link-"+research.Replace(' ','-'));
+                        if(portraitLink)
+                        {
+                            link.style.flexDirection=FlexDirection.Row;
+                            link.style.alignItems=Align.Center;
+                            link.Add(ObjectIcon(glyph));
+                            var text=new Label(label){pickingMode=PickingMode.Ignore};text.style.whiteSpace=WhiteSpace.Normal;text.style.flexShrink=1;link.Add(text);
+                        }
                         link.style.maxWidth=Length.Percent(100);link.style.whiteSpace=WhiteSpace.Normal;link.tooltip="Открыть исследование. Текущий черновик сохранится.";links.Add(link);
                     }
-                }
-            }
-            if(detailVisible.Length>0){
-                var hint=OrbitalTheme.Text("LOD: размер модели относительно высоты кадра. Следы: часть машин оставляет сплошной след, остальные — нет. Изменения применяются в следующей игре или в полигоне.","orbital-muted");hint.name="lab-lod-help";hint.style.whiteSpace=WhiteSpace.Normal;hint.style.width=Length.Percent(100);grid.Add(hint);
-                foreach(var field in detailVisible){
-                    var row=new VisualElement();row.AddToClassList("lab-parameter-row");row.style.width=Length.Percent(TwoColumns?50:100);grid.Add(row);
-                    string tip=field.Description+" Диапазон: "+Number(field.Minimum)+"–"+Number(field.Maximum)+" "+field.Unit+", шаг "+Number(field.Step)+" "+field.Unit+". "+field.Path;
-                    var editor=new TextField(field.Label){name=field.Path,isDelayed=true,tooltip=tip,isReadOnly=!store.CanEdit};editor.AddToClassList("lab-parameter");row.Add(editor);
-                    void Show()=>editor.SetValueWithoutNotify(invalid.TryGetValue(field.Path,out var raw)?raw:Number(field.Read()));Show();
-                    editor.RegisterCallback<FocusInEvent>(_=>ShowHelp(row,tip));editor.RegisterCallback<FocusOutEvent>(_=>help.style.display=DisplayStyle.None);
-                    editor.RegisterValueChangedCallback(e=>{try{
-                        if(!float.TryParse(e.newValue.Replace(',','.'),NumberStyles.Float,CultureInfo.InvariantCulture,out var value)||float.IsNaN(value)||float.IsInfinity(value)||value<field.Minimum||value>field.Maximum)throw new ArgumentException("Введите число в диапазоне "+Number(field.Minimum)+"–"+Number(field.Maximum)+" "+field.Unit+".");
-                        NativeBalanceStore.CheckStep(value,DetailFields(detailOriginal).Single(f=>f.Path==field.Path).Read(),field.Step,field.Path);field.Write(value);invalid.Remove(field.Path);SetDirty();
-                    }catch(Exception error){invalid[field.Path]=e.newValue;SetDirty();status.text=error.Message;}});
-                    if(section==Changes&&query.Length==0){var before=new Label("было: "+Number(DetailFields(detailOriginal).Single(f=>f.Path==field.Path).Read())+" "+field.Unit);before.AddToClassList("lab-before");row.Add(before);}
-                    var unit=new Label(field.Unit);unit.AddToClassList("lab-unit");row.Add(unit);
-                    foreach(int direction in new[]{-1,1}){int delta=direction;var button=OrbitalTheme.Action(delta<0?"−":"+",()=>{editor.value=Number(Math.Max(field.Minimum,Math.Min(field.Maximum,field.Read()+delta*field.Step)));});button.AddToClassList("lab-adjust");button.focusable=false;button.SetEnabled(store.CanEdit);row.Add(button);}
                 }
             }
             if(aiVisible.Length>0)
             {
                 if(section=="ИИ")grid.Add(OrbitalTheme.Text("После сохранения настройки применятся к новым матчам; текущий матч не меняется.","orbital-muted"));
-                if(section=="ИИ")grid.Add(OrbitalTheme.Action("Сбросить ИИ по умолчанию",()=>Try(()=>{aiDraft=NativeBalanceFields.InitialAiOpeningProfile().CopyData();invalid.Keys.Where(k=>NativeBalanceFields.AiOpeningFields.Any(f=>f.Path==k)).ToList().ForEach(k=>invalid.Remove(k));SetDirty();RenderFields();}),"lab-ai-reset"));
+                if(section=="ИИ")grid.Add(OrbitalTheme.Action("Сбросить ИИ по умолчанию",()=>Try(()=>{var defaults=NativeBalanceFields.InitialAiOpeningProfile();foreach(var field in NativeBalanceFields.AiLabFields){NativeBalanceFields.Write(field,aiDraft,defaults.Value(field.Path));invalid.Remove(field.Path);}SetDirty();RenderFields();}),"lab-ai-reset"));
                 grid.Add(OrbitalTheme.Text("ИИ / "+NativeBalanceLabels.AiEntity(aiVisible[0]),"lab-subheading"));
 
                 foreach(var field in aiVisible)
                 {
-                    string tip=field.Description+"\nДиапазон: "+Number(field.Minimum)+"–"+Number(field.Maximum)+" "+AiRangeUnit(field)+" · шаг "+Number(field.Step);
+                    string tip=ParameterHelp(field.Description,field.Path,field.Unit,field.Minimum,field.Maximum,field.Step);
                     var row=new VisualElement(){tooltip=tip};row.AddToClassList("lab-parameter-row");row.style.flexShrink=0;row.style.width=Length.Percent(TwoColumns?50:100);row.style.paddingRight=8;grid.Add(row);
                     var editor=new TextField(field.Label){name="lab-ai-"+field.Path.Replace('.','-'),isDelayed=true,tooltip=tip};editor.AddToClassList("lab-parameter");row.Add(editor);editor.isReadOnly=!store.CanEdit;
-                    if(section==Changes&&query.Length==0)row.Add(new Label("было: "+Number(aiOriginal.fields.Single(v=>v.path==field.Path).value)){name="lab-before-ai-"+field.Path.Replace('.','-')});
-                    void Show(){editor.SetValueWithoutNotify(invalid.TryGetValue(field.Path,out var raw)?raw:Number(aiDraft.fields.Single(v=>v.path==field.Path).value));}
-                    var unit=new Label(AiUnit(field,field.Initial)){tooltip=tip};unit.AddToClassList("lab-unit");row.Add(unit);
-                    void UpdateUnit()=>unit.text=AiUnit(field,aiDraft.fields.Single(v=>v.path==field.Path).value);
-                    editor.RegisterCallback<FocusInEvent>(_=>ShowHelp(row,tip+" · "+field.Path+" · Применение: следующий новый матч."));editor.RegisterCallback<FocusOutEvent>(_=>help.style.display=DisplayStyle.None);
-                    editor.RegisterValueChangedCallback(e=>{try{if(!double.TryParse(e.newValue,NumberStyles.Float,CultureInfo.InvariantCulture,out var value))throw new ArgumentException("Введите число: "+field.Path);NativeBalanceStore.CheckStep(value,aiOriginal.fields.Single(v=>v.path==field.Path).value,field.Step,field.Path);NativeBalanceFields.Write(field,aiDraft,value);invalid.Remove(field.Path);UpdateUnit();SetDirty();}catch(Exception error){invalid[field.Path]=e.newValue;SetDirty();status.text=field.Path+": "+error.Message;}});Show();
-                    foreach(int direction in new[]{-1,1}){int delta=direction;var adjust=OrbitalTheme.Action(delta<0?"−":"+",()=>Try(()=>{var current=aiDraft.fields.Single(v=>v.path==field.Path).value;NativeBalanceFields.Write(field,aiDraft,Math.Round(Math.Max(field.Minimum,Math.Min(field.Maximum,current+delta*field.Step)),6));invalid.Remove(field.Path);UpdateUnit();SetDirty();Show();}));adjust.AddToClassList("lab-adjust");adjust.focusable=false;adjust.SetEnabled(store.CanEdit);adjust.tooltip=tip;row.Add(adjust);}
+                    if(section==Changes&&query.Length==0)row.Add(new Label("было: "+WithUnit(Value(aiOriginal.fields.Single(v=>v.path==field.Path).value,field.Unit),field.Unit)){name="lab-before-ai-"+field.Path.Replace('.','-')});
+                    void Show(){editor.SetValueWithoutNotify(invalid.TryGetValue(field.Path,out var raw)?raw:Value(aiDraft.fields.Single(v=>v.path==field.Path).value,field.Unit));}
+                    var unit=new Label(NativeBalanceLabels.Unit(field.Unit)){tooltip=tip};unit.AddToClassList("lab-unit");row.Add(unit);
+                    editor.RegisterValueChangedCallback(e=>{try{if(!TryNumber(e.newValue,out var display))throw new ArgumentException("Введите число.");double value=display/NativeBalanceLabels.DisplayScale(field.Unit);NativeBalanceStore.CheckStep(value,aiOriginal.fields.Single(v=>v.path==field.Path).value,field.Step,field.Path);NativeBalanceFields.Write(field,aiDraft,value);invalid.Remove(field.Path);SetDirty();}catch(Exception error){invalid[field.Path]=e.newValue;SetDirty();status.text=field.Path+": "+error.Message;}});Show();
+                    foreach(int direction in new[]{-1,1}){int delta=direction;var adjust=OrbitalTheme.Action(delta<0?"−":"+",()=>Try(()=>{var current=aiDraft.fields.Single(v=>v.path==field.Path).value;NativeBalanceFields.Write(field,aiDraft,Math.Round(Math.Max(field.Minimum,Math.Min(field.Maximum,current+delta*field.Step)),6));invalid.Remove(field.Path);SetDirty();Show();}));adjust.AddToClassList("lab-adjust");adjust.focusable=false;adjust.SetEnabled(store.CanEdit);adjust.tooltip=tip;row.Add(adjust);}
+                    BindParameterHelp(row,editor,tip,field.Path);
                 }
             }
-            foreach(var bucket in visible.GroupBy(f=>query.Length==0&&section!=Changes?NativeBalanceLabels.Bucket(f):NativeBalanceLabels.Section(f)+" / "+NativeBalanceLabels.Entity(f)+" / "+NativeBalanceLabels.Bucket(f)).OrderBy(b=>query.Length==0&&section==NativeBalanceLabels.Research?b.Key=="Уровень I"?0:b.Key=="Уровень II"?1:b.Key=="Уровень III"?2:3:0))
+            foreach(var bucket in visible.GroupBy(f=>query.Length==0&&section!=Changes?NativeBalanceLabels.Bucket(f):NativeBalanceLabels.Section(f)+" / "+NativeBalanceLabels.Entity(f)+" / "+NativeBalanceLabels.Bucket(f)))
             {
                 var heading=OrbitalTheme.Text(bucket.Key,"lab-subheading");heading.style.width=Length.Percent(100);heading.style.flexShrink=0;grid.Add(heading);
                 foreach(var descriptor in bucket)
                 {
-                    var field=descriptor;string tip=NativeBalanceLabels.Help(field)+"\nДиапазон: "+field.Minimum+"–"+field.Maximum+" "+NativeBalanceLabels.Unit(field.Unit)+" · шаг "+field.Step;
+                    var field=descriptor;string tip=ParameterHelp(GameplayHelp(field),field.Path,field.Unit,field.Minimum,field.Maximum,field.Step);
                     var row=new VisualElement(){tooltip=tip};row.AddToClassList("lab-parameter-row");row.style.flexShrink=0;row.style.width=Length.Percent(TwoColumns?50:100);row.style.paddingRight=8;grid.Add(row);
-                    var button=new TextField(NativeBalanceLabels.Label(field)){name="lab-field-"+field.FieldName,isDelayed=true,tooltip=tip};button.AddToClassList("lab-parameter");row.Add(button);
-                    if(section==Changes&&query.Length==0){var before=new Label("было: "+Number(field.Read(original))){name="lab-before-"+field.FieldName,tooltip="Значение в выбранной сохранённой версии"};before.AddToClassList("lab-before");row.Add(before);}
+                    var button=new TextField(GameplayLabel(field)){name="lab-field-"+field.FieldName,isDelayed=true,tooltip=tip};button.AddToClassList("lab-parameter");row.Add(button);
+                    if(section==Changes&&query.Length==0){var before=new Label("было: "+WithUnit(Value(field.Read(original),field.Unit),field.Unit)){name="lab-before-"+field.FieldName,tooltip="Значение в выбранной сохранённой версии"};before.AddToClassList("lab-before");row.Add(before);}
                     button.isReadOnly=!store.CanEdit;
-                    button.RegisterCallback<FocusInEvent>(_=>ShowHelp(row,tip+" · "+field.Path+" · Применение: следующая игра."));button.RegisterCallback<FocusOutEvent>(_=>help.style.display=DisplayStyle.None);
-                    void Show(){button.SetValueWithoutNotify(invalid.TryGetValue(field.Path,out var raw)?raw:Number(field.Read(draft)));}
+                    void Show(){button.SetValueWithoutNotify(invalid.TryGetValue(field.Path,out var raw)?raw:Value(field.Read(draft),field.Unit));}
                     button.userData=new Action<int>(step=>{if(!store.CanEdit)return;Try(()=>{field.Write(draft,Math.Round(Math.Max(field.Minimum,Math.Min(field.Maximum,field.Read(draft)+step*field.Step)),6));invalid.Remove(field.Path);SetDirty();Show();});});
                     button.RegisterValueChangedCallback(e=>{
-                        try{if(!double.TryParse(e.newValue,NumberStyles.Float,CultureInfo.InvariantCulture,out var value))throw new ArgumentException("Введите число: "+field.Path);NativeBalanceStore.CheckStep(value,field.Read(original),field.Step,field.Path);field.Write(draft,value);invalid.Remove(field.Path);SetDirty();}
+                        try{field.Write(draft,ReadGameplayValue(e.newValue,field,field.Read(original)));invalid.Remove(field.Path);SetDirty();}
                         catch(Exception error){invalid[field.Path]=e.newValue;SetDirty();status.text=field.Path+": "+error.Message;}
                     });Show();
                     var unit=new Label(NativeBalanceLabels.Unit(field.Unit)){tooltip=tip};unit.AddToClassList("lab-unit");row.Add(unit);
                     foreach(int direction in new[]{-1,1}){int delta=direction;var adjust=OrbitalTheme.Action(delta<0?"−":"+",()=>((Action<int>)button.userData)(delta));adjust.AddToClassList("lab-adjust");adjust.tooltip=tip;adjust.focusable=false;adjust.SetEnabled(store.CanEdit);row.Add(adjust);}
-                    string helpText=tip+" · "+field.Path+" · Применение: следующая игра.";
-                    var info=new Button(){text="?",name="lab-info-"+field.FieldName,tooltip=tip};info.AddToClassList("lab-info");row.Add(info);
-                    info.clicked+=()=>{info.Focus();ShowHelp(row,helpText);};
-                    info.RegisterCallback<PointerEnterEvent>(_=>ShowHelp(row,helpText));
-                    info.RegisterCallback<PointerLeaveEvent>(_=>{if(help.parent==row&&Page.focusController?.focusedElement!=info)help.style.display=DisplayStyle.None;});
-                    info.RegisterCallback<FocusInEvent>(_=>ShowHelp(row,helpText));
-                    info.RegisterCallback<FocusOutEvent>(_=>{if(help.parent==row)help.style.display=DisplayStyle.None;});
+                    BindParameterHelp(row,button,tip,field.FieldName);
                 }
             }
             if(audioVisible.Length>0){var heading=OrbitalTheme.Text("Звук / Игровой микс","lab-subheading");heading.style.width=Length.Percent(100);grid.Add(heading);}
             foreach(var field in audioVisible)
             {
                 var row=new VisualElement();row.AddToClassList("lab-parameter-row");row.style.width=Length.Percent(TwoColumns?50:100);grid.Add(row);
-                string tip=field.Description+" · "+field.Path+" · Диапазон: "+field.Minimum+"–"+field.Maximum+" "+field.Unit+" · шаг "+field.Step+" · Применение: следующая игра.";
+                string tip=ParameterHelp(field.Description,field.Path,field.Unit,field.Minimum,field.Maximum,field.Step);
                 var editor=new TextField(field.Label){name=field.Path,isDelayed=true,tooltip=tip};editor.AddToClassList("lab-parameter");editor.SetValueWithoutNotify(invalid.TryGetValue(field.Path,out var raw)?raw:Number(field.Read(audioDraft)));editor.isReadOnly=!store.CanEdit;row.Add(editor);
-                editor.RegisterCallback<FocusInEvent>(_=>ShowHelp(row,tip));editor.RegisterCallback<FocusOutEvent>(_=>help.style.display=DisplayStyle.None);
-                editor.RegisterValueChangedCallback(e=>{try{if(!double.TryParse(e.newValue,NumberStyles.Float,CultureInfo.InvariantCulture,out var v))throw new ArgumentException("Введите число.");NativeBalanceStore.CheckStep(v,field.Read(audioOriginal),field.Step,field.Path);field.Write(audioDraft,v);invalid.Remove(field.Path);SetDirty();}catch(Exception error){invalid[field.Path]=e.newValue;SetDirty();status.text=field.Path+": "+error.Message;}});
-                if(section==Changes&&query.Length==0){var before=new Label("было: "+Number(field.Read(audioOriginal)));before.AddToClassList("lab-before");row.Add(before);}
-                var unit=new Label(field.Unit);unit.AddToClassList("lab-unit");row.Add(unit);
+                editor.RegisterValueChangedCallback(e=>{try{if(!TryNumber(e.newValue,out var v))throw new ArgumentException("Введите число.");NativeBalanceStore.CheckStep(v,field.Read(audioOriginal),field.Step,field.Path);field.Write(audioDraft,v);invalid.Remove(field.Path);SetDirty();}catch(Exception error){invalid[field.Path]=e.newValue;SetDirty();status.text=field.Path+": "+error.Message;}});
+                if(section==Changes&&query.Length==0){var before=new Label("было: "+WithUnit(Value(field.Read(audioOriginal),field.Unit),field.Unit));before.AddToClassList("lab-before");row.Add(before);}
+                var unit=new Label(NativeBalanceLabels.Unit(field.Unit));unit.AddToClassList("lab-unit");row.Add(unit);
                 editor.userData=new Action<int>(step=>{if(!store.CanEdit)return;editor.value=Number(field.Read(audioDraft)+step*field.Step);});
                 foreach(int direction in new[]{-1,1}){int delta=direction;var adjust=OrbitalTheme.Action(delta<0?"−":"+",()=>((Action<int>)editor.userData)(delta));adjust.AddToClassList("lab-adjust");adjust.focusable=false;adjust.SetEnabled(store.CanEdit);row.Add(adjust);}
+                BindParameterHelp(row,editor,tip,field.Path);
             }
         }
     }

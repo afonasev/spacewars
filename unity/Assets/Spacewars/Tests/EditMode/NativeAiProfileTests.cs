@@ -13,6 +13,47 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class NativeAiProfileTests
     {
+
+        [Test]
+        public void ExpertUsesVeteranPolicyAndKeepsTheLegacyDefaultIdentity()
+        {
+            var ai=AiProfile.Initial;
+            foreach(var field in AiProfileMetadata.Fields.Where(f=>f.Path.StartsWith("difficulty.veteran.")))
+            {
+                string key=field.Path.Substring("difficulty.veteran.".Length);
+                if(key=="control.ordersPerMinute"||key=="control.burst")continue;
+                Assert.AreEqual(ai.DifficultyValue(AiDifficulty.Veteran,key),ai.DifficultyValue(AiDifficulty.Expert,key),key);
+            }
+            Assert.AreEqual(240,ai.DifficultyValue(AiDifficulty.Expert,"control.ordersPerMinute"));
+            Assert.AreEqual(8,ai.DifficultyValue(AiDifficulty.Expert,"control.burst"));
+            Assert.AreEqual(50,ai.DifficultyValue(AiDifficulty.Expert,"incomeBonusPercent"));
+            var legacy=ai.CopyData();
+            legacy.fields=legacy.fields.Where(f=>!f.path.StartsWith("difficulty.expert.")).ToArray();
+            Assert.AreEqual(ai.Hash,new AiProfile(legacy).Hash);
+        }
+
+        [Test]
+        public void CheaterSharesTunedExpertSettingsExceptPeriodicIncome()
+        {
+            var data=AiProfile.Initial.CopyData();
+            Set(data,"difficulty.expert.reactionSeconds",.1);
+            Set(data,"difficulty.expert.control.reactionMaxSeconds",.1);
+            Set(data,"difficulty.expert.decision.retrySeconds",1);
+            Set(data,"difficulty.expert.incomeBonusPercent",0);
+            var ai=new AiProfile(data);
+            foreach(var field in AiProfileMetadata.Fields.Where(f=>f.Path.StartsWith("difficulty.veteran.")||f.Path.StartsWith("difficulty.expert.")))
+            {
+                var key=field.Path.Substring(field.Path.IndexOf('.', "difficulty.".Length)+1);
+                if(key=="incomeBonusPercent")continue;
+                Assert.AreEqual(ai.DifficultyValue(AiDifficulty.Expert,key),ai.DifficultyValue(AiDifficulty.Cheater,key),key);
+            }
+            Assert.AreEqual(.1,ai.DifficultyValue(AiDifficulty.Expert,"reactionSeconds"));
+            Assert.AreEqual(1,ai.IncomeMultiplier(AiDifficulty.Expert));
+            Assert.AreEqual(1.5,ai.IncomeMultiplier(AiDifficulty.Cheater));
+            Assert.AreEqual(3,ai.DifficultyValue(AiDifficulty.Veteran,"decision.retrySeconds"));
+            Assert.Throws<ArgumentOutOfRangeException>(()=>Set(data,"difficulty.expert.reactionSeconds",0));
+        }
+
         private static AiProfileData Roundtrip(AiProfileData data)
         {
             var serializer=new XmlSerializer(typeof(AiProfileData));
@@ -37,7 +78,9 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void MetadataControlsAllNumericRanges()
         {
-            Assert.AreEqual(268,NativeBalanceFields.AiFields.Count);
+            Assert.AreEqual(304,NativeBalanceFields.AiFields.Count(f=>!f.Path.StartsWith("victoryConversion.",StringComparison.Ordinal)));
+            Assert.AreEqual(7,NativeBalanceFields.AiFields.Count(f=>f.Path.StartsWith("victoryConversion.",StringComparison.Ordinal)));
+            Assert.AreEqual(7,NativeBalanceFields.AiOpeningFields.Count(f=>f.Path.StartsWith("victoryConversion.",StringComparison.Ordinal)));
             Assert.AreEqual(15,NativeBalanceFields.AiFields.Count(f=>f.Path.StartsWith("orbital.",StringComparison.Ordinal)));
             Assert.AreEqual(16,NativeBalanceFields.AiRosterFields.Count);
             foreach(var f in NativeBalanceFields.AiFields.Concat(NativeBalanceFields.AiRosterFields))
@@ -64,8 +107,8 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(1,AiProfile.SecondsToTicks(.001,30));Assert.AreEqual(8,AiProfile.SecondsToTicks(.25,30));Assert.AreEqual(0,AiProfile.SecondsToTicks(0,30));
             Assert.Throws<ArgumentOutOfRangeException>(()=>AiProfile.SecondsToTicks(1,0));
             var p=AiProfile.Initial;
-            CollectionAssert.AreEqual(new long[]{90,45,15},Enum.GetValues(typeof(AiDifficulty)).Cast<AiDifficulty>().Select(d=>AiProfile.SecondsToTicks(p.DifficultyValue(d,"decisionSeconds"),30)));
-            CollectionAssert.AreEqual(new long[]{60,30,12},Enum.GetValues(typeof(AiDifficulty)).Cast<AiDifficulty>().Select(d=>AiProfile.SecondsToTicks(p.DifficultyValue(d,"reactionSeconds"),30)));
+            CollectionAssert.AreEqual(new long[]{90,45,15,15,15},Enum.GetValues(typeof(AiDifficulty)).Cast<AiDifficulty>().Select(d=>AiProfile.SecondsToTicks(p.DifficultyValue(d,"decisionSeconds"),30)));
+            CollectionAssert.AreEqual(new long[]{60,30,12,12,12},Enum.GetValues(typeof(AiDifficulty)).Cast<AiDifficulty>().Select(d=>AiProfile.SecondsToTicks(p.DifficultyValue(d,"reactionSeconds"),30)));
         }
         [Test] public void CatalogCoversEveryKindAndReadsGameplayPrices()
         {

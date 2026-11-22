@@ -1,0 +1,16 @@
+--- a/external/bdwgc/include/private/gc_locks.h
++++ b/external/bdwgc/include/private/gc_locks.h
+@@ -27,6 +27,13 @@
+  * in assertions, and may return TRUE in the "don't know" case.
+  */
+ # ifdef THREADS
++
++/* Unity macOS Mono has no thread-local allocator. Use the existing queued
++ * lock instead of exponential nanosleep under concurrent allocation. */
++#  if defined(GC_DARWIN_THREADS) && defined(GC_PTHREADS)
++#    define USE_PTHREAD_LOCKS
++#    undef USE_SPIN_LOCK
++#  endif
+ 
+ #  ifdef PCR
+ #    include <base/PCR_Base.h>

@@ -3,7 +3,7 @@ import json
 from contextlib import redirect_stdout
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import check_qa
@@ -192,10 +192,58 @@ class QaContractTests(unittest.TestCase):
                      patch.object(check_qa.subprocess, 'check_output', return_value=b''):
                     with redirect_stdout(io.StringIO()):
                         self.assertEqual(1, check_qa.run())
-                import json
                 result = json.loads(next((root / '.local/qa').glob('*/result.json')).read_text())
                 self.assertEqual('Failed', result['result'])
-                self.assertEqual(exit_code, result['checks'][0]['exit_code'])
+                check = result['checks'][0]
+                self.assertEqual(exit_code, check['exit_code'])
+                self.assertGreater(check['wall_seconds'], 0)
+                self.assertIsNone(check['editor_wall_seconds'])
+                self.assertIsNone(check['test_duration_seconds'])
+
+    def test_failed_playmode_records_timings_without_qualifying_partial_xml(self):
+        for exit_code, payload, duration in (
+            (2, '<test-run result="Failed" duration="0.001"><test-case result="Failed" /></test-run>', 0.001),
+            (0, '<test-run result="Failed" duration="0.001"><test-case result="Failed" /></test-run>', 0.001),
+            (2, '<test-run duration="0.001">', None),
+            (2, '<test-run result="Failed" duration="NaN" />', None),
+            (2, None, None),
+        ):
+            with self.subTest(exit_code=exit_code, payload=payload), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / 'tools').mkdir()
+                wrapper = root / 'tools/unity.sh'
+                wrapper.write_text('#!/usr/bin/env python3\n'
+                                   'import pathlib, sys\n'
+                                   'print("unity-run: started fixture", flush=True)\n'
+                                   f'payload = {payload!r}\n'
+                                   'if payload is not None:\n'
+                                   '    pathlib.Path(sys.argv[sys.argv.index("-testResults")+1]).write_text(payload)\n'
+                                   f'sys.exit({exit_code})\n')
+                wrapper.chmod(0o755)
+                clock = Mock()
+                clock.monotonic.side_effect = [0, 1, 2, 5, 6]
+                with patch.object(check_qa, 'ROOT', root), \
+                     patch.object(check_qa, 'time', clock), \
+                     patch.object(check_qa, 'provenance', return_value={'revision': 'fixture'}), \
+                     patch('sys.argv', ['check_qa.py', '--scope', 'ui']), \
+                     patch.object(check_qa.subprocess, 'check_output', return_value=b''), \
+                     redirect_stdout(io.StringIO()):
+                    self.assertEqual(1, check_qa.run())
+                result = json.loads(next((root / '.local/qa').glob('*/result.json')).read_text())
+                self.assertEqual('Failed', result['result'])
+                check = result['checks'][0]
+                self.assertEqual(exit_code, check['exit_code'])
+                self.assertNotIn('passed', check)
+                self.assertAlmostEqual(check['wall_seconds'] - check['host_admission_seconds'],
+                                       check['editor_wall_seconds'])
+                self.assertEqual(duration, check['test_duration_seconds'])
+                if duration is None:
+                    self.assertIsNone(check['non_test_wall_seconds'])
+                else:
+                    self.assertAlmostEqual(check['editor_wall_seconds'] - duration, check['non_test_wall_seconds'])
+                if exit_code:
+                    self.assertIn('launcher exit 2', result['error'])
+
 
 
 if __name__ == '__main__': unittest.main()

@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Spacewars.Simulation;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace Spacewars.Presentation
@@ -10,6 +11,11 @@ namespace Spacewars.Presentation
         private static string BuildingName(PlayableBuildingKind kind)
         {
             switch(kind){case PlayableBuildingKind.GaussTower:return "ГАУСС-БАШНЯ";case PlayableBuildingKind.RepairTower:return "РЕМОНТНАЯ ВЫШКА";case PlayableBuildingKind.SentryTurret:return "ПУЛЕМЁТНАЯ ТУРЕЛЬ";case PlayableBuildingKind.Hangar:return "АНГАР";case PlayableBuildingKind.ScientificCenter:return "НАУЧНЫЙ ЦЕНТР";case PlayableBuildingKind.Headquarters:return "ШТАБ";case PlayableBuildingKind.Outpost:return "ФОРПОСТ";case PlayableBuildingKind.RelayTower:return "ВЫШКА СВЯЗИ";case PlayableBuildingKind.Mine:return "ШАХТА";case PlayableBuildingKind.Factory:return "ФАБРИКА";default:return "ПЕРЕРАБОТКА";}
+        }
+        private TerritorySite PickVisibleRelay(Ray ray,double surfaceDistance)
+        {
+            var relay=world.PickRelay(view,ray,surfaceDistance);
+            return relay!=null&&view.Sites.Any(s=>s.Site.Id==relay.Id)?relay:null;
         }
         private bool PickPad(NavPoint point)
         {
@@ -44,13 +50,14 @@ namespace Spacewars.Presentation
             if(runtime==null||paused||restarting||quitting||matchSetup?.Spectator==true)return;
             var site=view.Sites.FirstOrDefault(s=>s.Site.Id==selectedSite);if(site==null)return;
             int parent=selectedSlot==0?0:site.CenterId;
-            var intent=new PlayableCommand(generation,++sequence,LocalOwnerId,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:selectedSite,slotId:selectedSlot,buildingKind:kind,parentId:parent);
-            var result=runtime.TrySubmit(intent);AudioCommand(intent,result.Accepted);
+            var intent=new PlayableCommand(generation,0,LocalOwnerId,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:selectedSite,slotId:selectedSlot,buildingKind:kind,parentId:parent);
+            QueueHumanIntent(intent,(sent,result)=>{
             notice=result.Accepted?"":Friendly(result.Status);
-            Record("build site="+selectedSite+" slot="+selectedSlot+" kind="+kind+" admission="+result.Status);
+            Record("build site="+sent.SiteId+" slot="+sent.SlotId+" kind="+kind+" admission="+result.Status);});
         }
         private void UpdateSiteHud()
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.HudConstruction);
             var state=view.Sites.FirstOrDefault(s=>s.Site.Id==selectedSite);
             var request=view.Buildings.FirstOrDefault(b=>b.SiteId==selectedSite&&b.SlotId==selectedSlot);
             if(request!=null&&request.Owner==LocalOwner&&selectedSite!=0){selection.Clear();selection.Add(request.Id);}
@@ -62,10 +69,13 @@ namespace Spacewars.Presentation
             bool owned=!collapsing&&!sellingCenter&&state!=null&&(ordinary?state.Ready&&state.Owner==LocalOwner:state.Progress>=1&&state.Claimant==LocalOwner&&(!state.Owner.HasValue||state.Owner==LocalOwner));
             var discovered=view.DiscoveredSites.FirstOrDefault(s=>s.Id==selectedSite);
             siteLabel.text=state==null?(discovered==null?"Выберите площадку для стройки":BuildingName(discovered.Kind)+" · Разведана, вне обзора"):ordinary?(defense?"ОБОРОНИТЕЛЬНАЯ ПЛОЩАДКА · "+(selectedSlot-TerritoryRules.DefenseSlotOffset):"ПЛОЩАДКА · "+selectedSlot):BuildingName(state.Site.Kind)+" · "+(state.Contested?"СПОРНАЯ":state.Claimant.HasValue?(state.Claimant==view.Owner?"Ваша · ":IsOpponent(state.Claimant.Value)?"Вражеская · ":"Союзная · ")+(int)(state.Progress*100)+"%":"Нейтральная");
+            if(state?.Site.Kind==PlayableBuildingKind.RelayTower&&state.Owner==view.Owner&&
+                view.RelayTransferRecipients!=0&&(state.Contested||state.Progress<1))
+                siteLabel.text+=" · Передача недоступна";
             if(collapsing)siteLabel.text+=" · РАЗРУШАЕТСЯ";
             bool scienceReady=view.Buildings.Any(b=>b.Owner==LocalOwner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true);
             ConfigureBuild(buildGauss,PlayableBuildingKind.GaussTower,ordinary&&defense,active&&owned&&request==null&&scienceReady);
-            if(!scienceReady)buildGauss.tooltip+=" · Нужен научный центр";
+            if(!scienceReady&&(ordinary&&defense||refreshHiddenHud))buildGauss.tooltip+=" · Нужен научный центр";
             ConfigureBuild(buildRepairTower,PlayableBuildingKind.RepairTower,ordinary&&defense,active&&owned&&request==null);
             ConfigureBuild(buildTurret,PlayableBuildingKind.SentryTurret,ordinary&&defense,active&&owned&&request==null);
             ConfigureBuild(buildHangar,PlayableBuildingKind.Hangar,ordinary&&!defense,active&&owned&&request==null);
@@ -80,10 +90,18 @@ namespace Spacewars.Presentation
         }
         private void ConfigureBuild(Button button,PlayableBuildingKind kind,bool show,bool valid)
         {
-            int cost=TerritoryRules.Cost(profile,kind);double seconds=provingGround!=null?profile.ProvingGroundActionSeconds:TerritoryRules.Duration(profile,kind);
+            button.style.display=show?DisplayStyle.Flex:DisplayStyle.None;
+            if(!show&&!valid&&!refreshHiddenHud)
+            {
+                button.SetEnabled(false);
+                return;
+            }
+            int cost=TerritoryRules.Cost(profile,kind);
+            button.SetEnabled(valid&&(provingGround!=null||view.Credits>=cost));
+            if(!show&&!refreshHiddenHud)return;
+            double seconds=provingGround!=null?profile.ProvingGroundActionSeconds:TerritoryRules.Duration(profile,kind);
             button.text="⬡ "+BuildingName(kind)+(provingGround!=null?" · бесплатно":" · "+cost);
             button.tooltip=(provingGround!=null?BuildingName(kind)+" · бесплатно · "+seconds+" с":PlayableMenuDescriptions.Building(profile,kind,maxHealth:TerritoryRules.Health(profile,kind)*(view.OwnerResearch.Any(o=>o.Kind==PlayableResearchKind.ReinforcedConcrete&&o.Complete)?1+profile.ReinforcedConcreteBonusPercent/100:1)))+(provingGround==null&&view.Credits<cost?" · Недостаточно кредитов":!valid?" · Нужна свободная собственная площадка":"");
-            button.style.display=show?DisplayStyle.Flex:DisplayStyle.None;button.SetEnabled(valid&&(provingGround!=null||view.Credits>=cost));
         }
     }
 }

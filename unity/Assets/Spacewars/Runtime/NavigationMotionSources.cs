@@ -119,7 +119,7 @@ namespace Spacewars.Runtime
         private MotionSourcePin AcceptMotionSource(MotionPublication publication)
         {
             if(motionPhase!=1||!ReferenceEquals(preparingMotion,publication)||publication.SelectedSource!=null||AwaitingMotionSources)throw new InvalidOperationException("Native source acceptance is outside current preparation.");
-            if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,0,out var scope))throw new InvalidOperationException("Native source retention refused.");
+            if(!TryOpenMotionScope(0,out var scope))throw new InvalidOperationException("Native source retention refused.");
             NavigationMotionSource input=null;NavigationMotionRecord record=null;NavigationMotionSources next=null,old=null;MotionSourcePin pin=null;
             using(scope){try{var r=scope.OwnedReservation();long op=checked(MotionOperationWatermark+1);input=NavigationMotionSource.Create(Generation,op,publication.IncludesResults,publication.Transcript,r);record=NavigationMotionRecord.Create(input,null,r);next=NavigationMotionSources.Change(motionSources,Generation,op,0,record,r);pin=MotionSourcePin.Create(this,record,r);scope.Attach(next);
                 scope.Commit(next,_=>{using(EnterTransport()){old=motionSources;next.Retain();motionSources=next;}});publication.SelectSource(pin);return pin;

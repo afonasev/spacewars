@@ -18,15 +18,23 @@ namespace Spacewars.Presentation
         public Bounds ReferenceBounds=>referenceBounds;
         public void Configure(Renderer[] sources,Mesh[] near,Mesh[] far,Bounds bounds)
         {if(sources.Length!=near.Length||near.Length!=far.Length)throw new ArgumentException("Tank detail representation");renderers=sources;full=near;distant=far;referenceBounds=bounds;SetDistant(false);}
-        public void Select(Camera camera)
+        public void Select(Camera camera) => Select(new ActorCameraProjection(camera));
+
+        internal void Select(in ActorCameraProjection view)
         {
-            if(!camera){SetDistant(false);return;}
-            art??=TankMechanismProfile.Load();
-            var scale=transform.lossyScale;
-            float size=Mathf.Max(referenceBounds.size.x*Mathf.Abs(scale.x),referenceBounds.size.y*Mathf.Abs(scale.y),referenceBounds.size.z*Mathf.Abs(scale.z));
-            float depth=Vector3.Dot(transform.TransformPoint(referenceBounds.center)-camera.transform.position,camera.transform.forward);
-            float height=camera.orthographic?2*camera.orthographicSize:2*depth*Mathf.Tan(camera.fieldOfView*Mathf.Deg2Rad*.5f);
-            SelectScreenRatio(depth>camera.nearClipPlane&&height>0?size/height:float.PositiveInfinity,art);
+            if (!view.Camera)
+            {
+                SetDistant(false);
+                return;
+            }
+            art ??= TankMechanismProfile.Load();
+            var model = transform;
+            var scale = model.lossyScale;
+            var boundsSize = referenceBounds.size;
+            float size = Mathf.Max(boundsSize.x * Mathf.Abs(scale.x), boundsSize.y * Mathf.Abs(scale.y), boundsSize.z * Mathf.Abs(scale.z));
+            float depth = view.Depth(model.TransformPoint(referenceBounds.center));
+            float height = view.Height(depth);
+            SelectScreenRatio(depth > view.NearClip && height > 0 ? size / height : float.PositiveInfinity, art);
         }
         public void SelectScreenRatio(float ratio,TankMechanismProfile profile)
         {

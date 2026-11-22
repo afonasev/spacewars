@@ -56,6 +56,44 @@ namespace Spacewars.Tests.EditMode
                 d.Step(1d/30);cold.Step(1d/30);CollectionAssert.AreEqual(d.CaptureWorldBytes(7,"local-wreck-contract"),cold.CaptureWorldBytes(7,"local-wreck-contract"));
             }finally{kernel.Clear();d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();cold?.Navigation.ReleaseCommittedHostRoot();cold?.DestroyOwnedNavigation();Assert.Zero(d.Navigation.PhysicalHostBudget.PhysicalBytes);}
         }
+        [Test] public void CarryHistoryAllowsMixedAdditionsButRejectsStaticRemovalReplacementAndWrongRevision()
+        {
+            var originalBox=new NavObstacle(-8,-8,-6,-6);var foundation=new NavObstacle(6,6,8,8);
+            var oldWreck=new NavObstacle(new NavPoint(0,0),1);var newWreck=new NavObstacle(new NavPoint(2,2),1);
+            var original=new NavGeometry(16,new[]{originalBox,oldWreck},1);
+            Assert.True(InstalledGeometryCertificateV2.CarryHistoryDelta(original,new NavGeometry(16,new[]{originalBox,foundation,newWreck},3)));
+            Assert.False(InstalledGeometryCertificateV2.CarryHistoryDelta(original,new NavGeometry(16,new[]{foundation,newWreck},3)));
+            Assert.False(InstalledGeometryCertificateV2.CarryHistoryDelta(original,new NavGeometry(16,new[]{new NavObstacle(-9,-8,-6,-6),foundation,newWreck},3)));
+            Assert.False(InstalledGeometryCertificateV2.CarryHistoryDelta(original,new NavGeometry(16,new[]{originalBox,foundation,newWreck},1)));
+            Assert.False(InstalledGeometryCertificateV2.CarryHistoryDelta(original,new NavGeometry(20,new[]{originalBox,foundation,newWreck},3)));
+        }
+        [TestCase(false)][TestCase(true)] public void RemoteFoundationAndWreckKeepInstalledRouteAcrossBothChanges(bool wreckFirst)
+        {
+            var p=PlayableProfile.Default;var d=new PlayableDomain(p,81,false);var kernel=new CertifiedRouteKernel();PlayableDomain cold=null;
+            object Call(string name,params object[] args)=>typeof(PlayableDomain).GetMethod(name,F).Invoke(d,args);
+            try{
+                int dead=(int)Call("SpawnUnit",default(NavPoint),PlayableOwner.Player,PlayableEntityKind.Tank);
+                int mover=(int)Call("SpawnUnit",new NavPoint(-18,-14),PlayableOwner.Player,PlayableEntityKind.Tank);
+                Assert.AreEqual(PlayableCommandStatus.Applied,d.Apply(new PlayableCommand(81,1,"player-1",PlayableCommandKind.Move,new[]{mover},new NavPoint(-8,-14)),out _));
+                for(int i=0;i<20000&&d.Navigation.PendingCount>0;i++){kernel.Pump(new PlayableRouteBinding(d.Geometry,p,d.Navigation.Admission,d.Navigation.RoutePort),4);d.Navigation.ApplyResults();}
+                Assert.Zero(d.Navigation.PendingCount);for(int i=0;i<15;i++)d.Step(1d/30);
+                d.Navigation.Crowd.TryGet(mover,out var actor);Assert.True(actor.Moving);var route=actor.Route;int index=actor.routeIndex;long request=actor.InstalledRequest;var position=actor.Position;
+                void Foundation(){Call("AddCredits",PlayableOwner.Enemy,10000d);Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",2,1,PlayableBuildingKind.Refinery,2,PlayableOwner.Enemy,null));Call("AdvanceFoundations");}
+                if(wreckFirst)Call("Damage",dead,int.MaxValue);else Foundation();
+                Assert.True(actor.Moving,"First unrelated geometry change retains route.");
+                if(wreckFirst)Foundation();else Call("Damage",dead,int.MaxValue);
+                Assert.True(actor.Moving,"Second unrelated geometry change must compose with the previous carried route proof.");Assert.AreEqual(index,actor.routeIndex);Assert.AreEqual(request,actor.InstalledRequest);Assert.AreSame(route,actor.Route);Assert.AreEqual(position,actor.Position);
+                Assert.NotNull(d.Navigation.InstalledExecutionFor(mover));
+                var proof=((NavigationInstalledExecutionOwner)actor.StorageOwner.InstalledExecution).Certificate;
+                var blocking=wreckFirst?new NavObstacle(position.X-.1,position.Z-.1,position.X+.1,position.Z+.1):new NavObstacle(position,1);
+                var blocked=new NavGeometry(d.Geometry.HalfExtent,d.Geometry.Obstacles.Concat(new[]{blocking}).ToArray(),d.Geometry.Revision+1);
+                Assert.False(wreckFirst?InstalledGeometryCertificateV2.Safe(proof.Group,proof.Before,blocked,proof.Members):InstalledGeometryCertificateV2.SafeWreck(proof.Group,proof.Before,blocked,proof.Members),"Mixed history must still reject an added obstacle intersecting the route.");
+                kernel.Clear();var bytes=d.CaptureWorldBytes(7,"local-wreck-contract");cold=PlayableDomain.RestoreWorldBytes(bytes,p,7,"local-wreck-contract");
+                CollectionAssert.AreEqual(bytes,cold.CaptureWorldBytes(7,"local-wreck-contract"));
+                d.Step(1d/30);cold.Step(1d/30);CollectionAssert.AreEqual(d.CaptureWorldBytes(7,"local-wreck-contract"),cold.CaptureWorldBytes(7,"local-wreck-contract"));
+                Assert.AreNotEqual(position,actor.Position,"Existing motion resumes without a route-worker repump.");
+            }finally{kernel.Clear();d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();cold?.Navigation.ReleaseCommittedHostRoot();cold?.DestroyOwnedNavigation();Assert.Zero(d.Navigation.PhysicalHostBudget.PhysicalBytes);}
+        }
         [Test] public void TypedWreckBlocksItsOwnLayerWhileUpperUnitContinuesThroughSameProjection()
         {
             var map=new StackedRampQualificationMap();var p=NavigationProfile.Default.ForUnit(.42,4,3);

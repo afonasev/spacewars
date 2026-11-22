@@ -18,6 +18,23 @@ namespace Spacewars.Runtime
     }
     public sealed partial class NavigationSession
     {
+        private void PrepareRestoredExecutionAnswers(INavStorageReservation reservation)
+        {
+            if (committedHostRoot is NavigationHostRoot host)
+            {
+                foreach (var entry in host.Rows)
+                    ((NavigationHostRow)entry.Value).AnswerOwner?.RequalifyRestoredExecution(reservation, terrain);
+                foreach (var entry in host.Delivered)
+                    ((NavigationHostRow)entry.Value).AnswerOwner?.RequalifyRestoredExecution(reservation, terrain);
+            }
+
+            Answers.ObserveState(out var revision, out var count);
+            for (int i = 0; i < count; i++)
+                Answers.ReadPreparedAt(revision, i).StorageOwner?.RequalifyRestoredExecution(reservation, terrain);
+            foreach (var answer in barrierAnswers)
+                answer.StorageOwner?.RequalifyRestoredExecution(reservation, terrain);
+        }
+
         internal NavigationRequest[] RestoreWorldState(NavigationSessionState state)
         {
             if(state==null||state.Generation!=Generation)throw new ArgumentException("Navigation restore generation mismatch.");
@@ -42,6 +59,7 @@ namespace Spacewars.Runtime
                         candidate.Session.UsesRecastGroundRoutes=UsesRecastGroundRoutes;
                         candidate.Session.marchConfigured=marchConfigured;candidate.Session.marchStretch=marchStretch;candidate.Session.marchProfileRevision=marchProfileRevision;
                         candidate.Requests=candidate.Session.RestoreWorldStateCore(state);
+                        candidate.Session.PrepareRestoredExecutionAnswers(scope.OwnedReservation());
                         int at=0;if(candidate.Session.groups is NavigationCommandSlots<long,GroupOrderState> slots)for(int i=0;i<slots.Capacity;i++)if(slots.TryReadSlot(i,out long key,out _)){
                             var group=slots.OwnerFor(key) as NavigationLiveGroup;if(group==null||!group.BelongsToSession(candidate.Session)||at==candidate.Groups.Length)throw new ArgumentException("Cold live-group installation owner mismatch.");candidate.Groups[at++]=group;
                         }
@@ -71,6 +89,9 @@ namespace Spacewars.Runtime
             geometry=candidate.geometry;
             navigationGeometry=candidate.navigationGeometry;
             profile=candidate.profile;
+            candidate.Crowd.AllowsMovingTurn=Crowd.AllowsMovingTurn;
+            candidate.Crowd.AllowsExplorerYield=Crowd.AllowsExplorerYield;
+            candidate.Crowd.LeadsFormation=Crowd.LeadsFormation;
             Crowd=candidate.Crowd;Crowd.StorageSource=this;
             committedHostRoot=candidate.committedHostRoot;creditBank=candidate.creditBank;candidate.creditBank=null;accruedCreditsEnabled=candidate.accruedCreditsEnabled;accruedCreditCap=candidate.accruedCreditCap;
             groupCommandBacking=candidate.groupCommandBacking;

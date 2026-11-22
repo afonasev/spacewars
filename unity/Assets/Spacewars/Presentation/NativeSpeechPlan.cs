@@ -7,9 +7,9 @@ namespace Spacewars.Presentation
     public sealed class SpokenSignalCue
     {
         public string Key{get;} public string Identity{get;} public string MineCause{get;}
-        public double Created{get;} public int Priority{get;}
-        public SpokenSignalCue(string key,string identity,double created,int priority,string mineCause=null)
-        {Key=key;Identity=identity;Created=created;Priority=priority;MineCause=mineCause;}
+        public double Created{get;} public int Priority{get;} internal long Sequence{get;}
+        public SpokenSignalCue(string key,string identity,double created,int priority,string mineCause=null,long sequence=0)
+        {Key=key;Identity=identity;Created=created;Priority=priority;MineCause=mineCause;Sequence=sequence;}
     }
     // One detached planner for the device. Reads permitted screen records only, never world authority.
     public sealed class NativeSpeechPlan
@@ -28,7 +28,7 @@ namespace Spacewars.Presentation
         public void Observe(IReadOnlyList<GameplayAudioScreen> screens,double now,bool active,bool enabled=true)
         {
             if(!active||screens.Count==0){Reset();return;}
-            var valid=screens.Where(s=>s.View!=null&&!s.Overview).GroupBy(s=>s.View.OwnerId+":"+s.Overview).Select(g=>g.First()).ToArray();
+            var valid=screens.Where(s=>s.View!=null&&(!s.Overview||s.View.Domination.HasValue)).GroupBy(s=>s.View.OwnerId+":"+s.Overview).Select(g=>g.First()).ToArray();
             if(valid.Length==0){Reset();return;}
             string next=string.Join("|",valid.Select(s=>s.View.Generation+":"+s.View.OwnerId+":"+s.Overview).OrderBy(s=>s));
             long current=valid.Max(s=>s.View.Tick);bool baseline=context!=next||current<tick;
@@ -43,7 +43,8 @@ namespace Spacewars.Presentation
                 {
                     if(entry.VoiceKey==null||view.Tick-entry.Tick>profile.speechMaxAgeSeconds*30)continue;
                     string cause=entry.CauseId>0?view.Generation+":"+entry.Tick+":"+entry.CauseId:null;
-                    fresh.Add(new SpokenSignalCue(entry.VoiceKey,entry.Identity,now,entry.Priority,cause));
+                    long sequence=entry.Identity.StartsWith("fact:",StringComparison.Ordinal)&&long.TryParse(entry.Identity.Substring(5),out var id)?id:0;
+                    fresh.Add(new SpokenSignalCue(entry.VoiceKey,entry.Identity,now,entry.Priority,cause,sequence));
                 }
                 aiIds.TryGetValue(owner,out long last);
                 foreach(var message in screen.Communications.OrderBy(e=>e.Id))
@@ -58,12 +59,12 @@ namespace Spacewars.Presentation
             foreach(var cue in fresh.GroupBy(c=>c.Identity).Select(g=>g.OrderByDescending(c=>c.Priority).First()))
             {
                 if(!SpokenSignalCatalog.Phrases.ContainsKey(cue.Key)||cue.Key=="system-mine-triggered"&&cue.MineCause!=null&&victimCauses.ContainsKey(cue.MineCause))continue;
-                if(queue.Any(c=>c.Identity==cue.Identity||c.Key==cue.Key))continue;
-                if(repeats.TryGetValue(cue.Key,out double at)&&now-at<profile.speechRepeatSeconds)continue;
+                if(queue.Any(c=>c.Identity==cue.Identity||c.Key==cue.Key&&cue.Key!=SpokenSignalCatalog.NuclearLaunchKey))continue;
+                if(!SpokenSignalCatalog.IsUrgent(cue.Key)&&!SpokenSignalCatalog.IsDomination(cue.Key)&&repeats.TryGetValue(cue.Key,out double at)&&now-at<profile.speechRepeatSeconds)continue;
                 queue.Add(cue);
             }
             queue.RemoveAll(c=>now-c.Created>=profile.speechMaxAgeSeconds||c.Key=="system-mine-triggered"&&c.MineCause!=null&&victimCauses.ContainsKey(c.MineCause));
-            var ordered=queue.OrderByDescending(c=>c.Priority).ThenBy(c=>c.Created).Take(profile.speechQueueLimit).ToArray();queue.Clear();queue.AddRange(ordered);
+            var ordered=queue.OrderByDescending(c=>c.Priority).ThenBy(c=>c.Created).ThenBy(c=>c.Sequence).Take(profile.speechQueueLimit).ToArray();queue.Clear();queue.AddRange(ordered);
             foreach(var key in repeats.Where(p=>now-p.Value>profile.speechRepeatSeconds+profile.speechMaxAgeSeconds).Select(p=>p.Key).ToArray())repeats.Remove(key);
             foreach(var key in victimCauses.Where(p=>now-p.Value>profile.speechMaxAgeSeconds).Select(p=>p.Key).ToArray())victimCauses.Remove(key);
             // Consume disabled/silent events; enabling voice later cannot replay them.
@@ -74,7 +75,11 @@ namespace Spacewars.Presentation
             queue.RemoveAll(c=>now-c.Created>=profile.speechMaxAgeSeconds);
             // Allied action speech is immediate or discarded; it must not describe a
             // cancelled operation after waiting behind another spoken line. Text remains.
-            if(busy){queue.RemoveAll(c=>c.Identity.StartsWith("ai:",StringComparison.Ordinal));return null;}
+            if(busy)
+            {
+                queue.RemoveAll(c=>c.Identity.StartsWith("ai:",StringComparison.Ordinal));
+                if(queue.Count==0||!SpokenSignalCatalog.IsUrgent(queue[0].Key))return null;
+            }
             if(queue.Count==0)return null;
             var cue=queue[0];queue.RemoveAt(0);repeats[cue.Key]=now;return cue;
         }

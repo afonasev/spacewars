@@ -67,7 +67,7 @@ namespace Spacewars.Presentation
             VisualElement text=cell;
             if(featured){cell.Add(Icon(index==0?"health":"build",OrbitalTheme.Muted));text=Box();text.style.flexGrow=1;text.style.flexShrink=1;text.style.minWidth=0;cell.Add(text);}
             var key=Text("radial-stat-label",profile.textSize);key.text=label;key.style.flexGrow=1;key.style.flexShrink=1;key.style.minWidth=0;key.style.marginRight=6;text.Add(key);
-            var number=Text("radial-stat-value",profile.valueSize);number.text=value;number.style.color=value.Contains("→")?OrbitalTheme.Cyan:OrbitalTheme.Ink;number.style.unityFontStyleAndWeight=FontStyle.Bold;number.style.unityTextAlign=featured?TextAnchor.MiddleLeft:TextAnchor.MiddleRight;text.Add(number);stats.Add(cell);
+            var number=Text("radial-stat-value",profile.valueSize);number.text=value;number.style.color=value.Contains("→")||(value.StartsWith("+")&&value.EndsWith("%"))?OrbitalTheme.Cyan:OrbitalTheme.Ink;number.style.unityFontStyleAndWeight=FontStyle.Bold;number.style.unityTextAlign=featured?TextAnchor.MiddleLeft:TextAnchor.MiddleRight;text.Add(number);stats.Add(cell);
         }
         public void Set(OfflinePadAction action,bool gamepad,Gamepad device,string mode="buildingWheel",bool compact=false)
         {
@@ -88,7 +88,9 @@ namespace Spacewars.Presentation
                 var label=Text("radial-composition-count",profile.textSize);label.text=item.Title+" ×"+item.Count;label.style.flexShrink=1;cell.Add(label);composition.Add(cell);
             }
             composition.style.display=c.Composition.Length>0?DisplayStyle.Flex:DisplayStyle.None;
-            description.text=c.Description;description.style.display=compact||string.IsNullOrEmpty(c.Description)?DisplayStyle.None:DisplayStyle.Flex;
+            description.text=c.Description;
+            bool showDescription=(!compact||c.ShowDescriptionInCompact)&&!string.IsNullOrEmpty(c.Description);
+            description.style.display=showDescription?DisplayStyle.Flex:DisplayStyle.None;
             bool featured=c.Stats.Length==2&&c.Stats[0].StartsWith("Здоровье:")&&c.Stats[1].StartsWith("Постройка:");
             for(int i=0;i<c.Stats.Length;i++)Stat(c.Stats[i],i,!featured&&c.Stats.Length<=3,featured||i>=(c.Stats.Length<=3?c.Stats.Length-1:(c.Stats.Length-1)/2*2),featured);
             stats.style.display=c.Stats.Length>0?DisplayStyle.Flex:DisplayStyle.None;
@@ -106,20 +108,22 @@ namespace Spacewars.Presentation
                 if(c.AssignmentComplete)Hint(actions,"RB","Отпустить — закрыть");
                 else
                 {
-                    if(action.Sector.RecallEnabled)Hint(actions,"RB","Отпустить — выбрать");
-                    if(action.Sector.CanAssign)Hint(actions,"RB","Удержать и отпустить — назначить: "+c.ReplaceCount,true);
+                    if(action.Sector.RecallEnabled)Hint(actions,"A","Выбрать");
+                    if(action.Sector.CanAssign)Hint(actions,"A","Удержать и отпустить — назначить: "+c.ReplaceCount,true);
                     if(action.Sector.CanAdd)Hint(actions,"X","Добавить +"+c.AddCount+" → "+c.ResultCount);
                 }
             }
-            else if(mode=="baseWheel"){if(action.Sector.Enabled)Hint(actions,"LB","Отпустить — перейти");}
+            else if(mode=="baseWheel"){if(action.Sector.Enabled)Hint(actions,"A","Перейти");}
             else
             {
                 if(action.Sector.Hold=="sell")Hint(actions,gamepad?"A":"ЛКМ",action.Sector.Id.EndsWith(":remove")?(gamepad?"Удерживать — убрать":"Дважды — подтвердить удаление"):(gamepad?"Удерживать — продать":"Дважды — подтвердить продажу"),gamepad);
+                else if(action.Command?.Kind==Spacewars.Simulation.PlayableCommandKind.TransferRelay)
+                    Hint(actions,gamepad?"A":"ЛКМ","Передать контроль и доход");
                 else if(action.Command!=null||action.Sector.Id=="rally")Hint(actions,gamepad?"A":"ЛКМ",action.Sector.Id=="rally"?"Указать точку":action.Sector.Hold=="repeat"?"Заказать":action.Sector.Id.EndsWith(":repair")?action.Label:"Подтвердить");
                 if(action.HoldCommand!=null&&action.Sector.Hold=="repeat")Hint(actions,gamepad?"A":"ПКМ",(gamepad?"Удерживать · ":"")+(action.Repeat?"выключить повтор":"автоповтор"),gamepad);
             }
             actions.style.display=actions.childCount>0?DisplayStyle.Flex:DisplayStyle.None;
-            PreferredHeight=Mathf.Ceil(c.Composition.Length/2f)*profile.compositionSize+profile.padding*2+profile.titleSize+10+(compact?0:50)+(featured?profile.featuredStatHeight:(c.Stats.Length<=3?c.Stats.Length:Mathf.Ceil(c.Stats.Length/2f))*profile.statHeight)+(string.IsNullOrEmpty(c.Note)?0:50+profile.notePadding*2)+actions.childCount*profile.actionHeight+profile.actionHeight+35;
+            PreferredHeight=Mathf.Ceil(c.Composition.Length/2f)*profile.compositionSize+profile.padding*2+profile.titleSize+10+(showDescription?50:0)+(featured?profile.featuredStatHeight:(c.Stats.Length<=3?c.Stats.Length:Mathf.Ceil(c.Stats.Length/2f))*profile.statHeight)+(string.IsNullOrEmpty(c.Note)?0:50+profile.notePadding*2)+actions.childCount*profile.actionHeight+profile.actionHeight+35;
         }
         VisualElement Icon(string kind,Color color)
         {

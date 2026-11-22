@@ -10,9 +10,9 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class CrowdParallelSelectControlTests
     {
-        [Test] public void FrozenOwnedCrowdRowsKeepExactProposalsAndSessionAcrossParallelEvaluation()
+        [TestCase(false),TestCase(true)] public void FrozenOwnedCrowdRowsKeepExactProposalsAndSessionAcrossParallelEvaluation(bool crimson)
         {
-            var map=ThreeCrossingsMap.Default;var profile=PlayableProfile.Default.Navigation;
+            IPlayableTerrain map=crimson?(IPlayableTerrain)new CrimsonGroveMap():ThreeCrossingsMap.Default;var profile=PlayableProfile.Default.Navigation;
             var session=new NavigationSession(71,new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision),profile,terrain:map);
             byte[] State(){using(var state=session.CaptureOwnedState())return WorldWire.Pack(w=>WorldWire.Write(w,state));}
             try{

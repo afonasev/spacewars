@@ -15,7 +15,7 @@ namespace Spacewars.Tests.PlayMode
 {
     public sealed class RelayTowerUiTests
     {
-        [UnityTest] public IEnumerator ResourceGraphContainsCapturedRelayAndLossWithAntennaGlyph()
+        [UnityTest] public IEnumerator ResourceGraphShowsRelayLossOnlyForItsFormerOwnerInSoloView()
         {
             const BindingFlags f=BindingFlags.Instance|BindingFlags.NonPublic;
             var profile=PlayableProfile.ThreeCrossingsDefault;var domain=new PlayableDomain(profile,915,false);
@@ -37,14 +37,66 @@ namespace Spacewars.Tests.PlayMode
                 var ui=new PostMatchResultsView(result,()=>{},()=>{},()=>{});host.Add(ui.Root);ui.ShowTab(1);
                 for(int i=0;i<8;i++)yield return null;
                 var graph=ui.Root.Q<VisualElement>("result-graph-0");Assert.NotNull(graph);
-                var relayIcons=ui.Root.Query<OrbitalGlyph>().ToList().Where(g=>g.Kind=="relay-tower").ToArray();Assert.IsNotEmpty(relayIcons);
-                foreach(var icon in relayIcons){Assert.NotNull(icon.Q<ModelPortrait>("glyph-model").Texture,"same model portrait pipeline as other buildings");Assert.NotNull(DockArtwork.TextureFor("relay-tower-outline"));}
-                var graphEvent=typeof(PostMatchResultsView).GetMethod("GraphEvent",f);
-                foreach(var fact in result.Facts.Where(v=>v.Kind==MatchFactKind.RelayCaptured||v.Kind==MatchFactKind.RelayNeutralized))Assert.True((bool)graphEvent.Invoke(ui,new object[]{0,fact}));
-                string output=Environment.GetEnvironmentVariable("RELAY_UI_EVIDENCE")??Path.GetFullPath("../.local/relay-integration/ui");Directory.CreateDirectory(output);
-                var old=RenderTexture.active;RenderTexture.active=target;var image=new Texture2D(target.width,target.height,TextureFormat.RGB24,false);
-                try{image.ReadPixels(new Rect(0,0,target.width,target.height),0,0);image.Apply();Assert.Greater(image.GetPixels32().Where((_,i)=>i%173==0).Select(c=>(int)c.r<<16|(int)c.g<<8|c.b).Distinct().Count(),8);File.WriteAllBytes(Path.Combine(output,"relay-resource-graph.png"),image.EncodeToPNG());}
-                finally{RenderTexture.active=old;UnityEngine.Object.DestroyImmediate(image);}
+                var relayIcons=ui.Root.Query<OrbitalGlyph>().ToList().Where(g=>g.Kind=="relay-tower").ToArray();
+                Assert.AreEqual(2,relayIcons.Length,"Each completed capture has one marker across all graphs.");
+                foreach(var capture in result.Facts.Where(v=>v.Kind==MatchFactKind.RelayCaptured))
+                {
+                    var marker=graph.Q("result-event-stack-"+capture.Sequence);
+                    Assert.NotNull(marker);
+                    var icon=marker.Q<OrbitalGlyph>();
+                    Assert.AreEqual("relay-tower",icon.Kind);
+                    Assert.NotNull(icon.Q<ModelPortrait>("glyph-model").Texture,"same model portrait pipeline as other buildings");
+                    Assert.NotNull(DockArtwork.TextureFor("relay-tower-outline"));
+                }
+                var loss=result.Facts.Single(v=>v.Kind==MatchFactKind.RelayNeutralized);
+                Assert.IsNull(graph.Q("result-event-stack-"+loss.Sequence));
+                string output=Environment.GetEnvironmentVariable("RELAY_UI_EVIDENCE")??Path.GetFullPath("../.local/relay-integration/ui");
+                Directory.CreateDirectory(output);
+                void Capture(string filename)
+                {
+                    var previous=RenderTexture.active;
+                    RenderTexture.active=target;
+                    var image=new Texture2D(target.width,target.height,TextureFormat.RGB24,false);
+                    try
+                    {
+                        image.ReadPixels(new Rect(0,0,target.width,target.height),0,0);
+                        image.Apply();
+                        Assert.Greater(image.GetPixels32().Where((_,i)=>i%173==0).Select(c=>(int)c.r<<16|(int)c.g<<8|c.b).Distinct().Count(),8);
+                        File.WriteAllBytes(Path.Combine(output,filename),image.EncodeToPNG());
+                    }
+                    finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(image);}
+                }
+                Capture("relay-resource-graph.png");
+
+                var formerOwner=result.Players.Single(p=>p.Owner==loss.Owner);
+                var otherPlayer=result.Players.Single(p=>p.Owner!=loss.Owner);
+                var formerFilter=ui.Root.Q<Toggle>("result-filter-"+formerOwner.Slot);
+                var otherFilter=ui.Root.Q<Toggle>("result-filter-"+otherPlayer.Slot);
+                var formerCapture=result.Facts.Single(v=>v.Kind==MatchFactKind.RelayCaptured&&v.Owner==formerOwner.Owner);
+                var otherCapture=result.Facts.Single(v=>v.Kind==MatchFactKind.RelayCaptured&&v.Owner==otherPlayer.Owner);
+                otherFilter.value=false;
+                var lostMarker=graph.Q("result-event-stack-"+loss.Sequence);
+                Assert.NotNull(lostMarker?.Q("result-removal-cross"));
+                Assert.IsNull(lostMarker.Q("result-event-slash"));
+                Assert.NotNull(graph.Q("result-event-stack-"+formerCapture.Sequence));
+                Assert.IsNull(graph.Q("result-event-stack-"+otherCapture.Sequence));
+                for(int i=0;i<3;i++)yield return null;
+                Capture("relay-resource-graph-single-player.png");
+
+                var hideEvents=ui.Root.Q<Toggle>("result-hide-events");
+                hideEvents.value=true;
+                Assert.IsNull(graph.Q("result-event-stack-"+loss.Sequence));
+                hideEvents.value=false;
+                Assert.NotNull(graph.Q("result-event-stack-"+loss.Sequence));
+                formerFilter.value=false;
+                Assert.IsNull(graph.Q("result-event-stack-"+loss.Sequence));
+                otherFilter.value=true;
+                Assert.IsNull(graph.Q("result-event-stack-"+loss.Sequence));
+                Assert.NotNull(graph.Q("result-event-stack-"+otherCapture.Sequence));
+                formerFilter.value=true;
+                Assert.IsNull(graph.Q("result-event-stack-"+loss.Sequence));
+                Assert.NotNull(graph.Q("result-event-stack-"+formerCapture.Sequence));
+
                 var prefab=Resources.Load<GameObject>("StyleA/relay-tower");var model=UnityEngine.Object.Instantiate(prefab);try
                 {var motion=model.GetComponent<RelayTowerPresentation>();motion.Sample(Color.cyan,2);float angle=motion.YawDegrees;motion.Sample(null,2);Assert.AreEqual(angle,motion.YawDegrees);motion.Sample(Color.cyan,3);Assert.Greater(motion.YawDegrees,angle);}
                 finally{UnityEngine.Object.DestroyImmediate(model);}

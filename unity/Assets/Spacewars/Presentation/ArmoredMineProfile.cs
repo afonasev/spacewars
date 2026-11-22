@@ -9,7 +9,8 @@ namespace Spacewars.Presentation
     public sealed class ArmoredMineProfile
     {
         public string id = "armored-mine-v1";
-        public int revision = 6;
+        public int revision = 7;
+        public float depletedGlowRatio=.4f;
         [SurfaceSetting("Mine", "Facing offset", "Visual yaw relative to world south; negative turns toward screen right at the default camera. Does not change territory or collision.", "deg", -180, 180, 1)] public float facingYawDegrees=-30;
         [SurfaceSetting("Mine", "Cycle duration", "Full weighted extraction stroke; independent of income.", "s", 3, 12, .1f)] public float cycleSeconds=5;
         [SurfaceSetting("Mine", "Rocker angle", "Angular excursion within authored mechanism clearance.", "deg", 2, 16, .5f)] public float rockerDegrees=16;
@@ -41,6 +42,7 @@ namespace Spacewars.Presentation
         }
         public void Validate()
         {
+            if (float.IsNaN(depletedGlowRatio)||depletedGlowRatio<0||depletedGlowRatio>1)throw new ArgumentException(nameof(depletedGlowRatio));
             if (id != "armored-mine-v1" || revision < 1) throw new ArgumentException("Invalid mine profile identity");
             foreach (var p in Parameters()) if (float.IsNaN(p.Read()) || float.IsInfinity(p.Read()) || p.Read() < p.Minimum || p.Read() > p.Maximum) throw new ArgumentException(p.Path);
         }

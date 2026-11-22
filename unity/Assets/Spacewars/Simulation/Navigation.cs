@@ -9,6 +9,9 @@ namespace Spacewars.Simulation
         public readonly double X;
         public readonly double Z;
         public NavPoint(double x, double z) { X = x; Z = z; }
+        // Match inherited ValueType's field equality without boxing direct
+        // operands. Boxed equality, hashing and wire/storage layout stay inherited.
+        public bool Equals(NavPoint other)=>X.Equals(other.X)&&Z.Equals(other.Z);
     }
 
     public struct NavObstacle
@@ -66,7 +69,7 @@ namespace Spacewars.Simulation
         internal sealed partial class OwnedBuffers : NavOwnedStorage
         {
             internal NavRetainedArray<NavObstacle> Obstacles;internal NavGeometry Facade;private bool released;
-            internal OwnedBuffers():base(192){}
+            internal OwnedBuffers(long bytes=192):base(bytes){}
             internal override void ReleaseOwner(){if(released)return;released=true;Release();}
             protected override void ReleaseEdges(){Facade=null;Obstacles?.ReleaseOwner();}
         }
@@ -98,21 +101,43 @@ namespace Spacewars.Simulation
             if(source==null||reservation==null)throw new ArgumentNullException();
             using(var scratch=NavStorageScratch.Reserve(reservation,2048L+128L*source.obstacles.Length))
             using(var allocation=new NavStorageAllocation(reservation.TryReserve)){
-                allocation.Reserve(192);var storage=allocation.Register(new OwnedBuffers());
+                long bytes=checked(192+source.MeasureOwnedSpatial());allocation.Reserve(bytes);var storage=allocation.Register(new OwnedBuffers(bytes));
                 storage.Obstacles=NavRetainedArray<NavObstacle>.Copy(new OwnedCopySource(source,reservation,canonicalPolygon),reservation.TryReserve);
-                storage.Facade=new NavGeometry(source,storage);storage.Retain();return storage.Facade;
+                storage.Facade=new NavGeometry(source,storage);storage.Facade.InitializeOwnedSpatial();storage.Retain();return storage.Facade;
             }
         }
         // Immutable broad phase. Exact footprint/sweep predicates still decide every hit.
         private const int SpatialWidth=16;
         private readonly int[][] spatial;
+        private NavQueryGrid ownedSpatial;
+#if UNITY_INCLUDE_TESTS
+        [ThreadStatic] internal static bool DisableOwnedSpatialForTests;
+#endif
+        private bool UseOwnedSpatial {
+            get {
+#if UNITY_INCLUDE_TESTS
+                if(DisableOwnedSpatialForTests)return false;
+#endif
+                return ownedSpatial!=null;
+            }
+        }
+        private NavQueryBox ObstacleBox(int i){var o=obstacles[i];return new NavQueryBox(new NavPoint(o.MinX,o.MinZ),new NavPoint(o.MaxX,o.MaxZ));}
+        private long MeasureOwnedSpatial()=>obstacles.Length>=8&&obstacles.Length<=4096?NavQueryGrid.Measure(HalfExtent,obstacles.Length,ObstacleBox):0;
+        private void InitializeOwnedSpatial(){if(obstacles.Length>=8&&obstacles.Length<=4096){ownedSpatial=new NavQueryGrid(HalfExtent,obstacles.Length,ObstacleBox);SpatialIndexRetainedBytes=ownedSpatial.Bytes;}if(owned.StorageBytes!=NavStorageLayout.Charge(192+SpatialIndexRetainedBytes))throw new ArgumentException("Owned geometry spatial charge contradiction.");}
+
         public long SpatialIndexRetainedBytes {get;private set;}
-        public NavGeometry(double halfExtent, NavObstacle[] obstacles, int revision)
+        public NavGeometry(double halfExtent,NavObstacle[] obstacles,int revision)
+            :this(halfExtent,obstacles,revision,buildQueryIndex:true){}
+        // Rebinding reads obstacle values from this draft. Only the ledger-owned
+        // copy is queried or published, so its index is the one worth building.
+        internal static NavGeometry CreateRebindSource(double halfExtent,NavObstacle[] obstacles,int revision)
+            =>new NavGeometry(halfExtent,obstacles,revision,buildQueryIndex:false);
+        private NavGeometry(double halfExtent,NavObstacle[] obstacles,int revision,bool buildQueryIndex)
         {
             if (halfExtent <= 0d || Double.IsNaN(halfExtent) || Double.IsInfinity(halfExtent)) throw new ArgumentException("Invalid half extent.");
             if (revision < 1) throw new ArgumentException("Geometry revision must be positive.");
             HalfExtent = halfExtent; Revision = revision; this.obstacles = obstacles == null ? new NavObstacle[0] : (NavObstacle[])obstacles.Clone(); obstacleView = Array.AsReadOnly(this.obstacles);
-            if(this.obstacles.Length>=8){
+            if(buildQueryIndex&&this.obstacles.Length>=8){
                 var buckets=new List<int>[SpatialWidth*SpatialWidth];
                 for(int i=0;i<this.obstacles.Length;i++){
                     var o=this.obstacles[i];int left=Bucket(o.MinX),right=Bucket(o.MaxX),bottom=Bucket(o.MinZ),top=Bucket(o.MaxZ);
@@ -131,6 +156,10 @@ namespace Spacewars.Simulation
         {
             if (radius < 0d || Double.IsNaN(radius) || Double.IsInfinity(radius) || Double.IsNaN(point.X) || Double.IsInfinity(point.X) || Double.IsNaN(point.Z) || Double.IsInfinity(point.Z) || Math.Abs(point.X) + radius > HalfExtent || Math.Abs(point.Z) + radius > HalfExtent) return false;
             bool Hit(int i)=>(physicalLayer<0||obstacles[i].PhysicalLayer<0||physicalLayer==obstacles[i].PhysicalLayer)&&point.X+radius>=obstacles[i].MinX&&point.X-radius<=obstacles[i].MaxX&&point.Z+radius>=obstacles[i].MinZ&&point.Z-radius<=obstacles[i].MaxZ&&(obstacles[i].Polygon!=null?(obstacles[i].Polygon.Contains(point)||obstacles[i].Polygon.BoundaryWithin(point,radius)):PointRectDistanceSquared(point,obstacles[i])<=radius*radius);
+            if(UseOwnedSpatial){
+                foreach(int i in ownedSpatial.Candidates(point.X-radius,point.Z-radius,point.X+radius,point.Z+radius))if(Hit(i))return false;
+                return true;
+            }
             if(spatial!=null&&SmallQuery(point.X-radius,point.Z-radius,point.X+radius,point.Z+radius,out int left,out int bottom,out int right,out int top)){
                 for(int x=left;x<=right;x++)for(int z=bottom;z<=top;z++){var ids=spatial[x*SpatialWidth+z];if(ids!=null)for(int n=0;n<ids.Length;n++)if(Hit(ids[n]))return false;}
             }else for(int i=0;i<obstacles.Length;i++)if(Hit(i))return false;
@@ -143,6 +172,37 @@ namespace Spacewars.Simulation
             blocker=-1;if (!IsFree(from, radius,physicalLayer) || !IsFree(to, radius,physicalLayer)) return false;
             return SegmentFreeBetweenFreeEndpoints(from,to,radius,out blocker,physicalLayer);
         }
+        // The previous chord's blocker is only a candidate for this chord.
+        // A hint hit rejects the boolean sweep through the original predicate.
+        // Callers that need first-blocker identity use SegmentFree directly.
+        internal bool SegmentFreeWithBlockerHint(NavPoint from,NavPoint to,double radius,ref int hint)
+        {
+            if(HintBlocks(from,to,radius,hint))return false;
+            bool free=SegmentFree(from,to,radius,out int blocker);
+            if(blocker>=0)hint=blocker;
+            return free;
+        }
+
+        // The repair owns these bytes for the exact endpoints, footprint and
+        // geometry of this invocation. Cache the point tests only; a free pair
+        // must still pass the original swept query on every new chord.
+        internal bool SegmentFreeWithBlockerHint(NavPoint from,NavPoint to,double radius,ref int hint,
+            ref byte fromClearance,ref byte toClearance)
+        {
+            if(HintBlocks(from,to,radius,hint))return false;
+            if(fromClearance==0)fromClearance=IsFree(from,radius)?(byte)1:(byte)2;
+            if(fromClearance==2)return false;
+            if(toClearance==0)toClearance=IsFree(to,radius)?(byte)1:(byte)2;
+            if(toClearance==2)return false;
+            bool free=SegmentFreeBetweenFreeEndpoints(from,to,radius,out int blocker);
+            if(blocker>=0)hint=blocker;
+            return free;
+        }
+
+        private bool HintBlocks(NavPoint from,NavPoint to,double radius,int hint)
+            =>(uint)hint<(uint)obstacles.Length&&SweepHits(obstacles[hint],from,to,radius,
+                Math.Min(from.X,to.X)-radius,Math.Min(from.Z,to.Z)-radius,
+                Math.Max(from.X,to.X)+radius,Math.Max(from.Z,to.Z)+radius,-1);
         // Internal callers must own exact free-footprint certificates for this immutable geometry.
         internal bool SegmentFreeBetweenFreeEndpoints(NavPoint from,NavPoint to,double radius)
             =>SegmentFreeBetweenFreeEndpoints(from,to,radius,out _);
@@ -150,11 +210,26 @@ namespace Spacewars.Simulation
         {
             blocker=-1;
             double minX=Math.Min(from.X,to.X)-radius,minZ=Math.Min(from.Z,to.Z)-radius,maxX=Math.Max(from.X,to.X)+radius,maxZ=Math.Max(from.Z,to.Z)+radius;
-            bool Hit(int i)=>(physicalLayer<0||obstacles[i].PhysicalLayer<0||physicalLayer==obstacles[i].PhysicalLayer)&&maxX>=obstacles[i].MinX&&minX<=obstacles[i].MaxX&&maxZ>=obstacles[i].MinZ&&minZ<=obstacles[i].MaxZ&&(obstacles[i].Polygon!=null?obstacles[i].Polygon.SweepWithin(from,to,radius):SegmentRectDistanceSquared(from,to,obstacles[i])<=radius*radius);
+            bool Hit(int i)=>SweepHits(obstacles[i],from,to,radius,minX,minZ,maxX,maxZ,physicalLayer);
+            if(UseOwnedSpatial&&SmallQuery(minX,minZ,maxX,maxZ,out _,out _,out _,out _)){
+                Span<ulong> seen=stackalloc ulong[(obstacles.Length+63)/64];seen.Clear();
+                foreach(int i in ownedSpatial.Candidates(minX,minZ,maxX,maxZ))seen[i>>6]|=1UL<<(i&63);
+                // Owned geometry previously scanned in source order. The exact
+                // first blocker participates in terminal proofs and must agree.
+                for(int word=0;word<seen.Length;word++){ulong pending=seen[word];while(pending!=0){int i=word*64+NavQueryGrid.LowestSetBit(pending);if(Hit(i)){blocker=i;return false;}pending&=pending-1;}}
+                return true;
+            }
             if(spatial!=null&&SmallQuery(minX,minZ,maxX,maxZ,out int left,out int bottom,out int right,out int top)){
                 for(int x=left;x<=right;x++)for(int z=bottom;z<=top;z++){var ids=spatial[x*SpatialWidth+z];if(ids!=null)for(int n=0;n<ids.Length;n++)if(Hit(ids[n])){blocker=ids[n];return false;}}
             }else for(int i=0;i<obstacles.Length;i++)if(Hit(i)){blocker=i;return false;}
             return true;
+        }
+        private static bool SweepHits(NavObstacle obstacle,NavPoint from,NavPoint to,double radius,
+            double minX,double minZ,double maxX,double maxZ,int physicalLayer)
+        {
+            return (physicalLayer<0||obstacle.PhysicalLayer<0||physicalLayer==obstacle.PhysicalLayer)&&
+                maxX>=obstacle.MinX&&minX<=obstacle.MaxX&&maxZ>=obstacle.MinZ&&minZ<=obstacle.MaxZ&&
+                (obstacle.Polygon!=null?obstacle.Polygon.SweepWithin(from,to,radius):SegmentRectDistanceSquared(from,to,obstacle)<=radius*radius);
         }
         private int Bucket(double coordinate)=>(int)Math.Max(0,Math.Min(SpatialWidth-1,Math.Floor((coordinate+HalfExtent)/(2*HalfExtent)*SpatialWidth)));
         private bool SmallQuery(double minX,double minZ,double maxX,double maxZ,out int left,out int bottom,out int right,out int top){
@@ -244,9 +319,9 @@ namespace Spacewars.Simulation
             new NavigationProfileField("navigation.arrivalSlotSpacing", "Navigation", "Arrival spacing", "Slot spacing preserves a full footprint aisle after other units park.", "m",.5,10,.1,p=>p.ArrivalSlotSpacing),
             new NavigationProfileField("navigation.blockedTimeoutSeconds", "Navigation", "Blocked timeout", "Continuous inability to move ends the order with an explicit blocked outcome.", "s",.5,60,.5,p=>p.BlockedTimeoutSeconds),
             new NavigationProfileField("navigation.localGridCell", "Navigation", "Local repair grid", "Resolution of bounded local collision repair, independent of global field resolution.", "m",.1,1,.05,p=>p.LocalGridCell),
-            new NavigationProfileField("navigation.radius", "Navigation", "Tank radius", "Authoritative tank collision radius.", "m", .1, 5, .01, p => p.Radius),
-            new NavigationProfileField("navigation.tankSpeed", "Navigation", "Tank speed", "Maximum forward tank speed.", "m/s", .1, 50, .1, p => p.TankSpeed),
-            new NavigationProfileField("navigation.tankTurnSpeed", "Navigation", "Tank turn speed", "Maximum hull turn speed.", "rad/s", .1, 30, .1, p => p.TankTurnSpeed),
+            new NavigationProfileField("navigation.radius", "Navigation", "Vepr radius", "Authoritative Vepr collision radius.", "m", .1, 5, .01, p => p.Radius),
+            new NavigationProfileField("navigation.tankSpeed", "Navigation", "Vepr speed", "Maximum forward Vepr speed.", "m/s", .1, 50, .1, p => p.TankSpeed),
+            new NavigationProfileField("navigation.tankTurnSpeed", "Navigation", "Vepr turn speed", "Maximum hull turn speed.", "rad/s", .1, 30, .1, p => p.TankTurnSpeed),
             new NavigationProfileField("navigation.gridCell", "Navigation", "Grid cell", "Shared reverse-field cell size.", "m", .1, 5, .1, p => p.GridCell),
             new NavigationProfileField("navigation.arrivalTolerance", "Navigation", "Arrival tolerance", "Distance accepted at a route waypoint.", "m", .01, 1, .01, p => p.ArrivalTolerance),
             new NavigationProfileField("navigation.localDetourDistance", "Navigation", "Local detour distance", "Maximum committed local detour distance.", "m", .2, 8, .1, p => p.LocalDetourDistance),
@@ -331,6 +406,45 @@ namespace Spacewars.Simulation
         public int Count{get{lock(gate)return count;}}
         public T[] CopyItems(){lock(gate){RejectTransferReentry();var copy=new T[count];for(int i=0;i<count;i++)copy[i]=items[(head+i)%capacity];return copy;}}
         internal bool TryPeek(out T item){lock(gate){RejectTransferReentry();item=count==0?default:items[head];return count!=0;}}
+        internal bool TryRotateOwnedHead(T expected)
+        {
+            lock(gate){
+                RejectTransferReentry();
+                if(count<2||revision==long.MaxValue||slotOwners==null||!ReferenceEquals(items[head],expected))return false;
+                int tail=(head+count)%capacity;
+                if(tail!=head){
+                    items[tail]=items[head];
+                    slotOwners[tail]=slotOwners[head];
+                    items[head]=default;
+                    slotOwners[head]=null;
+                }
+                head=(head+1)%capacity;
+                revision++;
+                return true;
+            }
+        }
+        internal bool TryPromoteOwned(long expectedRevision, int index)
+        {
+            lock (gate)
+            {
+                RejectTransferReentry();
+                if (revision != expectedRevision || revision == long.MaxValue || index <= 0 || index >= count ||
+                    slotOwners == null || retention != null) return false;
+                var item = items[(head + index) % capacity];
+                var owner = slotOwners[(head + index) % capacity];
+                for (int i = index; i > 0; i--)
+                {
+                    int from = (head + i - 1) % capacity;
+                    int to = (head + i) % capacity;
+                    items[to] = items[from];
+                    slotOwners[to] = slotOwners[from];
+                }
+                items[head] = item;
+                slotOwners[head] = owner;
+                revision++;
+                return true;
+            }
+        }
         public bool TryEnqueue(T item){lock(authorityGate??gate){lock(gate){RejectTransferReentry();if(count==capacity)return false;validateEnqueue?.Invoke(item);if(items.Length==0)items=new T[capacity];retention?.Put((head+count)%capacity,ownerSelector(item));if(slotOwners!=null){var owner=ownerSelector(item);owner?.Retain();slotOwners[(head+count)%capacity]=owner;}acceptedEnqueue?.Invoke(item);items[(head+count)%capacity]=item;count++;revision++;return true;}}}
         public bool TryDequeue(out T item)=>Take(out item,true);
         internal bool TryDiscard(out T item)=>Take(out item,false);

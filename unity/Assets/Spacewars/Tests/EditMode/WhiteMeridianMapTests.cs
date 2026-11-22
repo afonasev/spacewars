@@ -98,7 +98,37 @@ namespace Spacewars.Tests.EditMode
                 var authority=new OfflineParticipantAuthority(config,1);var bytes=authority.CaptureBytes();CollectionAssert.AreEqual(bytes,OfflineParticipantAuthority.Restore(bytes,config).CaptureBytes());
                 foreach(var seat in roster){var v=authority.View(seat.Id);Assert.AreEqual(1,v.Buildings.Count(b=>b.Owner==v.Owner));Assert.AreEqual(PlayableBuildingKind.Headquarters,v.Buildings.Single(b=>b.Owner==v.Owner).Kind);}
             }
-            lobby.Participants[3].Team=1;Assert.IsNotNull(lobby.Validate(p,true,true));
+            lobby.Participants[3].Team=1;Assert.IsNull(lobby.Validate(p,true,true));
+            foreach(var participant in lobby.Participants)participant.Team=1;
+            Assert.IsNotNull(lobby.Validate(p,true,true));
+        }
+
+        [TestCase("1,2")]
+        [TestCase("1,2,3")]
+        [TestCase("1,2,3,4")]
+        [TestCase("1,1,1,2")]
+        public void AlternateRosterGetsDistinctSeededHomesAndRestores(string teams)
+        {
+            var p = Profile();
+            var map = (WhiteMeridianMap)p.AuthoredMap;
+            var participants = teams.Split(',').Select((team, slot) =>
+                new NativeLobbyParticipant { Team = int.Parse(team), Color = slot }).ToList();
+            var lobby = new NativeLobbyConfiguration { WhiteMeridian = true, Participants = participants };
+            Assert.IsNull(lobby.Validate(p, false, false));
+            var roster = participants.Select((seat, slot) =>
+                new OfflineParticipant("seat-" + slot, slot + 1, seat.Team, OfflineControl.Ai)).ToArray();
+            var config = map.Configuration(p, 7, roster);
+            Assert.AreEqual(roster.Length, config.Assignments.Distinct().Count());
+            CollectionAssert.AreEqual(config.Assignments, map.Configuration(p, 7, roster).Assignments);
+            var authority = new OfflineParticipantAuthority(config, 1);
+            foreach (var seat in roster)
+            {
+                var view = authority.View(seat.Id);
+                Assert.AreEqual(seat.Team, view.Team);
+                Assert.AreEqual(1, view.Buildings.Count(b => b.Owner == view.Owner && b.Kind == PlayableBuildingKind.Headquarters));
+            }
+            var bytes = authority.CaptureBytes();
+            CollectionAssert.AreEqual(bytes, OfflineParticipantAuthority.Restore(bytes, config).CaptureBytes());
         }
     }
 }

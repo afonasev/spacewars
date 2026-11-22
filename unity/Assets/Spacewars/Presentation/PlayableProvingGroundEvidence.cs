@@ -60,19 +60,18 @@ namespace Spacewars.Presentation
                 yield return Until(()=>Enumerable.Range(0,2).All(side=>ProvingView(side).Buildings.Any(b=>(int)b.Owner==side&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Progress>=1)),"both science centers ready");
                 for(int side=0;side<2;side++)Click(provingGroundLayer.Q<Button>("proving-tab-"+side+"-research"));
                 yield return null;
-                provingGroundLayer.Q<Toggle>("proving-research-0-AdvancedWeaponSystems").value=true;
-                provingGroundLayer.Q<Toggle>("proving-research-1-AdvancedDefensiveSystems").value=true;
+                for(int click=0;click<2;click++){Click(provingGroundLayer.Q<Button>("proving-research-0-ImprovedWeaponSystems"));Click(provingGroundLayer.Q<Button>("proving-research-1-ImprovedDefensiveSystems"));}
                 yield return Until(()=>Enumerable.Range(0,2).All(side=>ProvingView(side).OwnerResearch.Count==2),"II commands automatically enqueue I and II");
                 for(int side=0;side<2;side++){
                     var first=side==0?PlayableResearchKind.ImprovedWeaponSystems:PlayableResearchKind.ImprovedDefensiveSystems;
                     var second=side==0?PlayableResearchKind.AdvancedWeaponSystems:PlayableResearchKind.AdvancedDefensiveSystems;
                     var orders=ProvingView(side).OwnerResearch;
-                    Check(orders[0].Kind==first&&orders[0].Active&&!orders[0].Complete&&orders[1].Kind==second&&!orders[1].Active,"I active before II "+side);
+                    Check(orders.Any(o=>o.Kind==first&&o.Complete)&&orders.Any(o=>o.Kind==second&&o.Complete),"both prerequisite levels applied "+side);
                     UpdateProvingGroundUi();
-                    Check(provingGroundLayer.Q<Toggle>("proving-research-"+side+"-"+first).value&&provingGroundLayer.Q<Toggle>("proving-research-"+side+"-"+second).value,"both checkboxes selected immediately "+side);
+                    Check(provingGroundLayer.Q<Label>("proving-research-stage-"+side+"-"+first).text=="II","group badge shows II "+side);
                 }
                 yield return Frame("chain-01-both-levels-selected");
-                yield return Until(()=>Enumerable.Range(0,2).All(side=>ProvingView(side).OwnerResearch[0].Complete&&ProvingView(side).OwnerResearch[1].Active),"I finishes before II starts");
+                yield return Until(()=>!runtime.ProvingGroundEditsPending,"selected levels published");
                 yield return Frame("chain-02-second-level-active");
                 yield return Until(()=>Enumerable.Range(0,2).All(side=>ProvingView(side).OwnerResearch.All(o=>o.Complete)),"both chains complete",20);
                 for(int side=0;side<2;side++)Check(runtime.ProvingGroundCosts(side).Research==ProvingView(side).OwnerResearch.Sum(o=>PlayableResearchRules.Cost(profile,o.Kind)),"both original research costs counted "+side);
@@ -103,16 +102,20 @@ namespace Spacewars.Presentation
                 for(int side=0;side<2;side++){
                     var panel=side==0?provingLeft:provingRight;
                     Check(panel.layout.y<=12,"panel at upper corner "+side);
-                    foreach(PlayableResearchKind kind in Enum.GetValues(typeof(PlayableResearchKind))){
-                        var row=panel.Q("proving-research-row-"+side+"-"+kind);
+                    foreach(var chain in ProvingResearchChains){
+                        var kind=chain[0];var row=panel.Q("proving-research-row-"+side+"-"+kind);
                         Check(row.worldBound.yMin>=panel.worldBound.yMin&&row.worldBound.yMax<=panel.worldBound.yMax-4,"research visible without scroll "+side+" "+kind);
-                        var mark=row.Q(className:"unity-toggle__checkmark");var label=row.Q<Label>("proving-research-label-"+side+"-"+kind);
-                        Check(label.worldBound.xMin-mark.worldBound.xMax<=6,"checkbox close to label "+side+" "+kind);
+                        var badge=row.Q<Label>("proving-research-stage-"+side+"-"+kind);var label=row.Q<Label>("proving-research-label-"+side+"-"+kind);
+                        Check(label.worldBound.xMax<=badge.worldBound.xMin,"label and stage do not overlap "+side+" "+kind);
                     }
                 }
                 yield return Frame("panel-05-all-research");
                 foreach(var kind in new[]{PlayableResearchKind.HawkSalvoSystems,PlayableResearchKind.AdvancedDefensiveSystems}){
-                    var row=provingLeft.Q("proving-research-row-0-"+kind);
+                    var chain=ProvingResearchChains.Single(c=>c.Contains(kind));var rootKind=chain[0];
+                    int targetStage=Array.IndexOf(chain,kind)+1;
+                    for(int clicks=0;clicks<=chain.Length&&provingResearchStages[(0,rootKind)]!=targetStage;clicks++)Click(provingLeft.Q<Button>("proving-research-0-"+rootKind));
+                    yield return Until(()=>!runtime.ProvingGroundEditsPending,"hover stage applied");UpdateProvingGroundUi();
+                    var row=provingLeft.Q("proving-research-row-0-"+rootKind);
                     using(var enter=PointerEnterEvent.GetPooled()){enter.target=row;row.SendEvent(enter);}
                     yield return null;yield return Frame("panel-06-"+kind);
                     Check(provingUnitDetail.Q<Label>().text.Contains(PlayableResearchRules.Description(profile,kind)),"shared research effect card "+kind);

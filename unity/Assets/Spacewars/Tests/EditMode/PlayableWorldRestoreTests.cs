@@ -28,12 +28,12 @@ namespace Spacewars.Tests.EditMode
         private static PlayableSnapshot View(object d,PlayableOwner owner)=>(PlayableSnapshot)Call(d,"PlayerSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,Seed,owner);
         private static PlayableCommandStatus Send(object d,long sequence,PlayableCommandKind kind,int id,PlayableOwner owner=PlayableOwner.Player,NavPoint target=default(NavPoint),int victim=0,PlayableResearchKind research=PlayableResearchKind.TankChassis,long order=0)
             =>(PlayableCommandStatus)Call(d,"Apply",new PlayableCommand(71,sequence,owner==PlayableOwner.Player?"player-1":"enemy-1",kind,new[]{id},target,targetId:victim,researchKind:research,productionOrderId:order),null);
-        private static int Build(object d,PlayableBuildingKind kind,int slot,PlayableOwner owner,bool ready=true)
+        private static int Build(object d,PlayableBuildingKind kind,int slot,PlayableOwner owner,bool ready=true,CertifiedWorldRoutes routes=null)
         {
             int site=owner==PlayableOwner.Player?1:2;
             Assert.AreEqual(PlayableCommandStatus.Applied,Call(d,"BuildAt",site,slot,kind,site,owner,null));
             int id=Buildings(d).Values.Cast<object>().Select(b=>new{Id=(int)b.GetType().GetField("Id").GetValue(b),Site=(int)b.GetType().GetField("SiteId").GetValue(b),Slot=(int)b.GetType().GetField("SlotId").GetValue(b)}).Single(b=>b.Site==site&&b.Slot==slot).Id;
-            if(ready){for(int tick=0;tick<1800&&!((bool)Buildings(d)[id].GetType().GetField("Ready").GetValue(Buildings(d)[id]));tick++){Call(d,"AdvanceFoundations");Call(d,"AdvanceBuildings",100d);Deliver(d,tick);Call(d,"Step",1d/30);}Assert.True((bool)Buildings(d)[id].GetType().GetField("Ready").GetValue(Buildings(d)[id]),"Seeded producer must actually finish evacuation and construction.");}
+            if(ready){for(int tick=0;tick<1800&&!((bool)Buildings(d)[id].GetType().GetField("Ready").GetValue(Buildings(d)[id]));tick++){Call(d,"AdvanceFoundations");Call(d,"AdvanceBuildings",100d);if(routes==null)Deliver(d,tick);else routes.Deliver((PlayableDomain)d,tick);Call(d,"Step",1d/30);}Assert.True((bool)Buildings(d)[id].GetType().GetField("Ready").GetValue(Buildings(d)[id]),"Seeded producer must actually finish evacuation and construction.");}
             return id;
         }
         private static void Deliver(object d,int tick)
@@ -41,6 +41,56 @@ namespace Spacewars.Tests.EditMode
             // Explicit async-answer schedule: work completes only on labelled ticks.
             if(tick%3!=0)return;
             var nav=Nav(d);while(nav.Requests.TryDequeue(out var r))Assert.True(nav.Answers.TryEnqueue(new NavigationAnswer(r,new SharedFlowRouter(r.Geometry,r.Profile).FindPath(r.Start,r.Goal))));
+        }
+        private sealed class CertifiedWorldRoutes : IDisposable
+        {
+            private readonly Dictionary<PlayableDomain,Spacewars.Presentation.UnityHostRouteService> hosts=
+                new Dictionary<PlayableDomain,Spacewars.Presentation.UnityHostRouteService>();
+
+            private readonly long nativeBaseline=CertifiedHostContinuationTests.RecastWorkerNativeBytes();
+
+            internal void VerifyOwnership(int tick)
+            {
+                var sessions=hosts.Keys.Select(world=>world.Navigation).ToArray();
+                foreach(var session in sessions)_=session.RoutePort;
+                long reachable=sessions.Sum(CertifiedHostContinuationTests.RecastWorkerManagedAndSessionBytes)
+                    +CertifiedHostContinuationTests.RecastWorkerNativeBytes()-nativeBaseline;
+                Assert.AreEqual(reachable,sessions.Sum(session=>session.PhysicalHostBudget.PhysicalBytes),
+                    "independent reachable and native ownership tick "+tick);
+            }
+
+            internal void Add(PlayableDomain world) =>
+                hosts.Add(world,new Spacewars.Presentation.UnityHostRouteService());
+
+            internal void Deliver(PlayableDomain world,int tick)
+            {
+                if(tick%3!=0)return; // Keep the original labelled-tick answer schedule.
+                var nav=world.Navigation;
+                for(int pump=0;pump<20000&&nav.PendingCount>0;pump++)
+                {
+                    hosts[world].Service(new PlayableRouteBinding(world.Geometry,world.RoutingProfile,
+                        nav.Admission,nav.RoutePort),8);
+                    nav.ApplyResults();
+                }
+                Assert.Zero(nav.PendingCount,"Current native routes must settle on the scheduled delivery tick.");
+            }
+
+            internal void Remove(PlayableDomain world)
+            {
+                hosts[world].Dispose();
+                hosts.Remove(world);
+                var navigation=world.Navigation;
+                navigation.ReleaseCommittedHostRoot();
+                world.DestroyOwnedNavigation();
+                Assert.Zero(navigation.PhysicalHostBudget.PhysicalBytes);
+                Assert.Zero(navigation.PhysicalHostBudget.HeldBytes);
+                Assert.Zero(navigation.PhysicalHostBudget.ActiveScopes);
+            }
+
+            public void Dispose()
+            {
+                foreach(var world in hosts.Keys.ToArray())Remove(world);
+            }
         }
         // Independent oracle: reads actual private authority fields, never CaptureWorldBytes
         // or DTOs. New fields are included by default. Only explicitly classified cache,
@@ -50,7 +100,13 @@ namespace Spacewars.Tests.EditMode
             {"PlayableDomain.nextSoundEvent","Transient audio ID sequence belongs to the non-persisted feed, never gameplay/RNG"},
             {"PlayableDomain.soundMotion","Transient sound motion baseline re-seeded after restore; no navigation authority"},
             {"PlayableDomain.soundProductionLimits","Transient audio restriction edge baseline, never production authority"},
+            {"PlayableDomain.groundTrails","Transient presentation decals are not restored"},
+            {"PlayableDomain.groundTrailAlive","Scratch actor set cleared before collecting ground trails"},
+            {"PlayableDomain.matchEvents","Transient notification feed starts fresh on restore"},
+            {"PlayableDomain.nextMatchEvent","Sequence belongs to the transient notification feed"},
+            {"PlayableDomain.botCameraActivities","Transient presentation hint published from applied orders and restarted on restore"},
             {"PlayableDomain.lifecycleWork","Scratch list cleared before each lifecycle tick"},
+            {"NavCrowd.StorageSource","Session back-reference asserted by BindSession; the same session is traversed through the domain"},
             {"NavCrowd.spatial","Derived spatial index rebuilt from units"},
             {"NavigationSession.admission","Derived immutable publication rebuilt from groups, pending requests, geometry and profile"},
             {"NavCrowd.unitView","Read-only view of orderedUnits"},
@@ -59,16 +115,52 @@ namespace Spacewars.Tests.EditMode
             {"NavUnit.routeView","Read-only view of route"},
             {"NavGeometry.obstacleView","Read-only view of obstacles"},
             {"PlayableVision.cached","Derived immutable fog projection cache"},
+            {"PlayableVision.snapshotCells","Derived immutable projection of the independently compared discovered cells"},
+            {"PlayableVision.snapshotCoverage","Derived immutable projection of the independently compared coverage"},
+            {"PlayableVision.refreshInput","Scratch vision input cleared on refresh"},
+            {"PlayableVision.lastRefreshSources","Derived refresh cache; actual sources and discovery remain compared"},
+            {"PlayableVision.lastRefreshBuildings","Derived refresh cache; actual known buildings remain compared"},
+            {"PlayableDomain.visionInputProfile","Derived input binding used to skip redundant vision refresh"},
+            {"PlayableDomain.visionUnitInputs","Derived vision input read set; actual units remain compared"},
+            {"PlayableDomain.visionBuildingInputs","Derived vision input read set; actual buildings remain compared"},
+            {"PlayableDomain.visionInputTeams","Derived vision input read set; actual visions remain compared"},
+            {"PlayableDomain.visionRelayOwners","Derived vision input read set; actual territory and relay knowledge remain compared"},
+            {"PlayableDomain.orbitalProfile","Cache key for the current profile's orbital parameters"},
+            {"PlayableDomain.orbitalData","Lazy copy of parameters already compared in the current profile"},
+            {"PlayableDomain.publicApproachViews","Derived memo of public route candidates; Foundry compares fresh owner projections and continued world bytes"},
+            {"PlayableDomain.publicGeographyProfile","Cache key for public geography built from the current profile"},
+            {"PlayableDomain.publicIntelEnvelopes","Derived public geography; compared through the owner projection"},
+            {"PlayableDomain.publicObjectivesByOwner","Derived public objectives; compared through the owner projection"},
             {"PlayableDomain.targetSpatialIndex","Derived combat-phase broad phase; cache-neutral current capture and hot/cold target continuation qualified by PlayableTargetSpatialIndexTests"},
+            {"PlayableDomain.observedPathPool","Derived observer route cache; full route proof outputs and saved execution state remain compared"},
+            {"PlayableDomain.airAuthority","Rebound process-local Air bridge; independently validate both aliases before walking durable motion sources"},
+            {"PlayableDomain.combatAirMotionAuthority","Rebound process-local Air bridge; durable Air sources remain included"},
+            {"PlayableDomain.combatMotionAuthority","Rebound process-local ground bridge; durable Native sources remain included"},
+            {"PlayableDomain.airThread","Rebound process-local thread identity; durable Air sources remain included"},
+            {"NavigationSession.motionAuthority","Rebound process-local Native bridge; independently validate its Domain alias"},
+            {"NavigationSession.motionAuthorityThread","Rebound process-local thread identity; durable Native sources remain included"},
+            {"NavigationSession.certifiedHost","Attached host service, native cache and handles are process-local; committedHostRoot, mailboxes and registrations remain independently traversed"},
+            {"NavigationSession.recastStartup","Process-local Recast preparation shares native map/query handles with the host; typed installed corridors, requests and committed source are still traversed"},
+            {"NavigationSession.certifiedHostAttachmentIdentity","Local host replacement fence; the committed host and live request bindings remain compared"},
+            {"NavigationSession.<QualifiedEntryPreparations>k__BackingField","Route preparation work counter verified by the certified host fixture"},
+            {"NavigationSession.motionProofMemo","Derived memo for transcript tail reuse; saved sources and exact continuation remain compared"},
+            {"NavigationSession.<MotionProofHits>k__BackingField","Process-local memo hit counter"},
+            {"PlayableDomain.activeAttackerTargets","Derived before firing from persisted current and last-fired targets"},
+            {"PlayableDomain.activeAttackVictims","Derived membership of activeAttackerTargets values"},
+            {"PlayableDomain.contactSpatialIndex","Derived broad phase rebuilt from actors and buildings before contact queries"},
             {"NavigationAuthorityGroup.MemberParentIdentity","Process-local candidate provenance points at the prior VersionIdentity; neither is serialized or used by future live edits"},
             {"NavigationAuthorityGroup.ChangedMemberIndex","Local delta capability paired with excluded MemberParentIdentity/versionIdentity; cold publication rebuilds full owners and fresh capability, all member values/roles/layout remain visited"},
             {"NavigationSession.<LastNavigationStepPath>k__BackingField","Per-step diagnostic marker; never persisted or read by navigation decisions"},
+            {"NavigationSession.<LastOwnedMovementNullReason>k__BackingField","Per-step diagnostic reason, reset before the next navigation step"},
+            {"NavigationSession.<LastTrafficDispatchStage>k__BackingField","Per-step diagnostic marker, reset before the next navigation step"},
             {"NavigationSession.barrierPayloadRevision","Session-local observation stamp for exact-root guarded preparation; cold restore installs a fresh stamp, payload and owner roles remain included"},
             {"NavigationAuthorityGroup.versionIdentity","Process-local COW version birth token; primitive preflight49 forbids allocation-history IDs and restores fresh mutation tokens"},
             {"NavigationLiveGroup.installToken","Consumed private installation capability; PhaseLive and exact Session/ledger ownership remain checked"},
             {"NavigationLiveGroup.generation","Local observed-write generation reseeded with cold live owner; immutable group/member values remain included"},
             {"NavigationSession.authorityOperationIdentity","Local preparation/source guard reseeded on cold restore; durable admissionPublicationIdentity remains included"},
             {"NavigationHostRoot.released","Creator-handle release flag; retained root remains live and independent ownership walk requires positive references"},
+            {"NavigationAuthorityOwners.released","Creator handle retirement; retained references and exact session aliases are checked independently"},
+            {"NavigationMotionSources.ownerReleased","Creator handle retirement; retained sources, operation watermark and exact records remain traversed"},
             {"NavigationHostRequest.released","Creator-handle release flag; transport/mailbox/BODY owning references and aliases are independently checked"},
             {"NavOwnedStorage.CaptureEpoch","PhysicalIndex.Begin/Complete traversal stamp, absent from physical payload"},
             {"NavOwnedStorage.CaptureId","PhysicalIndex per-encode alias index; owner aliases remain independently visited"},
@@ -77,6 +169,9 @@ namespace Spacewars.Tests.EditMode
             {"NavigationRetentionBudget.peak","Allocation-history peak, independent unique reachable ledger is verified separately"},
             {"NavigationRetentionBudget.resolvedScopes","Completed preparation count, not saved execution work"},
             {"NavigationRetentionBudget.captureEpoch","Physical capture lane generation, not saved payload"},
+            {"NavigationRetentionBudget.<AuthorityPublicationBound>k__BackingField","Derived admission bound refreshed before opening physical host work"},
+            {"NavigationRetentionBudget.<LiveActorBound>k__BackingField","Derived crowd count refreshed before opening physical host work"},
+            {"NavigationRetentionBudget.liveHeadroom","Derived installation reservation floor refreshed from live owners before opening physical host work"},
             {"NavigationSession.<OwnedCapturePublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
             {"NavigationSession.<LastOwnedCaptureObservationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
             {"NavigationSession.<LastOwnedCapturePublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
@@ -102,6 +197,9 @@ namespace Spacewars.Tests.EditMode
             {"NavigationSession.<LastOwnedIngressPublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
             {"NavigationSession.<OwnedOrdinaryFailurePublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
             {"NavigationSession.<LastOwnedOrdinaryFailurePublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"PlayableDomain.<FriendlyApproachChecksForTests>k__BackingField","QA-only geometry work counter; restored gameplay facts are compared independently"},
+            {"PlayableDomain.<PublicApproachBuildsForTests>k__BackingField","QA-only geometry preparation counter; not used by match decisions"},
+            {"PlayableDomain.researchAvailabilityMemo","Derivative projection cache; restored owner research options are compared independently"},
             {"NavigationSession.<OwnedDiscardPublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
             {"NavigationSession.<LastOwnedDiscardPublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
             {"NavigationSession.<LastOwnedStaleIngressAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
@@ -123,6 +221,8 @@ namespace Spacewars.Tests.EditMode
         private static readonly Dictionary<Type,PropertyInfo[]> PropertyCache=new Dictionary<Type,PropertyInfo[]>();
         private static FieldInfo[] Fields(Type type,bool authority){var cache=authority?AuthorityFieldCache:PublicFieldCache;lock(cache){if(!cache.TryGetValue(type,out var fields)){fields=type.GetFields(BindingFlags.Public|BindingFlags.Instance|(authority?BindingFlags.NonPublic:0)).OrderBy(f=>f.Name).ToArray();cache.Add(type,fields);}return fields;}}
         private static PropertyInfo[] Properties(Type type){lock(PropertyCache){if(!PropertyCache.TryGetValue(type,out var props)){props=type.GetProperties(BindingFlags.Public|BindingFlags.Instance).Where(x=>x.GetIndexParameters().Length==0).OrderBy(x=>x.Name).ToArray();PropertyCache.Add(type,props);}return props;}}
+        private static bool RestoreRestartsProjection(Type type,string property)
+            =>type==typeof(PlayableSnapshot)&&(property==nameof(PlayableSnapshot.GroundTrails)||property==nameof(PlayableSnapshot.MatchEvents));
         internal static string Facts(object value,bool authority=false)
         {
             using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(FactBytes(value,authority)));
@@ -145,15 +245,18 @@ namespace Spacewars.Tests.EditMode
         {
             internal byte[] Name; internal Reader[] Authority,Projection;
         }
+        private static bool OrderedByKey(Type type,string member)
+            =>type==typeof(PlayableVision)&&member=="known"||type==typeof(NavCrowd)&&member=="units"||
+                type==typeof(PlayableDomain)&&(member=="orbital"||member=="visions");
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type,Description> Descriptions=new System.Collections.Concurrent.ConcurrentDictionary<Type,Description>();
         private static Description Describe(Type type)=>Descriptions.GetOrAdd(type,t=>{
             Func<MemberInfo,Reader> reader=member=>{
                 var value=System.Linq.Expressions.Expression.Parameter(typeof(object),"value");
                 var target=System.Linq.Expressions.Expression.Convert(value,t);
                 var access=member is FieldInfo field?System.Linq.Expressions.Expression.Field(target,field):(System.Linq.Expressions.Expression)System.Linq.Expressions.Expression.Property(target,(PropertyInfo)member);
-                return new Reader{MemberName=member.Name,Name=NameBytes(member.Name),Read=System.Linq.Expressions.Expression.Lambda<Func<object,object>>(System.Linq.Expressions.Expression.Convert(access,typeof(object)),value).Compile(),Ordered=t==typeof(PlayableVision)&&member.Name=="known"||t==typeof(NavCrowd)&&member.Name=="units"};
+                return new Reader{MemberName=member.Name,Name=NameBytes(member.Name),Read=System.Linq.Expressions.Expression.Lambda<Func<object,object>>(System.Linq.Expressions.Expression.Convert(access,typeof(object)),value).Compile(),Ordered=OrderedByKey(t,member.Name)};
             };
-            return new Description{Name=NameBytes(t.FullName),Authority=Fields(t,true).Where(field=>!ExcludeField(field)).Select(field=>reader(field)).ToArray(),Projection=Properties(t).Where(prop=>!(t==typeof(PlayableSnapshot)&&prop.Name=="Sounds")).Select(prop=>reader(prop)).Concat(Fields(t,false).Select(field=>reader(field))).ToArray()};
+            return new Description{Name=NameBytes(t.FullName),Authority=Fields(t,true).Where(field=>!ExcludeField(field)).Select(field=>reader(field)).ToArray(),Projection=Properties(t).Where(prop=>!(t==typeof(PlayableSnapshot)&&prop.Name==nameof(PlayableSnapshot.Sounds))).Select(prop=>reader(prop)).Concat(Fields(t,false).Select(field=>reader(field))).ToArray()};
         });
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type,byte[]> TypeNames=new System.Collections.Concurrent.ConcurrentDictionary<Type,byte[]>();
         private static byte[] TypeName(Type type)=>TypeNames.GetOrAdd(type,t=>NameBytes(t.FullName));
@@ -198,11 +301,11 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(cache==null,fifo==null,"Derived footprint cache and FIFO must have the same enabled mode");
             if(cache==null)return false;
             var keys=fifo.Cast<object>().ToArray();Assert.AreEqual(cache.Count,keys.Length);Assert.LessOrEqual(keys.Length,4096);
-            var unique=new HashSet<object>();var uncached=type.GetMethod("UncachedFootprint",F);
+            var unique=new HashSet<object>();var uncached=type.GetMethod("UncachedFootprintOwner",F);
             foreach(var key in keys){
                 Assert.True(unique.Add(key),"Derived footprint FIFO duplicate");Assert.True(cache.Contains(key),"Derived footprint FIFO must cover exactly the dictionary");
                 var keyType=key.GetType();double x=(double)keyType.GetField("x",F).GetValue(key),z=(double)keyType.GetField("z",F).GetValue(key),r=(double)keyType.GetField("r",F).GetValue(key);
-                Assert.AreEqual((bool)uncached.Invoke(locations,new object[]{new NavPoint(x,z),r}),(bool)cache[key],"Every cached positive and negative result must equal the pure uncached predicate");
+                Assert.AreEqual((int)uncached.Invoke(locations,new object[]{new NavPoint(x,z),r}),(int)cache[key],"Every cached owner, including a negative result, must match the uncached query");
             }
             return true;
         }
@@ -211,8 +314,8 @@ namespace Spacewars.Tests.EditMode
             var map=ThreeCrossingsMap.Default;var locations=(TerrainLocations)typeof(ThreeCrossingsMap).GetField("locations",F).GetValue(map);
             var before=FactBytes(locations,true);Assert.True(map.TryLocate(new NavPoint(-20,18),.58,out _));Assert.False(map.TryLocate(new NavPoint(-20,18),-1,out _));
             CollectionAssert.AreEqual(before,FactBytes(locations,true));CollectionAssert.AreEqual(FactBytes(locations,true,false),FactBytes(locations,true));
-            var cache=(IDictionary)typeof(TerrainLocations).GetField("footprints",F).GetValue(locations);Assert.AreEqual(2,cache.Count);var key=cache.Keys.Cast<object>().First();bool original=(bool)cache[key];
-            cache[key]=!original;Assert.Throws<AssertionException>(()=>FactBytes(locations,true));cache[key]=original;
+            var cache=(IDictionary)typeof(TerrainLocations).GetField("footprints",F).GetValue(locations);Assert.AreEqual(2,cache.Count);var key=cache.Keys.Cast<object>().First(k=>(int)cache[k]>=0);int original=(int)cache[key];
+            cache[key]=original+1;Assert.Throws<AssertionException>(()=>FactBytes(locations,true));cache[key]=original;
             var fifo=typeof(TerrainLocations).GetField("footprintOrder",F).GetValue(locations);var fifoType=fifo.GetType();var first=fifoType.GetMethod("Dequeue").Invoke(fifo,null);fifoType.GetMethod("Enqueue").Invoke(fifo,new[]{cache.Keys.Cast<object>().First(k=>!k.Equals(first))});
             Assert.Throws<AssertionException>(()=>FactBytes(locations,true));fifoType.GetMethod("Clear").Invoke(fifo,null);foreach(var k in cache.Keys)fifoType.GetMethod("Enqueue").Invoke(fifo,new[]{k});
             var changed=new TerrainLocations(new NavGeometry(20,Array.Empty<NavObstacle>(),1),Array.Empty<MapSupport>(),Array.Empty<NavSurfaceTransition>());
@@ -317,12 +420,26 @@ namespace Spacewars.Tests.EditMode
         {
             internal object Mailbox,Retention;internal Array Items,Retained,Slots;internal int Head,Count,Capacity;
         }
-        internal static byte[] FactBytes(object value,bool authority=false,bool cachedNames=true,IDictionary<long,string> positions=null)
+        internal static byte[] FactBytes(object value,bool authority=false,bool cachedNames=true,IDictionary<long,string> positions=null,bool restoreProjection=false)
         {
             var identities=new Dictionary<object,int>(FactReferenceIdentity.Instance);var active=new HashSet<object>(FactReferenceIdentity.Instance);var path=new List<string>();
             var mailboxes=new Dictionary<object,MailboxFacts>(FactReferenceIdentity.Instance);var boundArrays=new Dictionary<object,string>(FactReferenceIdentity.Instance);var transports=new Dictionary<object,NavigationHostRequest[]>(FactReferenceIdentity.Instance);var linkedRequests=new HashSet<object>(FactReferenceIdentity.Instance);
             using(var memory=new MemoryStream())using(var writer=new BinaryWriter(memory)){
                 object Read(object target,string field)=>target.GetType().GetField(field,F|BindingFlags.Public).GetValue(target);
+                void ValidateCombatBridges(PlayableDomain domain)
+                {
+                    void Validate(object domainAlias,object authorityAlias,string ownersField)
+                    {
+                        Assert.AreSame(domainAlias,authorityAlias,"Authority and Domain must share one motion bridge");
+                        if(domainAlias==null)return; // Cold restore rebinds on first authority delivery.
+                        Assert.AreSame(domain,Read(domainAlias,"domain"));
+                        var bridgeOwners=(Func<IReadOnlyList<PlayableAiOwnerLoop>>)Read(domainAlias,ownersField);
+                        var domainOwners=(Func<IReadOnlyList<PlayableAiOwnerLoop>>)Read(domain,"combatExecutionOwners");
+                        CollectionAssert.AreEqual(domainOwners(),bridgeOwners(),"Bridge owners are the actual live scheduler owners");
+                    }
+                    Validate(Read(domain,"combatAirMotionAuthority"),Read(domain,"airAuthority"),"owners");
+                    Validate(Read(domain,"combatMotionAuthority"),Read(domain.Navigation,"motionAuthority"),"currentOwners");
+                }
                 void BindMailbox(object box,NavigationSession session,bool answers){
                     if(mailboxes.ContainsKey(box))return;
                     var c=new MailboxFacts{Mailbox=box,Items=(Array)Read(box,"items"),Slots=(Array)Read(box,"slotOwners"),Retention=Read(box,"retention"),Head=(int)Read(box,"head"),Count=(int)Read(box,"count"),Capacity=(int)Read(box,"capacity")};
@@ -339,6 +456,22 @@ namespace Spacewars.Tests.EditMode
                 }
                 void BindSession(NavigationSession session){
                     BindMailbox(session.Requests,session,false);BindMailbox(session.Answers,session,true);
+                    Assert.AreSame(session,session.Crowd.StorageSource,"Crowd storage must stay bound to its current session");
+                    if(restoreProjection&&Read(session,"groupCommandBacking") is NavigationCommandAuthority backing&&backing.CrowdNames!=null)
+                    {
+                        var names=backing.CrowdNames;
+                        Assert.True(names.BelongsTo(session.PhysicalHostBudget));
+                        CollectionAssert.AreEqual(session.Crowd.Units.Select(unit=>unit.Id).OrderBy(id=>id).ToArray(),names.Keys);
+                        foreach(var name in names.Names)
+                            if(name.Owner!=null)Assert.True(name.Owner.BelongsTo(session.PhysicalHostBudget));
+                    }
+                    if(Read(session,"authorityOwners") is NavigationAuthorityOwners root)
+                    {
+                        Assert.Greater(root.References,0,"The session must retain its live authority owner");
+                        Assert.AreSame(Read(session,"geometry"),root.Geometry.Facade);
+                        Assert.AreSame(Read(session,"navigationGeometry"),root.NavigationGeometry.Facade);
+                        Assert.AreSame(Read(session,"profile"),root.Profile.Facade);
+                    }
                     if(Read(session,"groups") is NavigationCommandSlots<long,GroupOrderState> ownedGroups)foreach(var group in ownedGroups){Assert.True(ownedGroups.OwnerFor(group.Key) is NavigationLiveGroup);var live=(NavigationLiveGroup)ownedGroups.OwnerFor(group.Key);Assert.True(live.BelongsToSession(session));Assert.Greater(live.References,0);}
                     var transport=(NavigationTransportOwner)Read(session,"transportOwner");if(transport==null||transports.ContainsKey(transport))return;var rows=new List<NavigationHostRequest>();var seen=new HashSet<object>(FactReferenceIdentity.Instance);NavigationHostRequest prior=null;
                     for(var row=(NavigationHostRequest)Read(transport,"first");row!=null;row=row.TransportNext){Assert.True(seen.Add(row),"transport cycle");Assert.AreSame(transport,row.TransportOwner);Assert.AreSame(prior,row.TransportPrevious);Assert.True(row.TransportExternal||row.TransportAnswers>0);Assert.Greater(row.References,0);rows.Add(row);linkedRequests.Add(row);prior=row;}
@@ -347,14 +480,31 @@ namespace Spacewars.Tests.EditMode
                 void Mailbox(MailboxFacts c){
                     writer.Write(c.Capacity);writer.Write(c.Items.Length);writer.Write((bool)Read(c.Mailbox,"closed"));writer.Write(c.Count);writer.Write(c.Retention!=null);writer.Write(c.Slots!=null);Visit(c.Retention);
                     var occupied=new bool[c.Capacity];for(int i=0;i<c.Count;i++){int slot=(c.Head+i)%c.Capacity;occupied[slot]=true;var item=c.Items.GetValue(slot);NavOwnedStorage expected=item is NavigationRequest request?request.StorageOwner:item is NavigationAnswer answer?answer.StorageOwner??(NavOwnedStorage)answer.Request.StorageOwner:null;var retained=c.Retained?.GetValue(slot);var owned=c.Slots?.GetValue(slot);if(c.Retained!=null)Assert.AreSame(expected,retained);if(c.Slots!=null)Assert.AreSame(expected,owned);Visit(item);Visit(retained);Visit(owned);}
-                    for(int i=0;i<c.Capacity;i++)if(!occupied[i]){if(i<c.Items.Length)Assert.Null(c.Items.GetValue(i));if(c.Retained!=null)Assert.Null(c.Retained.GetValue(i));if(c.Slots!=null)Assert.Null(c.Slots.GetValue(i));}
+                    for(int i=0;i<c.Capacity;i++)if(!occupied[i]){
+                        if(i<c.Items.Length&&c.Items.GetValue(i)!=null)Assert.Fail("Unoccupied mailbox item at "+i);
+                        if(c.Retained?.GetValue(i)!=null)Assert.Fail("Unoccupied mailbox retention at "+i);
+                        if(c.Slots?.GetValue(i)!=null)Assert.Fail("Unoccupied mailbox slot has an owner at "+i);
+                    }
                 }
                 void Slots(object value){
                     var keys=(Array)Read(value,"keys");var values=(Array)Read(value,"values");var edges=(Array)Read(value,"edges");var live=(bool[])Read(value,"live");var free=(int[])Read(value,"free");var next=(int[])Read(value,"next");var buckets=(int[])Read(value,"buckets");int length=(int)Read(value,"length"),count=(int)Read(value,"count"),freeCount=(int)Read(value,"freeCount"),capacity=keys.Length;bool reference=(bool)Read(value,"referenceKeys");
                     foreach(var array in new Array[]{values,edges,live,free,next,buckets})Assert.AreEqual(capacity,array.Length);Assert.That(length,Is.InRange(0,capacity));Assert.That(count,Is.InRange(0,length));Assert.AreEqual(length-count,freeCount);writer.Write(((NavOwnedStorage)value).StorageBytes);writer.Write(capacity);writer.Write(length);writer.Write(count);writer.Write(reference);
                     var holes=new bool[length];for(int i=0;i<freeCount;i++){int slot=free[i];Assert.That(slot,Is.InRange(0,length-1));Assert.False(live[slot]);Assert.False(holes[slot]);holes[slot]=true;writer.Write(slot);}
                     object emptyKey=keys.GetType().GetElementType().IsValueType?Activator.CreateInstance(keys.GetType().GetElementType()):null,emptyValue=values.GetType().GetElementType().IsValueType?Activator.CreateInstance(values.GetType().GetElementType()):null;
-                    int occupied=0;for(int i=0;i<capacity;i++){writer.Write(live[i]);if(live[i]){Assert.Less(i,length);occupied++;Visit(keys.GetValue(i));Visit(values.GetValue(i));Visit(edges.GetValue(i));}else{if(i<length)Assert.True(holes[i]);Assert.AreEqual(emptyKey,keys.GetValue(i));Assert.AreEqual(emptyValue,values.GetValue(i));Assert.Null(edges.GetValue(i));}}Assert.AreEqual(count,occupied);
+                    int occupied=0;
+                    for(int i=0;i<capacity;i++){
+                        writer.Write(live[i]);
+                        if(live[i]){
+                            if(i>=length)Assert.Fail("Live command slot outside the allocated prefix: "+i);
+                            occupied++;
+                            Visit(keys.GetValue(i));Visit(values.GetValue(i));Visit(edges.GetValue(i));
+                        }else{
+                            if(i<length&&!holes[i])Assert.Fail("Untracked free command slot at "+i);
+                            if(!Equals(emptyKey,keys.GetValue(i))||!Equals(emptyValue,values.GetValue(i))||edges.GetValue(i)!=null)
+                                Assert.Fail("Free command slot retains payload at "+i);
+                        }
+                    }
+                    Assert.AreEqual(count,occupied);
                     var indexed=new bool[length];var unique=new HashSet<object>(reference?FactReferenceIdentity.Instance:EqualityComparer<object>.Default);for(int b=0;b<capacity;b++)for(int at=buckets[b];at>=0;at=next[at]){Assert.Less(at,length);Assert.True(live[at]);Assert.False(indexed[at],"hash chain duplicate/cycle");indexed[at]=true;var key=keys.GetValue(at);Assert.True(unique.Add(key));int hash=reference?System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(key):key.GetHashCode();Assert.AreEqual(b,(hash&int.MaxValue)%capacity);}for(int i=0;i<length;i++)Assert.AreEqual(live[i],indexed[i]);
                 }
                 void Name(string name){if(cachedNames)writer.Write(NameBytes(name));else writer.Write(name);}
@@ -386,8 +536,35 @@ namespace Spacewars.Tests.EditMode
                     // are values or views; profile object aliases do not change execution.
                     // Owned storage is an identity graph as well. Runtime transport
                     // links may cycle; read each owner once and retain alias IDs.
-                    if(authority&&(v is NavGeometry||v is NavigationRequest||v is NavOwnedStorage||v is NavigationSession||v is NavigationRoutePort)){if(identities.TryGetValue(v,out var identity)){writer.Write(identity);return;}writer.Write(identities.Count);identities.Add(v,identities.Count);}
+                    if(authority&&(v is NavGeometry||v is NavigationRequest||v is NavOwnedStorage||v is NavigationSession||v is NavigationRoutePort||v is NavCrowd)){if(identities.TryGetValue(v,out var identity)){writer.Write(identity);return;}writer.Write(identities.Count);identities.Add(v,identities.Count);}
                     if(authority&&v is NavigationSession session)BindSession(session);
+                    if(authority&&v is NavigationMotionSources sources)
+                        Assert.Greater(sources.References,0,"Live Native motion sources must remain retained");
+                    if(authority&&restoreProjection&&v is NavigationCrowdNameBacking liveNames)
+                    {
+                        // This mutable live backing is rebuilt from the actor names.
+                        // BODY owner aliases are visited on the saved actors themselves.
+                        Assert.Greater(liveNames.References,0);
+                        Assert.AreEqual(liveNames.Keys.Length*3,liveNames.Names.Length);
+                        writer.Write(liveNames.StorageBytes);
+                        Visit(liveNames.Keys);
+                        for(int i=0;i<liveNames.Names.Length;i++)
+                        {
+                            var name=liveNames.Names[i];
+                            string resolved=name.Resolve();
+                            // The first slot is the surface at the last backing
+                            // refresh. Motion may cross a portal before the next
+                            // refresh. The actor's actual surface is visited above
+                            // through the live crowd and also in the BODY graph.
+                            if(i%3==0)continue;
+                            writer.Write((int)name.Role);
+                            writer.Write(name.Index);
+                            path.Add("actor "+liveNames.Keys[i/3]+(i%3==1?" goal":" failed goal"));
+                            try{Visit(resolved);}finally{path.RemoveAt(path.Count-1);}
+                        }
+                        return;
+                    }
+                    if(authority&&v is PlayableDomain domain)ValidateCombatBridges(domain);
                     if(authority&&mailboxes.TryGetValue(v,out var mailbox)){Mailbox(mailbox);return;}
                     if(authority&&v is Array bound&&boundArrays.TryGetValue(bound,out string role)){writer.Write(role);writer.Write(bound.Length);return;}
                     if(authority&&v is NavigationTransportOwner transport&&transports.TryGetValue(transport,out var transferred)){writer.Write(transport.StorageBytes);writer.Write(transferred.Length);foreach(var row in transferred)Visit(row);return;}
@@ -411,25 +588,31 @@ namespace Spacewars.Tests.EditMode
                     if(cachedNames&&v is int[] integers){writer.Write(integers.Length);var name=TypeName(typeof(int));foreach(int item in integers){writer.Write(name);writer.Write(item);}return;}
                     if(v is IEnumerable rows){var items=rows.Cast<object>().ToArray();if(t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(HashSet<>))items=items.OrderBy(x=>Convert.ToString(x,CultureInfo.InvariantCulture)).ToArray();writer.Write(items.Length);foreach(var row in items)Visit(row);return;}
                     if(cachedNames){foreach(var reader in authority?Describe(t).Authority:Describe(t).Projection){
+                        if(!authority&&restoreProjection&&RestoreRestartsProjection(t,reader.MemberName))continue;
+                        if(authority&&restoreProjection&&t==typeof(NavigationRetentionBudget)&&reader.MemberName=="physical")continue;
                         writer.Write(reader.Name);if(linkedRequests.Contains(v)&&(reader.MemberName=="TransportNext"||reader.MemberName=="TransportPrevious")){writer.Write("validated-transport-link");continue;}var item=reader.Read(v);
                         // Same creator-handle rule as NavigationHostRoot.released above;
                         // packed lifecycle retains every policy and unknown bit except 2.
                         if(authority&&t==typeof(NavigationHostRoot)&&reader.MemberName=="lifecycle")item=(byte)((byte)item&~2);
                         path.Add(reader.MemberName);try{
-                        if(authority&&reader.Ordered){var dictionary=(IDictionary)item;foreach(object knownKey in dictionary.Keys.Cast<object>().OrderBy(x=>(int)x)){Visit(knownKey);Visit(dictionary[knownKey]);}}else Visit(item);
+                        if(authority&&reader.Ordered){var dictionary=(IDictionary)item;foreach(object knownKey in dictionary.Keys.Cast<object>().OrderBy(x=>Convert.ToInt32(x,CultureInfo.InvariantCulture))){Visit(knownKey);Visit(dictionary[knownKey]);}}else Visit(item);
                         }finally{path.RemoveAt(path.Count-1);}
                     }return;}
                     if(authority){foreach(var f in Fields(t,true)){
-                        if(ExcludeField(f))continue;
+                        if(ExcludeField(f)||restoreProjection&&t==typeof(NavigationRetentionBudget)&&f.Name=="physical")continue;
                         Name(f.Name);if(linkedRequests.Contains(v)&&(f.Name=="TransportNext"||f.Name=="TransportPrevious")){writer.Write("validated-transport-link");continue;}var item=f.GetValue(v);
                         if(f.DeclaringType==typeof(NavigationHostRoot)&&f.Name=="lifecycle")item=(byte)((byte)item&~2);
                         path.Add(f.Name);try{
                         // Vision memory and crowd lookup tables do not use insertion order for decisions;
                         // all mutable facts/counters are still read independently.
-                        if(t==typeof(PlayableVision)&&f.Name=="known"||t==typeof(NavCrowd)&&f.Name=="units"){var dictionary=(IDictionary)item;foreach(object knownKey in dictionary.Keys.Cast<object>().OrderBy(x=>(int)x)){Visit(knownKey);Visit(dictionary[knownKey]);}}else Visit(item);
+                        if(OrderedByKey(t,f.Name)){var dictionary=(IDictionary)item;foreach(object knownKey in dictionary.Keys.Cast<object>().OrderBy(x=>Convert.ToInt32(x,CultureInfo.InvariantCulture))){Visit(knownKey);Visit(dictionary[knownKey]);}}else Visit(item);
                         }finally{path.RemoveAt(path.Count-1);}
                     }}else{
-                        foreach(var prop in Properties(t)){if(t==typeof(PlayableSnapshot)&&prop.Name=="Sounds")continue;Name(prop.Name);Visit(prop.GetValue(v));}
+                        foreach(var prop in Properties(t)){
+                            if(t==typeof(PlayableSnapshot)&&prop.Name==nameof(PlayableSnapshot.Sounds))continue;
+                            if(restoreProjection&&RestoreRestartsProjection(t,prop.Name))continue;
+                            Name(prop.Name);Visit(prop.GetValue(v));
+                        }
                         foreach(var f in Fields(t,false)){Name(f.Name);Visit(f.GetValue(v));}
                     }
                 }
@@ -490,11 +673,25 @@ namespace Spacewars.Tests.EditMode
             public new bool Equals(object a,object b)=>ReferenceEquals(a,b);
             public int GetHashCode(object value)=>System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(value);
         }
-        private static void Equal(object a,object b,int tick,bool projections=true)
+        private static void Equal(object a,object b,int tick,bool projections=true,Action<int> verifyOwnership=null)
         {
-            foreach(var domain in new[]{a,b}){var navigation=Nav(domain);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(navigation),navigation.PhysicalHostBudget.PhysicalBytes,"independent reachable ownership tick "+tick);Assert.Zero(navigation.PhysicalHostBudget.HeldBytes);Assert.Zero(navigation.PhysicalHostBudget.ActiveScopes);}
-            var leftFacts=FactBytes(a,true);var rightFacts=FactBytes(b,true);string Hash(byte[] facts){using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(facts));}var actual=Hash(leftFacts);var restored=Hash(rightFacts);
-            if(actual!=restored){
+            foreach(var domain in new[]{a,b}){
+                var navigation=Nav(domain);
+                // Capture materializes the lazy host facade. Compare its live binding on both sides.
+                _=navigation.RoutePort;
+                if(verifyOwnership==null)
+                    Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(navigation),navigation.PhysicalHostBudget.PhysicalBytes,"independent reachable ownership tick "+tick);
+                Assert.Zero(navigation.PhysicalHostBudget.HeldBytes);Assert.Zero(navigation.PhysicalHostBudget.ActiveScopes);
+            }
+            verifyOwnership?.Invoke(tick);
+            // A cold session rebuilds its native worker cache lazily. The caller
+            // accounts for those bytes separately from the persisted facts.
+            bool separateWorkerOwnership=verifyOwnership!=null;
+            var leftFacts=FactBytes(a,true,restoreProjection:separateWorkerOwnership);
+            var rightFacts=FactBytes(b,true,restoreProjection:separateWorkerOwnership);
+            if(!leftFacts.AsSpan().SequenceEqual(rightFacts)){
+                string Hash(byte[] facts){using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(facts));}
+                var actual=Hash(leftFacts);var restored=Hash(rightFacts);
                 int first=0;while(first<Math.Min(leftFacts.Length,rightFacts.Length)&&leftFacts[first]==rightFacts[first])first++;string Around(byte[] facts){int start=Math.Max(0,first-180);return start>=facts.Length?"<end>":Encoding.UTF8.GetString(facts,start,Math.Min(360,facts.Length-start));}TestContext.WriteLine("PRIMARY root fact byte="+first+" left="+Around(leftFacts)+" right="+Around(rightFacts));
                 string Diff(object x,object y,string path,int depth){if(depth>4||x==null||y==null||x.GetType()!=y.GetType())return path;var type=x.GetType();if(type.IsPrimitive||type.IsEnum||x is string||x is decimal)return path+" ("+Convert.ToString(x,CultureInfo.InvariantCulture)+" -> "+Convert.ToString(y,CultureInfo.InvariantCulture)+")";if(x is IEnumerable)return path+" [ordered collection]";var changed=new List<string>();foreach(var f in Fields(type,true)){if(ExcludeField(f))continue;var l=f.GetValue(x);var r=f.GetValue(y);try{if(Facts(l,true)!=Facts(r,true))changed.Add(Diff(l,r,path+"."+f.Name,depth+1));}catch(InvalidOperationException diagnostic){changed.Add(path+"."+f.Name+" [diagnostic unavailable: "+diagnostic.Message+"]");}}return changed.Count==0?path+" [reference aliases]":string.Join("; ",changed);}
                 TestContext.WriteLine("PRIMARY independent authority mismatch before capture tick="+tick+" actual="+actual+" restored="+restored);
@@ -502,13 +699,27 @@ namespace Spacewars.Tests.EditMode
                 var byteEqual=Bytes(a).SequenceEqual(Bytes(b));TestContext.WriteLine("PRIMARY independent authority mismatch tick="+tick+" byteEqual="+byteEqual+" actual="+actual+" restored="+restored+" preCaptureFields="+diagnostic);
                 Assert.Fail("Independent authority mismatch tick="+tick+" byteEqual="+byteEqual+" actual="+actual+" restored="+restored+" preCaptureFields="+diagnostic);
             }
-            Assert.True(Bytes(a).SequenceEqual(Bytes(b)),"complete authority bytes at suffix tick "+tick);
-            if(projections)foreach(PlayableOwner owner in new[]{PlayableOwner.Player,PlayableOwner.Enemy})Assert.AreEqual(Facts(View(a,owner)),Facts(View(b,owner)),"fog projection "+owner+" tick "+tick);
+            ExactByteAssert.AreEqual(Bytes(a),Bytes(b),"complete authority bytes at suffix tick "+tick);
+            if(projections)foreach(PlayableOwner owner in new[]{PlayableOwner.Player,PlayableOwner.Enemy})
+                ExactByteAssert.AreEqual(FactBytes(View(a,owner),restoreProjection:true),FactBytes(View(b,owner),restoreProjection:true),"fog projection "+owner+" tick "+tick);
         }
-        private static void Suffix(object a,object b,int ticks=600)
+        private static void Suffix(object a,object b,int ticks=600,CertifiedWorldRoutes routes=null)
         {
-            Equal(a,b,-1);for(int i=0;i<ticks;i++){Deliver(a,i);Deliver(b,i);Call(a,"Step",1d/30);Call(b,"Step",1d/30);Equal(a,b,i);}
-            var recaptured=Restore(Bytes(b),PlayableProfile.Default);Equal(b,recaptured,ticks);
+            Action<int> ownership=routes==null?null:routes.VerifyOwnership;
+            void Service(object world,int tick)
+            {
+                if(routes==null)Deliver(world,tick);
+                else routes.Deliver((PlayableDomain)world,tick);
+            }
+            Equal(a,b,-1,verifyOwnership:ownership);
+            for(int i=0;i<ticks;i++)
+            {
+                Service(a,i);Service(b,i);Call(a,"Step",1d/30);Call(b,"Step",1d/30);
+                Equal(a,b,i,verifyOwnership:ownership);
+            }
+            var recaptured=(PlayableDomain)Restore(Bytes(b),((PlayableDomain)b).RoutingProfile);
+            routes?.Add(recaptured);
+            Equal(b,recaptured,ticks,verifyOwnership:ownership);
         }
         [Test] public void SlotMapMatchesUnityDictionaryMutationOrderAndRepeatedHydration()
         {
@@ -541,7 +752,10 @@ namespace Spacewars.Tests.EditMode
             int first=Build(a,PlayableBuildingKind.Factory,1,PlayableOwner.Player),second=Build(a,PlayableBuildingKind.Factory,2,PlayableOwner.Player);
             NavPoint Free(PlayableEntityKind kind)=>Enumerable.Range(-40,81).SelectMany(x=>Enumerable.Range(-40,81).Select(z=>new NavPoint(x,z))).First(point=>Nav(a).Crowd.CanPlace(point,PlayableUnitRules.Radius(p,kind)));
             int removed=(int)Call(a,"SpawnUnit",Free(PlayableEntityKind.Tank),PlayableOwner.Player,PlayableEntityKind.Tank);Call(a,"Damage",removed,100000);
-            Call(a,"Damage",first,100000);int replacement=Build(a,PlayableBuildingKind.Factory,1,PlayableOwner.Player);
+            Call(a,"Damage",first,100000);
+            int collapseTicks=(int)Math.Ceiling(p.BuildingDestructionSeconds*30);
+            for(int tick=0;tick<collapseTicks;tick++){Deliver(a,tick);Call(a,"Step",1d/30);}
+            int replacement=Build(a,PlayableBuildingKind.Factory,1,PlayableOwner.Player);
             Call(a,"SpawnUnit",Free(PlayableEntityKind.Explorer),PlayableOwner.Player,PlayableEntityKind.Explorer);
             Assert.AreEqual(PlayableCommandStatus.Accepted,Send(a,20,PlayableCommandKind.SetRally,second,target:new NavPoint(-35,-35)));
             Assert.AreEqual(PlayableCommandStatus.Accepted,Send(a,21,PlayableCommandKind.SetRally,replacement,target:new NavPoint(-34,-35)));
@@ -555,6 +769,53 @@ namespace Spacewars.Tests.EditMode
             Assert.Zero(Units(empty).Count);Assert.Zero(Buildings(empty).Count);Assert.Zero(Nav(empty).Crowd.Units.Count);Assert.Zero((long)D.GetProperty("Tick",F).GetValue(empty));Assert.AreEqual(1,D.GetField("nextId",F).GetValue(empty));
             Assert.Zero(((ICollection)D.GetField("projectiles",F).GetValue(empty)).Count);Assert.Zero(((IDictionary)D.GetField("visions",F).GetValue(empty)).Count);Assert.Zero(Nav(empty).Requests.Count);Assert.Zero(Nav(empty).Answers.Count);
         }
+        [Test]
+        public void ExplorerYieldEligibilitySurvivesExistingWorldSaveFields()
+        {
+            var profile=PlayableProfile.Default;
+            var original=New(profile);
+            var originalCrowd=Nav(original).Crowd;
+            var explorer=originalCrowd.Units.First(unit=>originalCrowd.AllowsExplorerYield(unit.Id));
+            var goal=new NavPoint(explorer.Position.X,explorer.Position.Z-3);
+            Assert.AreEqual(PlayableCommandStatus.Applied,
+                ((PlayableDomain)original).Apply(new PlayableCommand(71,1,"player-1",PlayableCommandKind.Move,new[]{explorer.Id},goal).AsHuman(),out _));
+            var navigation=Nav(original);
+            var kernel=new CertifiedRouteKernel();
+            try
+            {
+                var binding=new PlayableRouteBinding(((PlayableDomain)original).Geometry,profile,navigation.Admission,navigation.RoutePort);
+                for(int pump=0;pump<80&&navigation.IsPending(explorer.Id);pump++)
+                {
+                    kernel.Pump(binding,8);
+                    navigation.ApplyResults();
+                }
+                Assert.False(navigation.IsPending(explorer.Id));
+                Assert.True(explorer.Moving);
+            }
+            finally
+            {
+                kernel.Clear();
+            }
+            Assert.True(originalCrowd.AllowsMovingTurn(explorer.Id));
+            var bytes=Bytes(original);
+            var restored=Restore(bytes,profile);
+            try
+            {
+                CollectionAssert.AreEqual(bytes,Bytes(restored));
+                var restoredCrowd=Nav(restored).Crowd;
+                Assert.True(restoredCrowd.TryGet(explorer.Id,out var saved));
+                Assert.True(restoredCrowd.AllowsMovingTurn(saved.Id));
+                Assert.False(saved.CanYield);
+                Assert.True(restoredCrowd.AllowsExplorerYield(saved.Id));
+                Assert.False(restoredCrowd.AllowsExplorerYield(int.MaxValue));
+            }
+            finally
+            {
+                Call(original,"DestroyOwnedNavigation");
+                Call(restored,"DestroyOwnedNavigation");
+            }
+        }
+
         [TestCase(false)][TestCase(true)] public void IndependentBytesReconstructWithoutGenesisAndContinueEveryTick(bool authored)
         {
             var p=authored?PlayableProfile.ThreeCrossingsDefault:PlayableProfile.Default;var a=New(p);
@@ -567,12 +828,19 @@ namespace Spacewars.Tests.EditMode
         // This is a test infrastructure watchdog, not a gameplay/performance budget.
         [Test,Timeout(1200000)] public void AuthoredPaidQueuesResearchFoundationUpgradeRepairSaleRallySettleAcrossBytes()
         {
-            var p=PlayableProfile.ThreeCrossingsDefault;var a=New(p);foreach(PlayableOwner owner in new[]{PlayableOwner.Player,PlayableOwner.Enemy})Call(a,"AddCredits",owner,100000d);
+            var p=PlayableProfile.ThreeCrossingsDefault;var a=(PlayableDomain)New(p);using var routes=new CertifiedWorldRoutes();routes.Add(a);foreach(PlayableOwner owner in new[]{PlayableOwner.Player,PlayableOwner.Enemy})Call(a,"AddCredits",owner,100000d);
             int factory=Build(a,PlayableBuildingKind.Factory,1,PlayableOwner.Player),science=Build(a,PlayableBuildingKind.ScientificCenter,2,PlayableOwner.Player),refinery=Build(a,PlayableBuildingKind.Refinery,3,PlayableOwner.Player),repair=Build(a,PlayableBuildingKind.Factory,4,PlayableOwner.Player),sale=Build(a,PlayableBuildingKind.Factory,5,PlayableOwner.Player);
             int enemyFactory=Build(a,PlayableBuildingKind.Factory,1,PlayableOwner.Enemy),enemyScience=Build(a,PlayableBuildingKind.ScientificCenter,2,PlayableOwner.Enemy);Build(a,PlayableBuildingKind.Refinery,3,PlayableOwner.Enemy);
-            Call(a,"Damage",repair,17);for(int tick=0;tick<(p.BuildingRepairCombatLockoutSec+1)*30;tick++){Deliver(a,tick);Call(a,"Step",1d/30);}
-            long seq=1;foreach(var f in new[]{factory,enemyFactory})foreach(var kind in new[]{PlayableCommandKind.QueueTank,PlayableCommandKind.QueueExplorer,PlayableCommandKind.QueueShkval})Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,seq++,kind,f,f==factory?PlayableOwner.Player:PlayableOwner.Enemy));
-            foreach(PlayableOwner owner in new[]{PlayableOwner.Player,PlayableOwner.Enemy})foreach(PlayableResearchKind kind in Enum.GetValues(typeof(PlayableResearchKind)))Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,seq++,PlayableCommandKind.QueueResearch,owner==PlayableOwner.Player?science:enemyScience,owner,research:kind));
+            long seq=1;
+            var centerUpgrade=PlayableResearchKind.ScientificCenterUpgrade;
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,seq++,PlayableCommandKind.QueueResearch,science,research:centerUpgrade));
+            Call(a,"AdvanceResearch",PlayableResearchRules.Duration(p,centerUpgrade)+1);
+            Assert.True(View(a,PlayableOwner.Player).Buildings.Single(b=>b.Id==science).PrivateState.Research.Single(r=>r.Kind==centerUpgrade).Complete);
+            Call(a,"Damage",repair,17);for(int tick=0;tick<(p.BuildingRepairCombatLockoutSec+1)*30;tick++){routes.Deliver(a,tick);Call(a,"Step",1d/30);}
+            foreach(var f in new[]{factory,enemyFactory})foreach(var kind in new[]{PlayableCommandKind.QueueTank,PlayableCommandKind.QueueExplorer,PlayableCommandKind.QueueShkval})Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,seq++,kind,f,f==factory?PlayableOwner.Player:PlayableOwner.Enemy));
+            var initialResearch=new[]{PlayableResearchKind.TankChassis,PlayableResearchKind.ExplorerAssaultGuns,PlayableResearchKind.ShkvalGuidance};
+            foreach(PlayableOwner owner in new[]{PlayableOwner.Player,PlayableOwner.Enemy})foreach(var kind in initialResearch)
+                Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,seq++,PlayableCommandKind.QueueResearch,owner==PlayableOwner.Player?science:enemyScience,owner,research:kind),kind.ToString());
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,seq++,PlayableCommandKind.UpgradeRefinery,refinery));
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,seq++,PlayableCommandKind.StartBuildingRepair,repair));Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,seq++,PlayableCommandKind.SellBuilding,sale));
             var site=TerritoryRules.Sites(p).Single(s=>s.Id==2);var blocker=(int)Call(a,"SpawnUnit",site.Slots[3].Position,PlayableOwner.Enemy,PlayableEntityKind.Explorer);
@@ -580,52 +848,111 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(PlayableCommandStatus.Accepted,Send(a,seq++,PlayableCommandKind.SetRally,factory,target:new NavPoint(-35,-35)));
             Assert.AreEqual(PlayableCommandStatus.Accepted,Send(a,seq++,PlayableCommandKind.SetRally,enemyFactory,PlayableOwner.Enemy,new NavPoint(35,35)));
             Call(a,"Step",1d/30);Call(a,"Step",1d/30); // fractional clock, active production, blocked foundation, active probe
-            var initial=View(a,PlayableOwner.Player);Assert.AreEqual(3,initial.Buildings.Single(x=>x.Id==factory).PrivateState.Orders.Count);Assert.True(initial.Buildings.Single(x=>x.Id==factory).PrivateState.Orders[0].Active);Assert.AreEqual(3,initial.Buildings.Single(x=>x.Id==science).PrivateState.Research.Count);Assert.NotNull(initial.Buildings.Single(x=>x.Id==factory).PrivateState.PendingRally);
+            var initial=View(a,PlayableOwner.Player);Assert.AreEqual(3,initial.Buildings.Single(x=>x.Id==factory).PrivateState.Orders.Count);Assert.True(initial.Buildings.Single(x=>x.Id==factory).PrivateState.Orders[0].Active);Assert.AreEqual(3,initial.Buildings.Single(x=>x.Id==science).PrivateState.Research.Count(r=>!r.Complete));Assert.NotNull(initial.Buildings.Single(x=>x.Id==factory).PrivateState.PendingRally);
             Assert.True(initial.Buildings.Single(x=>x.Id==refinery).PrivateState.Upgrade.Active);Assert.True(initial.Buildings.Single(x=>x.Id==repair).PrivateState.Lifecycle.Repairing);Assert.True(initial.Buildings.Single(x=>x.Id==sale).PrivateState.Lifecycle.Selling);Assert.AreEqual(ConstructionPhase.Pending,View(a,PlayableOwner.Enemy).Buildings.Single(x=>x.Id==pending).Phase);
-            var b=Restore(Bytes(a),p);Equal(a,b,-1);
+            var b=(PlayableDomain)Restore(Bytes(a),p);routes.Add(b);Equal(a,b,-1,verifyOwnership:routes.VerifyOwnership);
             int settledAt=-1;for(int tick=0;tick<12000;tick++){
                 if(tick==5){foreach(var d in new[]{a,b})Assert.AreEqual(PlayableCommandStatus.Applied,Send(d,seq,PlayableCommandKind.Hold,blocker,PlayableOwner.Enemy));seq++;}
                 if(tick==8){foreach(var d in new[]{a,b})Assert.AreEqual(PlayableCommandStatus.Applied,Send(d,seq,PlayableCommandKind.Move,blocker,PlayableOwner.Enemy,new NavPoint(35,35)));seq++;}
-                Deliver(a,tick);Deliver(b,tick);Call(a,"Step",1d/30);Call(b,"Step",1d/30);Equal(a,b,tick);
-                if(tick==0||tick==3||tick==600){b=Restore(Bytes(b),p);Equal(a,b,tick);}
+                routes.Deliver(a,tick);routes.Deliver(b,tick);Call(a,"Step",1d/30);Call(b,"Step",1d/30);Equal(a,b,tick,verifyOwnership:routes.VerifyOwnership);
+                if(tick==0||tick==3||tick==600)
+                {
+                    var coldBytes=Bytes(b);
+                    routes.Remove(b);
+                    b=(PlayableDomain)Restore(coldBytes,p);
+                    routes.Add(b);
+                    Equal(a,b,tick,verifyOwnership:routes.VerifyOwnership);
+                }
                 var own=View(a,PlayableOwner.Player);var enemy=View(a,PlayableOwner.Enemy);
                 bool settled=own.Buildings.Where(x=>x.Owner==PlayableOwner.Player).All(x=>x.PrivateState.Orders.Count==0&&x.PrivateState.Research.All(r=>r.Complete)&&!x.PrivateState.Lifecycle.Repairing&&!x.PrivateState.Lifecycle.Selling&&(x.PrivateState.Upgrade?.Active!=true)&&!x.PrivateState.PendingRally.HasValue)&&enemy.Buildings.Where(x=>x.Owner==PlayableOwner.Enemy).All(x=>x.Phase==ConstructionPhase.Ready&&x.PrivateState.Orders.Count==0&&x.PrivateState.Research.All(r=>r.Complete))&&Nav(a).PendingCount==0;
+                if(tick%600==0)
+                {
+                    var lifecycle=own.Buildings.Where(x=>x.Owner==PlayableOwner.Player)
+                        .Concat(enemy.Buildings.Where(x=>x.Owner==PlayableOwner.Enemy))
+                        .Where(x=>x.Phase!=ConstructionPhase.Ready||x.PrivateState.Orders.Count>0||
+                            x.PrivateState.Research.Any(r=>!r.Complete)||x.PrivateState.Lifecycle.Repairing||
+                            x.PrivateState.Lifecycle.Selling||x.PrivateState.Upgrade?.Active==true||
+                            x.PrivateState.PendingRally.HasValue)
+                        .Select(x=>$"{x.Id}:{x.Phase}/p{x.PrivateState.Orders.Count}/r{x.PrivateState.Research.Count(r=>!r.Complete)}/"+
+                            $"repair={x.PrivateState.Lifecycle.Repairing}/sale={x.PrivateState.Lifecycle.Selling}/"+
+                            $"upgrade={x.PrivateState.Upgrade?.Active}/rally={x.PrivateState.PendingRally.HasValue}");
+                    TestContext.Progress.WriteLine($"SAVE_LIFECYCLE tick={tick} routes={Nav(a).PendingCount} {string.Join(" ",lifecycle)}");
+                }
                 if(tick>=600&&settled){settledAt=tick;break;}
             }
             TestContext.WriteLine("seed="+Seed+" profile="+p.ProfileId+"@"+p.Revision+" map="+p.AuthoredMap.Id+"@"+p.AuthoredMap.Revision+" settledSuffixTick="+settledAt);
             Assert.GreaterOrEqual(settledAt,600,"Continue until every seeded pending lifecycle settles, not only 600 ticks.");
             Assert.False(Buildings(a).Contains(sale));Assert.True(View(a,PlayableOwner.Enemy).Buildings.Single(x=>x.Id==pending).Phase==ConstructionPhase.Ready);Assert.AreEqual(p.FactoryHealth,View(a,PlayableOwner.Player).Buildings.Single(x=>x.Id==repair).Health);
-            Equal(a,Restore(Bytes(a),p),settledAt);
+            var settledClone=(PlayableDomain)Restore(Bytes(a),p);
+            routes.Add(settledClone);
+            Equal(a,settledClone,settledAt,verifyOwnership:routes.VerifyOwnership);
         }
         [Test] public void HeldBodyChangeBeforeCaptureReplansAtSameSuffixTick()
         {
-            var p=PlayableProfile.Default;var a=New(p);int mover=(int)Call(a,"SpawnUnit",new NavPoint(-10,10),PlayableOwner.Player,PlayableEntityKind.Explorer),held=(int)Call(a,"SpawnUnit",new NavPoint(-7,10),PlayableOwner.Player,PlayableEntityKind.Tank);
-            Nav(a).Move(mover,new NavPoint(-4,10));Deliver(a,0);Call(a,"Step",1d/30);Nav(a).Stop(held,true);
-            var b=Restore(Bytes(a),p);long before=Nav(a).CaptureState().RequestSequence;Suffix(a,b);Assert.Greater(Nav(a).CaptureState().RequestSequence,before);
+            var p=PlayableProfile.Default;var a=(PlayableDomain)New(p);using var routes=new CertifiedWorldRoutes();routes.Add(a);
+            int mover=(int)Call(a,"SpawnUnit",new NavPoint(-10,10),PlayableOwner.Player,PlayableEntityKind.Explorer),
+                held=(int)Call(a,"SpawnUnit",new NavPoint(-7,10),PlayableOwner.Player,PlayableEntityKind.Tank);
+            Assert.True(Nav(a).Move(mover,new NavPoint(-4,10)));
+            routes.Deliver(a,0);
+            Assert.True(Nav(a).Crowd.Units.Single(u=>u.Id==mover).Moving,"The first route must be installed before HOLD.");
+            Call(a,"Step",1d/30);
+            Nav(a).Stop(held,true);
+            Assert.True(Nav(a).Crowd.Units.Single(u=>u.Id==held).Held);
+            var b=(PlayableDomain)Restore(Bytes(a),p);routes.Add(b);
+            long before=Nav(a).CaptureState().RequestSequence;
+            Assert.True(Nav(a).PrepareDeliveryBarrier());
+            Assert.True(Nav(b).PrepareDeliveryBarrier());
+            Suffix(a,b,routes:routes);
+            Assert.Greater(Nav(a).CaptureState().RequestSequence,before);
         }
-        [Test] public void RegisteredRouteWorldWireRestoresAsOriginalPendingMailboxInput()
+        [Test] public void RegisteredRouteWorldWirePreservesCertifiedWorkThroughColdRestore()
         {
-            var p=PlayableProfile.Default;var a=New(p);
-            int id=(int)Call(a,"SpawnUnit",new NavPoint(-10,10),PlayableOwner.Player,PlayableEntityKind.Explorer);
-            var nav=Nav(a);Assert.True(nav.Move(id,new NavPoint(-5,10)));
-            Assert.True(nav.TryTransferRoute(_=>true,out var registered));
-            var bytes=Bytes(a);var b=Restore(bytes,p);var replayNav=Nav(b);
-            Assert.AreEqual(1,replayNav.Requests.Count);
-            Assert.AreEqual(0,replayNav.RegisteredRouteCount);
-            Assert.True(replayNav.Requests.TryDequeue(out var replay));
-            Assert.AreEqual(registered.Request,replay.Request);
-            Assert.AreEqual(nav.Admission.Groups[0].GroupId,replayNav.Admission.Groups[0].GroupId);
-            Assert.AreEqual(nav.Admission.Groups[0].RootOrderRevision,replayNav.Admission.Groups[0].RootOrderRevision);
-            Assert.AreEqual(nav.Admission.Groups[0].Members[0].AssignedEndpoint,replayNav.Admission.Groups[0].Members[0].AssignedEndpoint);
-            Assert.AreEqual(nav.Admission.Requests[0].Request,replayNav.Admission.Requests[0].Request);
-            Assert.AreEqual(Facts(nav.Admission),Facts(replayNav.Admission),
-                "Complete immutable admission including ordered members, typed endpoints, profile, geometry, HOLD and probes");
-            Assert.False(replayNav.Requests.TryDequeue(out _));
-            Assert.True(nav.TryCompleteRegisteredRoute(new NavigationAnswer(registered,new[]{registered.Goal})));
-            Assert.True(replayNav.Answers.TryEnqueue(new NavigationAnswer(replay,new[]{replay.Goal})));
-            Call(a,"Step",1d/30);Call(b,"Step",1d/30);
-            Assert.AreEqual(nav.AppliedResults,replayNav.AppliedResults);
-            Assert.True(Bytes(a).SequenceEqual(Bytes(b)),"world wire suffix after replay");
+            var data=PlayableProfile.Default.CopyData();
+            data.groundRouteBackend=0;
+            var p=PlayableProfile.Create(data);
+            var a=(PlayableDomain)New(p);
+            var originalHost=new CertifiedRouteKernel();
+            var restoredHost=new CertifiedRouteKernel();
+            PlayableDomain b=null;
+            try
+            {
+                int id=(int)Call(a,"SpawnUnit",new NavPoint(-10,10),PlayableOwner.Player,PlayableEntityKind.Explorer);
+                var nav=a.Navigation;
+                Assert.True(nav.Move(id,new NavPoint(-5,10)));
+                originalHost.PauseAtPhysicalBoundary=()=>nav.RegisteredRouteCount>0;
+                var binding=new PlayableRouteBinding(a.Geometry,p,nav.Admission,nav.RoutePort);
+                for(int pump=0;pump<2000&&nav.RegisteredRouteCount==0;pump++)originalHost.Pump(binding,4);
+                originalHost.PauseAtPhysicalBoundary=null;
+                Assert.AreEqual(1,nav.RegisteredRouteCount,"A real worker must register the pending route before capture.");
+
+                var bytes=Bytes(a);
+                b=(PlayableDomain)Restore(bytes,p);
+                var replay=b.Navigation;
+                Assert.AreEqual(1,replay.RegisteredRouteCount);
+                Assert.AreEqual(0,replay.Requests.Count);
+                Assert.AreEqual(Facts(nav.Admission),Facts(replay.Admission),
+                    "Complete immutable admission including ordered members, typed endpoints, profile, geometry, HOLD and probes");
+                CollectionAssert.AreEqual(bytes,Bytes(b));
+
+                for(int pump=0;pump<4000&&(nav.PendingCount>0||replay.PendingCount>0);pump++)
+                {
+                    originalHost.Pump(new PlayableRouteBinding(a.Geometry,p,nav.Admission,nav.RoutePort),4);
+                    restoredHost.Pump(new PlayableRouteBinding(b.Geometry,p,replay.Admission,replay.RoutePort),4);
+                    nav.ApplyResults();replay.ApplyResults();
+                }
+                Assert.Zero(nav.PendingCount);
+                Assert.Zero(replay.PendingCount);
+                Assert.AreEqual(1,nav.AppliedResults);
+                Assert.AreEqual(nav.AppliedResults,replay.AppliedResults);
+                Call(a,"Step",1d/30);Call(b,"Step",1d/30);
+                CollectionAssert.AreEqual(Bytes(a),Bytes(b),"Exact continuation from registered work.");
+            }
+            finally
+            {
+                originalHost.Clear();restoredHost.Clear();
+                a.Navigation.ReleaseCommittedHostRoot();a.DestroyOwnedNavigation();
+                if(b!=null){b.Navigation.ReleaseCommittedHostRoot();b.DestroyOwnedNavigation();}
+            }
         }
         [Test] public void SellingCenterCascadesToUnfinishedChildrenWithoutNormalization()
         {
@@ -645,11 +972,16 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void StaleGeometryAnswerAndPendingReplacementKeepReferenceBindings()
         {
-            var p=PlayableProfile.Default;var a=New(p);int mover=(int)Call(a,"SpawnUnit",new NavPoint(-10,10),PlayableOwner.Player,PlayableEntityKind.Explorer);
-            Nav(a).Move(mover,new NavPoint(-4,10));Assert.True(Nav(a).Requests.TryDequeue(out var old));
-            Call(a,"AddCredits",PlayableOwner.Player,10000d);Build(a,PlayableBuildingKind.Factory,1,PlayableOwner.Player);
+            var p=PlayableProfile.Default;var a=(PlayableDomain)New(p);using var routes=new CertifiedWorldRoutes();routes.Add(a);
+            int mover=(int)Call(a,"SpawnUnit",new NavPoint(-10,10),PlayableOwner.Player,PlayableEntityKind.Explorer);
+            Assert.True(Nav(a).Move(mover,new NavPoint(-4,10)));
+            Assert.True(Nav(a).Requests.TryDequeue(out var old));
+            Call(a,"AddCredits",PlayableOwner.Player,10000d);
+            Build(a,PlayableBuildingKind.Factory,1,PlayableOwner.Player,routes:routes);
             Assert.True(Nav(a).Answers.TryEnqueue(new NavigationAnswer(old,new[]{old.Goal})));
-            var b=Restore(Bytes(a),p);Equal(a,b,-1);Suffix(a,b);Assert.GreaterOrEqual(Nav(a).RejectedResults,1);
+            var b=(PlayableDomain)Restore(Bytes(a),p);routes.Add(b);
+            Suffix(a,b,routes:routes);
+            Assert.GreaterOrEqual(Nav(a).RejectedResults,1);
         }
         [Test] public void ActiveBurstsAndRocketOutlivingSourceContinueExactly()
         {
@@ -679,7 +1011,17 @@ namespace Spacewars.Tests.EditMode
             using(var stream=new MemoryStream(domain))using(var reader=new BinaryReader(stream))
             {
                 int count=reader.ReadInt32();Assert.Greater(count,0);
-                for(int i=0;i<count;i++){Assert.Greater(reader.ReadInt32(),0);int nameBytes=reader.ReadInt32();Assert.GreaterOrEqual(nameBytes,0);reader.ReadBytes(nameBytes);foreach(var field in PlayableProfileMetadata.PreCrowdFields)reader.ReadDouble();}
+                var fields=PlayableProfileMetadata.PreCrowdFields.Concat(OrbitalProfileMetadata.Fields)
+                    .Concat(PlayableProfileMetadata.WreckFields).Concat(PlayableProfileMetadata.HawkFields)
+                    .Concat(PlayableProfileMetadata.FactoryFields).Concat(PlayableProfileMetadata.TankReverseFields);
+                for(int i=0;i<count;i++)
+                {
+                    Assert.Greater(reader.ReadInt32(),0);
+                    int nameBytes=reader.ReadInt32();
+                    Assert.GreaterOrEqual(nameBytes,0);
+                    Assert.AreEqual(nameBytes,reader.ReadBytes(nameBytes).Length);
+                    foreach(var field in fields)reader.ReadDouble();
+                }
                 return (int)stream.Position;
             }
         }
@@ -695,10 +1037,10 @@ namespace Spacewars.Tests.EditMode
             state=PlayableWorldState.Decode(original);state.SourceIdentity+="changed";AssertRestoreRejected(state.Encode(),p);
             state=PlayableWorldState.Decode(original);state.Binding[5]^=1;AssertRestoreRejected(state.Encode(),p);
             state=PlayableWorldState.Decode(original);BitConverter.GetBytes(-1).CopyTo(state.Domain,state.Domain.Length-4);AssertRestoreRejected(state.Encode(),p); // malformed final rally slot layout
-            state=PlayableWorldState.Decode(original);Assert.AreEqual(9,state.Version);int prefix=TransactionRegistryBytes(state.Domain);Assert.AreEqual((int)D.GetField("nextId",F).GetValue(a),BitConverter.ToInt32(state.Domain,prefix+54),"v9 allocator offset");BitConverter.GetBytes(1).CopyTo(state.Domain,prefix+54);AssertRestoreRejected(state.Encode(),p); // v9 next entity collides
-            state=PlayableWorldState.Decode(original);Assert.AreEqual((long)D.GetField("nextAiSequence",F).GetValue(a),BitConverter.ToInt64(state.Domain,prefix+38),"v9 AI allocator offset");BitConverter.GetBytes(0L).CopyTo(state.Domain,prefix+38);AssertRestoreRejected(state.Encode(),p);
-            state=PlayableWorldState.Decode(original);int incomeCount=BitConverter.ToInt32(state.Domain,prefix+86);Assert.Zero(incomeCount,"cold v9 settlement table");int creditOffset=prefix+90+incomeCount*12;Assert.AreEqual((double)D.GetField("credits",F).GetValue(a),BitConverter.ToDouble(state.Domain,creditOffset),"v9 diagnostic credit offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,creditOffset);AssertRestoreRejected(state.Encode(),p); // v9 negative diagnostic credit balance
-            state=PlayableWorldState.Decode(original);Assert.AreEqual(p.StartingCredits,BitConverter.ToDouble(state.Domain,prefix+18),"v9 owner account offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,prefix+18);AssertRestoreRejected(state.Encode(),p); // v9 negative owner account
+            state=PlayableWorldState.Decode(original);Assert.AreEqual(PlayableWorldState.CurrentVersion,state.Version);int prefix=TransactionRegistryBytes(state.Domain);Assert.AreEqual((int)D.GetField("nextId",F).GetValue(a),BitConverter.ToInt32(state.Domain,prefix+54),"current allocator offset");BitConverter.GetBytes(1).CopyTo(state.Domain,prefix+54);AssertRestoreRejected(state.Encode(),p); // current next entity collides
+            state=PlayableWorldState.Decode(original);Assert.AreEqual((long)D.GetField("nextAiSequence",F).GetValue(a),BitConverter.ToInt64(state.Domain,prefix+38),"current AI allocator offset");BitConverter.GetBytes(0L).CopyTo(state.Domain,prefix+38);AssertRestoreRejected(state.Encode(),p);
+            state=PlayableWorldState.Decode(original);int incomeCount=BitConverter.ToInt32(state.Domain,prefix+86);Assert.Zero(incomeCount,"cold current settlement table");int creditOffset=prefix+90+incomeCount*12;Assert.AreEqual((double)D.GetField("credits",F).GetValue(a),BitConverter.ToDouble(state.Domain,creditOffset),"current diagnostic credit offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,creditOffset);AssertRestoreRejected(state.Encode(),p); // current negative diagnostic credit balance
+            state=PlayableWorldState.Decode(original);Assert.AreEqual(p.StartingCredits,BitConverter.ToDouble(state.Domain,prefix+18),"current owner account offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,prefix+18);AssertRestoreRejected(state.Encode(),p); // current negative owner account
             state=PlayableWorldState.Decode(original);BitConverter.GetBytes(-1).CopyTo(state.Domain,prefix+86);AssertRestoreRejected(state.Encode(),p); // invalid settled-income count
             var income=(System.Collections.Generic.IDictionary<PlayableOwner,double>)D.GetField("settledIncome",F).GetValue(a);
             income.Add(PlayableOwner.Player,-1d);AssertRestoreRejected(Bytes(a),p);income[PlayableOwner.Player]=0d;
@@ -713,9 +1055,12 @@ namespace Spacewars.Tests.EditMode
             var decoded=PlayableWorldState.Decode(original);var independent=Restore(decoded.Encode(),p);Array.Clear(decoded.Domain,0,decoded.Domain.Length);Array.Clear(decoded.Navigation,0,decoded.Navigation.Length);foreach(var vision in decoded.Vision)Array.Clear(vision,0,vision.Length);ExactByteAssert.AreEqual(original,Bytes(independent),"Decoded arrays cannot mutate hydrated authority.");
             ExactByteAssert.AreEqual(original,Bytes(Restore(original,p)),"Valid source bytes remain reusable after failed candidates.");
         }
-        [Test] public void ResearchWireRejectsOldVersionAndInvalidWaitingButAcceptsHistoricalCenter()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ResearchWireRejectsOldVersionAndPreservesSaleOrDestructionRules(bool destroyed)
         {
             var p=PlayableProfile.Default;var a=New(p);Call(a,"AddCredits",PlayableOwner.Player,10000d);
+            Build(a,PlayableBuildingKind.Factory,2,PlayableOwner.Player);
             int center=Build(a,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player);
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,1,PlayableCommandKind.QueueResearch,center,research:PlayableResearchKind.TankChassis));
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,2,PlayableCommandKind.QueueResearch,center,research:PlayableResearchKind.ExplorerAssaultGuns));
@@ -724,11 +1069,25 @@ namespace Spacewars.Tests.EditMode
             duration.SetValue(waiting,1d);AssertRestoreRejected(Bytes(a),p);duration.SetValue(waiting,0d);
             preferred.SetValue(waiting,999999);AssertRestoreRejected(Bytes(a),p);preferred.SetValue(waiting,center);
             var old=PlayableWorldState.Decode(Bytes(a));old.Version=2;Assert.Throws<ArgumentException>(()=>PlayableWorldState.Decode(old.Encode()));
-            Call(a,"Damage",center,(int)p.ScienceHealth+1);
+            if(destroyed)
+                Call(a,"Damage",center,(int)p.ScienceHealth+1);
+            else
+            {
+                Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,3,PlayableCommandKind.SellBuilding,center));
+                int saleTicks=(int)Math.Ceiling(p.BuildingSaleDemolitionSec*30)+1;
+                for(int tick=0;tick<saleTicks;tick++){Deliver(a,tick);Call(a,"Step",1d/30);}
+            }
+            Assert.False(Buildings(a).Contains(center));
             var sourceBytes=Bytes(a);var detached=Restore(sourceBytes,p);ExactByteAssert.AreEqual(sourceBytes,Bytes(detached));
-            Assert.AreEqual(1,View(detached,PlayableOwner.Player).OwnerResearch.Count);
-            Assert.False(View(detached,PlayableOwner.Player).OwnerResearch[0].Active);
-            Assert.AreEqual(center,View(detached,PlayableOwner.Player).OwnerResearch[0].CenterId);
+            var orders=View(detached,PlayableOwner.Player).OwnerResearch;
+            if(destroyed)
+                Assert.IsEmpty(orders,"Destroying the center clears all unfinished research.");
+            else
+            {
+                Assert.AreEqual(1,orders.Count);
+                Assert.False(orders[0].Active);
+                Assert.AreEqual(center,orders[0].CenterId);
+            }
         }
         private static void AssertRestoreRejected(byte[] bytes,PlayableProfile p){var e=Assert.Throws<TargetInvocationException>(()=>Restore(bytes,p));Assert.IsInstanceOf<ArgumentException>(e.InnerException);}
         [Test] public void BindingCoversEveryEffectivePrimitiveProfileProperty()
@@ -736,7 +1095,14 @@ namespace Spacewars.Tests.EditMode
             var wire=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.WorldWire",true);var binding=wire.GetMethod("Binding",BindingFlags.Static|BindingFlags.NonPublic);
             foreach(var prop in typeof(PlayableProfile).GetProperties(BindingFlags.Public|BindingFlags.Instance).Where(x=>x.GetSetMethod(true)!=null&&(x.PropertyType==typeof(double)||x.PropertyType==typeof(int)||x.PropertyType==typeof(bool)||x.PropertyType==typeof(string)))){
                 var profile=PlayableProfile.Default;var before=(byte[])binding.Invoke(null,new object[]{profile,false});var value=prop.GetValue(profile);object altered=prop.PropertyType==typeof(double)?(object)((double)value+.001):prop.PropertyType==typeof(int)?(object)((int)value+1):prop.PropertyType==typeof(bool)?(object)!(bool)value:(object)((string)value+":changed");
-                prop.SetValue(profile,altered);Assert.False(before.SequenceEqual((byte[])binding.Invoke(null,new object[]{profile,false})),"Wire identity must cover effective profile field "+prop.Name);
+                if(prop.Name==nameof(PlayableProfile.SkatWreckChancePercent))
+                {
+                    var edited=profile.CopyData();
+                    edited.skatWreckChancePercent=(double)altered;
+                    profile=PlayableProfile.Create(edited);
+                }
+                else prop.SetValue(profile,altered);
+                Assert.False(before.SequenceEqual((byte[])binding.Invoke(null,new object[]{profile,false})),"Wire identity must cover effective profile field "+prop.Name);
             }
         }
         [Test] public void CircleWireRetainsExactBoundsAtNonRepresentableMidpoint()

@@ -114,6 +114,7 @@ namespace Spacewars.Runtime
             WorkAllotment, WorkAllotment * 3, 256);
         private static readonly NavGraphCompileLimits Limits = new NavGraphCompileLimits(1048576, 300000, 1200000);
         public NavSchedulerCounters Counters {get{var root=currentPort?.PinCommittedHostRoot();try{return root?.Scheduler.Counters??scheduler.Counters;}finally{root?.Release();}}}
+        internal bool ReuseCompatibleRoutes { get; set; }
         public long SolverEpoch => epoch;
         public string LastProjectionFailure { get; private set; }
         private long OwnedRetainedBytes=>scheduler.Counters.RetainedBytes+OwnedExternalBytes();
@@ -380,13 +381,16 @@ namespace Spacewars.Runtime
             public bool Owns(NavOwnedStorage storage)=>((INavStorageLedgerIdentity)scope).Owns(storage);
             public IDisposable ClaimScratch(long bytes)=>((INavStorageScratchAllocator)scope).ClaimScratch(bytes);
         }
-        internal bool TryRegisterPhysicalOrdinary(PlayableRouteBinding binding)
+        internal bool TryRegisterPhysicalOrdinary(PlayableRouteBinding binding, RecordedGroundRoute recording = null)
         {
             var port=binding.RoutePort;
             if(port==null)throw new ArgumentException("Missing route authority facade.");
             Attach(port);
             if(!port.TryObservePhysicalIngress(out var ingress,out var admissionPin))return false;
             using var observedPin=admissionPin;var observed=observedPin.Value;
+            if (recording != null && (recording.Request != ingress.Request ||
+                recording.Entity != ingress.Entity || recording.Order != ingress.Order))
+                throw new InvalidOperationException("Recorded ground route does not match admitted ingress.");
             if(port.UsesRecastGroundRoutes&&recastPreparation?.HasPendingAttachment(ingress)==true)return false;
             var source=port.PinCommittedHostRoot();
             NavigationRetentionBudget.Scope scope=null;
@@ -415,14 +419,21 @@ namespace Spacewars.Runtime
                     if(provider.EstimatedRetainedBytes>construction)
                         throw new InvalidOperationException("Physical provider exceeded construction reserve.");
                     var prepared=BuildScheduled(observed,ingress,provider);
-                    if(port.UsesRecastGroundRoutes){
+                    if (recording != null)
+                        key = recording.Status == NavSolveStatus.Ready
+                            ? candidate.RegisterRecordedGroundRoute(ingress, prepared, recording, observed.SurfaceProviderId,
+                                observed.AuthoredTerrain, reservation)
+                            : candidate.RegisterRecast(ingress, prepared, null, recording.Status, observed.SurfaceProviderId, reservation);
+                    else if(port.UsesRecastGroundRoutes){
                         recastPreparation??=port.PrepareRecastStartup(binding.Profile,()=>Continue?.Invoke()==false);
-                        if(!recastPreparation.TryGet(observedPin,ingress,provider,reservation,()=>Continue?.Invoke()==false,out var route,out var status))return false;
+                        if(!recastPreparation.TryGet(observedPin,ingress,provider,reservation,()=>Continue?.Invoke()==false,out var route,out var status,ReuseCompatibleRoutes))return false;
                         key=candidate.RegisterRecast(ingress,prepared,route,status,observed.SurfaceProviderId,reservation);
                     }else key=candidate.RegisterOrdinary(ingress,prepared,observed.SurfaceProviderId,reservation,observed.Geometry);
                 }
                 var registrationFrame=CapturePumpFrontier();
-                candidate.SetFrontier(WithCounters(registrationFrame,transfers:registrationFrame.TransfersUsed+1),epoch,checked(ProgressSequence+1));
+                candidate.SetFrontier(recording == null
+                    ? WithCounters(registrationFrame,transfers:registrationFrame.TransfersUsed+1)
+                    : new PumpFrontier(PumpStage.Idle,0,0,0,0,0,0,0,0,0),epoch,checked(ProgressSequence+1));
                 candidate.SetOperation(new NavigationHostRoot.OperationDescriptor(
                     PumpStage.Transfer,transfersUsed,true,false,key.Reference));
                 candidate.SealPrepared();
@@ -598,7 +609,7 @@ namespace Spacewars.Runtime
                 var reservation=scope.CapacityReservationOwned();
                 candidate=source.ForkOwned(reservation);
                 var key=candidate.Projection.First;
-                if(!StageNextPhysicalProjection(candidate,reservation,out var failure))return 0;
+                if(!StageNextPhysicalProjection(candidate,reservation,out var failure,port.Admission.AuthoredTerrain))return 0;
                 if(failure!=null)LastProjectionFailure=failure;
                 var frame=CapturePumpFrontier();
                 bool inPump=frame.Stage==PumpStage.Projection&&frame.OriginalBudget>0;
@@ -625,7 +636,7 @@ namespace Spacewars.Runtime
         // The same paid projection action is used by the ordinary host and
         // the source-runner qualification; no synchronous solver substitute.
         internal static bool StageNextPhysicalProjection(NavigationHostRoot candidate,
-            INavStorageReservation reservation,out string failure)
+            INavStorageReservation reservation,out string failure,IPlayableTerrain authoredTerrain=null)
         {
             failure=null;
                 var key=candidate.Projection.First;
@@ -686,7 +697,7 @@ namespace Spacewars.Runtime
                         state.Point(state.PointCount-1).Equals(state.Expected.Position)&&
                         (!(row.Provider is PartitionNavigationProvider)||
                             state.ReplayCursor==state.PointCount&&state.At.Equals(state.Expected)&&
-                            state.PortalsMatch()))candidate.StageReady(key,reservation);
+                            state.PortalsMatch()))candidate.StageReady(key,reservation,authoredTerrain);
                     else{
                         failure="physical XZ replay sequence/end";
                         candidate.StageReplayFailure(key,reservation);

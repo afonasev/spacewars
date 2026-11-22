@@ -12,12 +12,17 @@ namespace Spacewars.Editor
     {
         public int callbackOrder=>0;
         public void OnPreprocessBuild(BuildReport report)=>Prepare();
+        // Local diagnostic Players keep their fixture catalog. Release entrypoints
+        // require SPACEWARS_RELEASE_VERSION before reaching this callback.
+        public static Newtonsoft.Json.Linq.JObject CatalogForBuild(NativeBalanceStore store,string releaseVersion)
+            =>string.IsNullOrWhiteSpace(releaseVersion)?store.ExportPackage():store.ExportReleasePackage(releaseVersion);
         public static void Prepare()
         {
             var source=Path.GetFullPath(Path.Combine(UnityEngine.Application.dataPath,"../..",NativeBalanceStore.ProjectRelativePath));
             if(!File.Exists(source))throw new BuildFailedException("Missing Git-owned laboratory profiles: "+source);
             var store=new NativeBalanceStore(PlayableProfile.Default,source,true);
-            var catalog=store.ExportPackage();
+            var version=System.Environment.GetEnvironmentVariable("SPACEWARS_RELEASE_VERSION");
+            var catalog=CatalogForBuild(store,version);
             const string path="Assets/Spacewars/Resources/NativeLabCatalog.json";
             File.WriteAllText(path,catalog.ToString()+"\n");AssetDatabase.ImportAsset(path,ImportAssetOptions.ForceSynchronousImport);
         }

@@ -8,6 +8,7 @@ namespace Spacewars.Runtime
         // Trusted local diagnostic host only; private AI checkpoints must never enter network projection.
         public string[] CaptureDiagnosticOwnerIds()=>domain.DiagnosticOwnerIds;
         public PlayableAiOwnerCheckpoint[] CaptureDiagnosticCheckpoints()=>scheduler.Owners.Select(o=>o.Checkpoint).ToArray();
+        public PlayableRepairCancellation[] DrainDiagnosticRepairCancellations()=>domain.DrainRepairCancellations();
         public PlayableSnapshot ParticipantView(string id)=>domain.PlayerSnapshot(sequence,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,seed,domain.OwnerFor(id));
         // Detached live ledger, not the older policy-observation checkpoint. Read-only diagnostics.
         public AiBudgetState[] CaptureDiagnosticBudgets()=>scheduler.Owners.Select(o=>o.Budget.Capture()).ToArray();

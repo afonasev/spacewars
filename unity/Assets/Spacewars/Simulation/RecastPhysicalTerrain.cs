@@ -33,7 +33,7 @@ namespace Spacewars.Simulation
             NavPagedList<NavTypedLeg> owned=null;List<NavTypedLeg> detached=null;
             void Add(NavLocation a,NavLocation b,double cost,NavTypedLegKind kind,string portal){if(reservation!=null){var value=NavTypedLeg.CreateOwned(a,b,cost,kind,portal,reservation,provider);try{owned.Add(value);}finally{value.ReleaseStorage();}}else detached.Add(new NavTypedLeg(a,b,cost,kind,portal));}
             try{
-                if(reservation!=null)owned=NavPagedList<NavTypedLeg>.Create(reservation.TryReserve);else detached=new List<NavTypedLeg>();
+                if(reservation!=null)owned=NavPagedList<NavTypedLeg>.Create(reservation.TryReserve,pageSize:NavTypedLeg.TracePageSlots);else detached=new List<NavTypedLeg>();
                 if(provider.CanSweep(from,target,clearance))Add(from,target,LayeredNavigationProvider.Distance(from.Position,target.Position)*provider.SurfaceCost(from.SurfaceId),NavTypedLegKind.Surface,null);
                 else{
                     NavLayerPortal selected=null;bool forward=false;
@@ -147,7 +147,7 @@ namespace Spacewars.Simulation
             var target=new NavLocation(to,at.SurfaceId);if(!Provider.CanSweep(at,target,clearance)||!IsValidLocation(target,radius))return false;emit?.Invoke(new NavTypedLeg(at,target,LayeredNavigationProvider.Distance(at.Position,to)*Provider.SurfaceCost(at.SurfaceId),NavTypedLegKind.Surface,null));reached=target;return true;
         }
         bool IRecastPhysicalTerrain.TracePhysical(NavLocation from,NavPoint to,double radius,ILayeredNavigationProvider canonical,NavTypedRoute route,int cursor,INavStorageReservation r,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace){
-            trace=null;var list=NavPagedList<NavTypedLeg>.Create(r.TryReserve);try{bool ok=Trace(from,to,radius,leg=>{var value=NavTypedLeg.CreateOwned(leg.From,leg.To,leg.Cost,leg.Kind,leg.PortalId,r,canonical);try{list.Add(value);}finally{value.ReleaseStorage();}},route,cursor,null,out reached);if(!ok)return false;list.Seal();trace=list;list=null;return true;}finally{list?.Release();}
+            trace=null;var list=NavPagedList<NavTypedLeg>.Create(r.TryReserve,pageSize:NavTypedLeg.TracePageSlots);try{bool ok=Trace(from,to,radius,leg=>{var value=NavTypedLeg.CreateOwned(leg.From,leg.To,leg.Cost,leg.Kind,leg.PortalId,r,canonical);try{list.Add(value);}finally{value.ReleaseStorage();}},route,cursor,null,out reached);if(!ok)return false;list.Seal();trace=list;list=null;return true;}finally{list?.Release();}
         }
         public bool CompatibleCombatSurface(NavLocation a,NavLocation b)=>Provider.CompatibleCombatSurface(a,b);
         MapSupport IRecastPhysicalTerrain.PhysicalSupportAt(NavLocation location)=>IsValidLocation(location,0)?Piece(location):null;

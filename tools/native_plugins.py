@@ -8,7 +8,9 @@ MACOS_RECAST_NAME = 'libspacewars_recast.dylib'
 RECAST_EXPORTS = {
     'sw_recast_abi', 'sw_recast_layer_abi', 'sw_recast_memory_abi',
     'sw_recast_memory_scope', 'sw_recast_build', 'sw_recast_build_layered',
+    'sw_recast_build_reusing_tiles', 'sw_recast_reused_tiles',
     'sw_recast_map_free', 'sw_recast_query', 'sw_recast_step',
+    'sw_recast_capture_query', 'sw_recast_restore_query',
     'sw_recast_copy', 'sw_recast_copy_areas', 'sw_recast_copy_portals',
     'sw_recast_query_free', 'sw_recast_live_maps', 'sw_recast_live_queries',
     'sw_recast_allocation_count', 'sw_recast_allocation_bytes',

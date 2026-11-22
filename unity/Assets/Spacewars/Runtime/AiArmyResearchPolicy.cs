@@ -28,7 +28,7 @@ namespace Spacewars.Runtime
                     // Recruit does not collect opponent upgrade intelligence.
                     if(difficulty!=AiDifficulty.Recruit&&visible>=level)memory.RememberArmyResearch(kind,o.Tick);
                     bool behind=difficulty!=AiDifficulty.Recruit&&memory.ArmyResearchSeen(kind,out var first)&&o.Tick-first>=AiProfile.SecondsToTicks(p.ArmySystemsAiCatchupSeconds(difficulty),30)&&!o.OwnerResearch.Any(x=>x.Kind==kind&&x.Complete);
-                    if(behind||timeReady&&difficulty==AiDifficulty.Veteran&&phase!=AiGamePhase.Early)result.priority.Add(kind);
+                    if(behind||timeReady&&AiProfile.BehaviorDifficulty(difficulty)==AiDifficulty.Veteran&&phase!=AiGamePhase.Early)result.priority.Add(kind);
                 }
             }
             return result;

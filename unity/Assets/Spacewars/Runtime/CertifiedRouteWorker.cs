@@ -105,6 +105,7 @@ namespace Spacewars.Runtime
                 Exception cleanupFailure=null;
                 binding.RoutePort.CancelResultPreparation();
                 binding.RoutePort.CancelCommandPreparation();
+                binding.RoutePort.CancelCommandPreparation(scheduledAi:true);
                 // Cleanup also mutates the host and must wait for capture's finally release.
                 EnterHostOperation(cleanup:true);
                 try{kernel.Clear();}catch(Exception ex){cleanupFailure=ex;binding.RoutePort.ReportHostFailure(ex);ReportFailure(ex);

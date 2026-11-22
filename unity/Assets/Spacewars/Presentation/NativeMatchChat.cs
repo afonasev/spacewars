@@ -16,9 +16,10 @@ namespace Spacewars.Presentation
             public readonly int Color;
             public readonly double Created;
             public readonly bool IsAi;
+            internal readonly bool IsFarewell;
             public readonly NavPoint? Point;
-            internal Message(int author,int team,string name,int color,string text,double now,NavPoint? point)
-                :this(author,team,name,color,text,now){IsAi=true;Point=point;}
+            internal Message(int author,int team,string name,int color,string text,double now,NavPoint? point,bool farewell=false)
+                :this(author,team,name,color,text,now){IsAi=true;Point=point;IsFarewell=farewell;}
 
             internal double? Evicted;
             internal double EvictionOpacity;
@@ -84,18 +85,27 @@ namespace Spacewars.Presentation
             Add(new Message(author,evt.Team,roster.ParticipantName(author),roster.ParticipantColor(author),text,now,evt.Point),now);
             return true;
         }
+        internal bool SendAiPublicLine(int author,string text,double now,bool farewell=false)
+        {
+            if(author<0||author>=roster.Participants.Count||roster.Participants[author].Human)return false;
+            Add(new Message(author,Public,roster.ParticipantName(author),roster.ParticipantColor(author),text,now,null,farewell),now);
+            return true;
+        }
+
         private void Add(Message message,double now)
         {
             Advance(now);int channel=message.Team;
-            var active=messages.Where(m=>m.Team==channel&&!m.Evicted.HasValue).ToArray();
-            if(active.Length>=limit){var old=active[0];old.EvictionOpacity=Opacity(old,now);old.Evicted=now;}
+            var active=messages.Where(m=>m.Team==channel&&!m.Evicted.HasValue&&!InFarewellWindow(m,now)).ToArray();
+            if(!InFarewellWindow(message,now)&&active.Length>=limit){var old=active[0];old.EvictionOpacity=Opacity(old,now);old.Evicted=now;}
             messages.Add(message);
             var outgoing=messages.Where(m=>m.Team==channel&&m.Evicted.HasValue).ToArray();
             foreach(var old in outgoing.Take(Math.Max(0,outgoing.Length-limit)))messages.Remove(old);
         }
         public double Opacity(Message message,double now)=>message.Evicted.HasValue?
             Math.Max(0,message.EvictionOpacity*(1-Math.Max(0,now-message.Evicted.Value)/evictionFade)):
-            Math.Clamp(1-Math.Max(0,now-message.Created-readable)/fade,0,1);
+            Math.Clamp(1-Math.Max(0,now-message.Created-(message.IsFarewell?Math.Max(readable,AiDefeatLines.ReadingSeconds):readable))/fade,0,1);
+        private static bool InFarewellWindow(Message message,double now)
+            =>message.IsFarewell&&now-message.Created<AiDefeatLines.ReadingSeconds;
         public void Advance(double now)=>messages.RemoveAll(m=>Opacity(m,now)<=0);
         public Message[] Visible(int viewer,bool spectator,double now)
         {
@@ -103,8 +113,9 @@ namespace Spacewars.Presentation
             bool watching=spectator||spectators.ContainsKey(viewer);
             bool Allowed(Message m)=>m.Team==Public||watching&&m.IsAi||(m.Team==Spectators?watching:
                 !watching&&viewer>=0&&viewer<roster.Participants.Count&&m.Team==roster.Participants[viewer].Team);
-            var selected=new HashSet<Message>(messages.Where(Allowed).Where(m=>!m.Evicted.HasValue).TakeLast(limit)
-                .Concat(messages.Where(Allowed).Where(m=>m.Evicted.HasValue).TakeLast(limit)));
+            var selected=new HashSet<Message>(messages.Where(Allowed).Where(m=>!m.Evicted.HasValue&&!InFarewellWindow(m,now)).TakeLast(limit)
+                .Concat(messages.Where(Allowed).Where(m=>m.Evicted.HasValue).TakeLast(limit))
+                .Concat(messages.Where(Allowed).Where(m=>InFarewellWindow(m,now))));
             return messages.Where(selected.Contains).ToArray();
         }
     }

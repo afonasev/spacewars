@@ -26,7 +26,7 @@ public sealed class NativeLobbyUiTests
         typeof(PlayableBootstrap).GetField("input",Flags).SetValue(app,host.AddComponent<Spacewars.Input.PlayableInput>());
         Call("CreateLobby");
     }
-    [TearDown] public void Teardown(){foreach(var camera in UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsSortMode.None))UnityEngine.Object.DestroyImmediate(camera.gameObject);foreach(var light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None))UnityEngine.Object.DestroyImmediate(light.gameObject);UnityEngine.Object.DestroyImmediate(host);}
+    [TearDown] public void Teardown(){UnityEngine.Object.DestroyImmediate(host);}
     [UnityTest] public IEnumerator RenderedUnitPoseUsesSubstepsAndSnapsPauseAndNewVisibility()
     {
         var profile=PlayableProfile.ThreeCrossingsDefault;var world=Get<PlayableWorld>("world");world.InspectionReveal();
@@ -74,33 +74,44 @@ public sealed class NativeLobbyUiTests
     [UnityTest] public IEnumerator MapAtmosphereMatchesTerrainAndFitsBelowPreview()
     {
         Call("ShowLobby");var root=Get<VisualElement>("root");var lobby=Get<VisualElement>("lobbyScreen");
-        var choice=lobby.Q<DropdownField>("lobby-map-choice");CollectionAssert.AreEqual(new[]{"Дальний берег (2)",BasaltCrownMap.DisplayName,MossHighlandMap.DisplayName,WhiteMeridianMap.DisplayName,"Огненный разлом (6)","Полигон (8)"},choice.choices);
-        var terrainTypes=new[]{typeof(ThreeCrossingsMap),typeof(BasaltCrownMap),typeof(MossHighlandMap),typeof(WhiteMeridianMap),typeof(FoundryMap),typeof(AiTestMap)};
-        var capacities=new[]{2,2,4,4,6,8};
-        var capacityLabels=new[]{"2 игровых места","2 игровых места","4 игровых места","4 игровых места · 2×2","6 игровых мест","8 игровых мест"};
-        var descriptions=new[]{
-            "Переселенцам обещали, что за рекой начнётся безопасная территория. Последний транспорт ушёл туда перед самым прекращением связи.",
-            "Первые колонисты назвали эти чёрные скалы короной нового мира. Позже здесь возвели крепость, и название осталось уже за ней.",
-            "После ухода гарнизона мох скрыл следы дорог и старые опознавательные знаки. Когда в эфире вновь прозвучал позывной заставы, на него ответили сразу несколько армий.",
-            "Белый меридиан появился в навигационных сводках после крушения корабля, чей сигнал стал ориентиром среди соляных бурь. Передатчик всё ещё работает; принадлежность корабля засекречена.",
-            "Заводы у разлома снабжали оружием весь сектор. Их владельцы давно исчезли, но подземный жар до сих пор питает аварийные печи.",
-            "Здесь испытывали автономные боевые соединения для войны, которая тогда казалась далёкой. Приказ о завершении испытаний так и не поступил."};
-        string[] names={"crossings","basalt","moss","meridian","foundry","polygon"};
+        var choice=lobby.Q<DropdownField>("lobby-map-choice");
+        var maps=new[]{
+            ("Переправа (2)",typeof(ThreeCrossingsMap),2,"2 игровых места","crossings",
+                "Переселенцам обещали, что за рекой начнётся безопасная территория. Последний транспорт ушёл туда перед самым прекращением связи."),
+            (NullDockMap.DisplayName,typeof(NullDockMap),2,"2 игровых места","null-dock",
+                "Грузовые палубы Нулевого дока давно отрезаны от торговых маршрутов. Два гарнизона делят оставшиеся запасы, пока за обшивкой безмолвно вращается планета."),
+            (BasaltCrownMap.DisplayName,typeof(BasaltCrownMap),2,"2 игровых места","basalt",
+                "Первые колонисты назвали эти чёрные скалы короной нового мира. Позже здесь возвели крепость, и название осталось уже за ней."),
+            (MossHighlandMap.DisplayName,typeof(MossHighlandMap),4,"4 игровых места","moss",
+                "После ухода гарнизона мох скрыл следы дорог и старые опознавательные знаки. Когда в эфире вновь прозвучал позывной заставы, на него ответили сразу несколько армий."),
+            (WhiteMeridianMap.DisplayName,typeof(WhiteMeridianMap),4,"4 игровых места","meridian",
+                "Белый меридиан появился в навигационных сводках после крушения корабля, чей сигнал стал ориентиром среди соляных бурь. Передатчик всё ещё работает; принадлежность корабля засекречена."),
+            ("Огненный разлом (6)",typeof(FoundryMap),6,"6 игровых мест","foundry",
+                "Заводы у разлома снабжали оружием весь сектор. Их владельцы давно исчезли, но подземный жар до сих пор питает аварийные печи."),
+            (AntennaCityMap.DisplayName,typeof(AntennaCityMap),6,"6 игровых мест","nova-city",
+                "В Нова-Сити никогда не гасли огни. Даже теперь, когда залпы заглушают городской эфир, реклама обещает счастливое завтра, а автоматические поезда прибывают точно по расписанию. Жители уже научились отличать грохот вагонов от приближения бронетехники."),
+            (DeafMirrorMap.DisplayName,typeof(DeafMirrorMap),8,"8 игровых мест","deaf-mirror",
+                "Здесь слушали дальний космос, пока разломы не рассекли дно лунного моря. Уцелели два моста и три вышки связи. Теперь за них сражаются гарнизоны с противоположных берегов."),
+            (CrimsonGroveMap.DisplayName,typeof(CrimsonGroveMap),8,"8 игровых мест","crimson-grove",
+                "Первые экспедиции приняли багряные кроны за цветение нового мира. Теперь под ними проходят границы восьми враждующих гарнизонов."),
+            ("Полигон (8)",typeof(AiTestMap),8,"8 игровых мест","polygon",
+                "Здесь испытывали автономные боевые соединения для войны, которая тогда казалась далёкой. Приказ о завершении испытаний так и не поступил.")};
+        CollectionAssert.AreEqual(maps.Select(map=>map.Item1).ToArray(),choice.choices);
         var panel=host.GetComponent<UIDocument>().panelSettings;
         foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(1600,1000)})
         {
             var image=new RenderTexture(size.x,size.y,24);image.Create();panel.targetTexture=image;root.style.width=1280;root.style.height=800;
             try
             {
-                for(int index=0;index<choice.choices.Count;index++)
+                foreach(var (name,terrain,capacity,capacityLabel,slug,story) in maps)
                 {
-                    choice.value=choice.choices[index];for(int frame=0;frame<8;frame++)yield return null;
-                    Assert.AreEqual(index==4,Get<NativeLobbyConfiguration>("lobbySetup").Foundry);
-                    Assert.AreEqual(terrainTypes[index],Get<PlayableProfile>("profile").AuthoredMap.GetType());
-                    Assert.AreEqual(capacities[index],Get<NativeLobbyConfiguration>("lobbySetup").Capacity(Get<PlayableProfile>("profile")));
-                    Assert.AreEqual(capacityLabels[index],lobby.Q<Label>("lobby-map-capacity").text);
+                    choice.value=name;for(int frame=0;frame<8;frame++)yield return null;
+                    Assert.AreEqual(terrain==typeof(FoundryMap),Get<NativeLobbyConfiguration>("lobbySetup").Foundry);
+                    Assert.AreEqual(terrain,Get<PlayableProfile>("profile").AuthoredMap.GetType());
+                    Assert.AreEqual(capacity,Get<NativeLobbyConfiguration>("lobbySetup").LobbyCapacity(Get<PlayableProfile>("profile")));
+                    Assert.AreEqual(capacityLabel,lobby.Q<Label>("lobby-map-capacity").text);
                     var description=lobby.Q<Label>("lobby-map-description");
-                    Assert.AreEqual(descriptions[index],description.text);
+                    Assert.AreEqual(story,description.text);
                     Assert.AreEqual(DisplayStyle.Flex,description.resolvedStyle.display);
                     Assert.GreaterOrEqual(description.worldBound.yMin,Get<PlayableMapSurface>("lobbyPreview").worldBound.yMax);
                     Assert.LessOrEqual(description.worldBound.yMax,Get<VisualElement>("mapPanel").worldBound.yMax);
@@ -110,7 +121,7 @@ public sealed class NativeLobbyUiTests
                     if(!string.IsNullOrEmpty(output))
                     {
                         var prior=RenderTexture.active;RenderTexture.active=image;var png=new Texture2D(size.x,size.y,TextureFormat.RGB24,false);png.ReadPixels(new Rect(0,0,size.x,size.y),0,0);png.Apply();
-                        System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,names[index]+"-"+size.x+"x"+size.y+".png"),png.EncodeToPNG());RenderTexture.active=prior;UnityEngine.Object.Destroy(png);
+                        System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,slug+"-"+size.x+"x"+size.y+".png"),png.EncodeToPNG());RenderTexture.active=prior;UnityEngine.Object.Destroy(png);
                     }
                 }
             }
@@ -125,19 +136,29 @@ public sealed class NativeLobbyUiTests
         var choice=lobby.Q<DropdownField>("lobby-map-choice");var preview=Get<PlayableMapSurface>("lobbyPreview");
         var panel=host.GetComponent<UIDocument>().panelSettings;
         var image=new RenderTexture(1280,800,24);image.Create();panel.targetTexture=image;root.style.width=1280;root.style.height=800;
-        string[] names={"three-crossings","basalt-crown","moss-highland","white-meridian","foundry","ai-test"};
+        var captures=new[]{
+            ("Переправа (2)","three-crossings"),
+            (NullDockMap.DisplayName,"null-dock"),
+            (BasaltCrownMap.DisplayName,"basalt-crown"),
+            (MossHighlandMap.DisplayName,"moss-highland"),
+            (WhiteMeridianMap.DisplayName,"white-meridian"),
+            ("Огненный разлом (6)","foundry"),
+            (AntennaCityMap.DisplayName,"nova-city"),
+            (DeafMirrorMap.DisplayName,"deaf-mirror"),
+            (CrimsonGroveMap.DisplayName,"crimson-grove"),
+            ("Полигон (8)","ai-test")};
         try
         {
-            for(int index=0;index<names.Length;index++)
+            foreach(var (mapName,fileName) in captures)
             {
-                choice.value=choice.choices[index];
+                Assert.Contains(mapName,choice.choices);choice.value=mapName;
                 preview.style.width=180;preview.style.height=180;preview.style.minHeight=180;preview.style.maxHeight=180;preview.style.flexGrow=0;preview.style.flexShrink=0;
                 for(int frame=0;frame<8;frame++)yield return null;
                 var bounds=preview.worldBound;int x=Mathf.RoundToInt(bounds.xMin),y=Mathf.RoundToInt(800-bounds.yMax);
                 if(bounds.width<179||bounds.height<179||x<0||y<0||x+180>1280||y+180>800)throw new InvalidOperationException("Minimap capture bounds: "+bounds);
                 var prior=RenderTexture.active;RenderTexture.active=image;
                 var png=new Texture2D(180,180,TextureFormat.RGB24,false);
-                try{png.ReadPixels(new Rect(x,y,180,180),0,0);png.Apply();System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,names[index]+".png"),png.EncodeToPNG());}
+                try{png.ReadPixels(new Rect(x,y,180,180),0,0);png.Apply();System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,fileName+".png"),png.EncodeToPNG());}
                 finally{RenderTexture.active=prior;UnityEngine.Object.Destroy(png);}
             }
             choice.value=WhiteMeridianMap.DisplayName;
@@ -221,7 +242,7 @@ public sealed class NativeLobbyUiTests
         Assert.AreEqual(1,lobby.Query<TextField>().ToList().Count);
         Assert.IsNull(lobby.Q<TextField>("lobby-ai-name"));
         Assert.AreEqual("ИИ",lobby.Q<Label>("lobby-ai-label-1").text);
-        CollectionAssert.AreEqual(new[]{"Кадет","Боец","Ветеран"},lobby.Q<DropdownField>("lobby-ai-difficulty").choices);
+        CollectionAssert.AreEqual(new[]{"Кадет","Боец","Ветеран","Эксперт","Читер"},lobby.Q<DropdownField>("lobby-ai-difficulty").choices);
         Assert.AreEqual(5,lobby.Query<DropdownField>().ToList().Count);
         Assert.AreEqual(2,lobby.Query<LobbyColorField>().ToList().Count);
         var launch=lobby.Q<Button>("lobby-launch");Assert.IsNotNull(launch);Assert.AreEqual("Start",launch.Q<Label>("controller-glyph-symbol").text);
@@ -326,11 +347,12 @@ public sealed class NativeLobbyUiTests
             var names=Enumerable.Range(0,8).Select(match.ParticipantName).ToArray();
             Assert.AreEqual(8,names.Select(n=>n.Split('(')[0]).Distinct().Count());
             for(int i=0;i<8;i++)StringAssert.EndsWith(" ("+NativeLobbyConfiguration.DifficultyNames[i%3]+")",names[i]);
-            CollectionAssert.AreEquivalent(names,Get<VisualElement>("spectatorRows").Query<Button>().ToList().Select(b=>b.text));
+            var playerButtons=Get<VisualElement>("spectatorRows").Query<Button>().ToList().Where(button=>button.name.StartsWith("spectator-player-",StringComparison.Ordinal)).ToArray();
+            CollectionAssert.AreEquivalent(names,playerButtons.Select(b=>b.text));
             yield return null;yield return null;
-            foreach(var row in Get<VisualElement>("spectatorRows").Children())
+            foreach(var name in playerButtons)
             {
-                var name=(Button)row[0];Assert.AreEqual(WhiteSpace.NoWrap,name.resolvedStyle.whiteSpace);
+                var row=name.parent;Assert.AreEqual(WhiteSpace.NoWrap,name.resolvedStyle.whiteSpace);
                 float text=name.MeasureTextSize(name.text,0,VisualElement.MeasureMode.Undefined,0,VisualElement.MeasureMode.Undefined).x;
                 Assert.LessOrEqual(text,name.contentRect.width+.5f,name.text+" fits without clipping");
                 Assert.LessOrEqual(name.worldBound.xMax,row[1].worldBound.xMin+.5f,name.text+" does not overlap credits");
@@ -515,6 +537,7 @@ public sealed class NativeLobbyUiTests
         Set("preparing",true);Set("inLobby",true);
         foreach(var difficulty in new[]{AiDifficulty.Recruit,AiDifficulty.Fighter,AiDifficulty.Veteran})
         {
+            Set("preparing",true);Set("inLobby",true);
             var draft=Get<NativeLobbyConfiguration>("lobbySetup");draft.HasExplicitSeed=true;draft.ExplicitSeed=31007+(int)difficulty;
             Get<VisualElement>("lobbyScreen").Q<DropdownField>("lobby-ai-difficulty").value=NativeLobbyConfiguration.DifficultyNames[(int)difficulty];
             Assert.AreEqual(difficulty,draft.Difficulty);Set("matchSetup",draft.Copy());Call("StartSession");
@@ -531,7 +554,9 @@ public sealed class NativeLobbyUiTests
                     Assert.AreEqual(PlayableProfile.ThreeCrossingsDefault.StartingCredits,view.Credits);
                 }
             }
-            Genesis(runtime);var generation=runtime.Generation;runtime.RequestPause(false);yield return Wait(()=>runtime.Latest.Tick>=5,"first ticks "+difficulty);Call("UpdateFrame");
+            Genesis(runtime);var generation=runtime.Generation;
+            Set("preparing",false);Set("inLobby",false);
+            runtime.RequestPause(false);yield return Wait(()=>runtime.Latest.Tick>=5,"first ticks "+difficulty);Call("UpdateFrame");
             Assert.AreEqual(PlayableMatchOutcome.Playing,runtime.Latest.Outcome);Assert.AreEqual(0,runtime.Latest.Metrics.Errors);
             runtime.RequestPause(true);yield return Wait(()=>runtime.Latest.Paused,"paused "+difficulty+" generation="+runtime.Generation);
             // Mutate only at the acknowledged pause barrier. Actual CheckOutcome and
@@ -541,13 +566,117 @@ public sealed class NativeLobbyUiTests
             var hq=enemy.Buildings.Single(b=>b.Owner==PlayableOwner.Enemy&&b.Kind==PlayableBuildingKind.Headquarters);
             domainType.GetMethod("Damage",Flags).Invoke(live,new object[]{hq.Id,100000});runtime.RequestPause(false);
             yield return Wait(()=>runtime.Latest.Outcome==PlayableMatchOutcome.TeamWon,"result "+difficulty);Call("UpdateFrame");
-            Assert.AreEqual("ПОБЕДА",Get<Label>("modalTitle").text);Assert.AreEqual(DisplayStyle.Flex,Get<PostMatchResultsView>("postMatch").Root.style.display.value);
+            Assert.AreEqual("ПОБЕДА",Get<Label>("modalTitle").text);
+            var defeat=runtime.AiDefeats.Single();
+            TestContext.WriteLine("Farewell profile "+runtime.Result.Profile);
+            Assert.AreEqual(runtime.Result.Tick,defeat.Tick,"The outcome freezes on the elimination tick");
+            Assert.AreEqual(1,defeat.Slot);
+            Assert.True(defeat.LostHeadquarters);
+            Assert.IsNull(Get<PostMatchResultsView>("postMatch"),"The results wait while the farewell is readable");
+            var chat=Get<NativeMatchChat>("matchChat");
+            var defeatTexts=AiDefeatLines.Eligible(defeat).Select(line=>line.Text).ToArray();
+            bool Farewell(NativeMatchChat.Message message)=>message.IsAi&&message.Team==NativeMatchChat.Public&&defeatTexts.Contains(message.Text);
+            var farewell=chat.Visible(0,false,Time.unscaledTimeAsDouble).Single(Farewell);
+            Assert.AreEqual(runtime.LobbyConfiguration.ParticipantName(1),farewell.Name);
+            Assert.Contains(farewell,chat.Visible(-1,true,Time.unscaledTimeAsDouble));
+            Call("UpdateFrame");
+            Assert.AreEqual(1,chat.Visible(0,false,Time.unscaledTimeAsDouble).Count(Farewell));
+            Assert.IsNull(Get<PostMatchResultsView>("postMatch"));
+            var frozen=runtime.Result;
+            yield return Wait(()=>{Call("UpdateFrame");return Get<PostMatchResultsView>("postMatch")!=null;},"farewell and results");
+            Assert.GreaterOrEqual(Time.unscaledTimeAsDouble-farewell.Created,AiDefeatLines.ReadingSeconds);
+            Assert.AreSame(frozen,runtime.Result);
+            Assert.AreEqual(DisplayStyle.Flex,Get<PostMatchResultsView>("postMatch").Root.style.display.value);
+            Set("preparing",true);
             Call("Restart");yield return Wait(()=>runtime.IsStopped,"restart stop "+difficulty);Call("UpdateFrame");
             var next=Get<PlayableRuntime>("runtime");Assert.AreNotSame(runtime,next);yield return Wait(()=>next.Latest.Paused,"restart paused "+difficulty);
             Assert.Greater(next.Generation,generation);Genesis(next);Assert.AreEqual(PlayableMatchOutcome.Playing,next.Latest.Outcome);
             next.RequestStop();yield return Wait(()=>next.IsStopped,"next stop "+difficulty);Set("runtime",null);
         }
     }
+    [Test] public void GreetingsSelectAtMostTwoTeamsAndVarySpeakerOrderAndTone()
+    {
+        NativeLobbyParticipant Bot(int team)=>new NativeLobbyParticipant{Team=team};
+        var human=new NativeLobbyParticipant{Team=99,Human=true};
+        var random=new System.Random(7);
+        Assert.IsEmpty(AiGreetingLines.Select(new[]{human},random));
+        var singleTeam=new[]{human,Bot(1),Bot(1)};
+        Assert.That(AiGreetingLines.Select(singleTeam,random).Single().Slot,Is.InRange(1,2));
+        var twoTeams=new[]{human,Bot(1),Bot(1),Bot(2)};
+        CollectionAssert.AreEquivalent(new[]{1,2},
+            AiGreetingLines.Select(twoTeams,random).Select(line=>twoTeams[line.Slot].Team));
+        var manyTeams=new[]{human,Bot(1),Bot(1),Bot(2),Bot(3)};
+        var heardSlots=new System.Collections.Generic.HashSet<int>();
+        var heardFirstTeams=new System.Collections.Generic.HashSet<int>();
+        for(int i=0;i<100;i++)
+        {
+            var selected=AiGreetingLines.Select(manyTeams,random);
+            Assert.AreEqual(2,selected.Length);
+            var first=selected[0];
+            var second=selected[1];
+            Assert.AreNotEqual(manyTeams[first.Slot].Team,manyTeams[second.Slot].Team);
+            Assert.AreNotEqual(first.Phrase.Mood,second.Phrase.Mood);
+            heardSlots.Add(first.Slot);heardSlots.Add(second.Slot);
+            heardFirstTeams.Add(manyTeams[first.Slot].Team);
+        }
+        CollectionAssert.AreEquivalent(new[]{1,2,3,4},heardSlots);
+        CollectionAssert.AreEquivalent(new[]{1,2,3},heardFirstTeams);
+    }
+
+    [UnityTest] public IEnumerator OrdinarySpectatorMatchShowsTwoPublicGreetingsInSequenceWithoutSound()
+    {
+        void Set(string name,object value)=>typeof(PlayableBootstrap).GetField(name,Flags).SetValue(app,value);
+        Call("ShowLobby");SetFirstSeatAi();
+        var draft=Get<NativeLobbyConfiguration>("lobbySetup");
+        draft.HasExplicitSeed=true;draft.ExplicitSeed=31021;
+        Set("preparing",true);Set("matchSetup",draft.Copy());Call("StartSession");
+        var runtime=Get<PlayableRuntime>("runtime");
+        var chat=Get<NativeMatchChat>("matchChat");
+        var catalog=AiGreetingLines.All.ToDictionary(line=>line.Text);
+        var received=new System.Collections.Generic.List<NativeMatchChat.Message>();
+        try
+        {
+            Assert.True(NativeSilentStartup.IsSilent);
+            Assert.True(Get<bool>("spectatorMode"));
+            Call("UpdateFrame");
+            Assert.False(chat.Visible(-1,true,Time.unscaledTimeAsDouble).Any(m=>catalog.ContainsKey(m.Text)));
+            Set("inLobby",false);Set("preparing",false);
+            Get<VisualElement>("lobbyScreen").style.display=DisplayStyle.None;
+            typeof(PlayableBootstrap).GetMethod("SetMatchUi",Flags).Invoke(app,new object[]{true});
+            double start=Time.unscaledTimeAsDouble;
+            runtime.RequestPause(false);
+            double deadline=start+15;
+            while(received.Count<2&&Time.unscaledTimeAsDouble<deadline)
+            {
+                Call("UpdateFrame");
+                foreach(var message in chat.Visible(-1,true,Time.unscaledTimeAsDouble))
+                    if(message.IsAi&&message.Team==NativeMatchChat.Public&&catalog.ContainsKey(message.Text)&&!received.Contains(message))
+                        received.Add(message);
+                yield return null;
+            }
+            Assert.AreEqual(2,received.Count);
+            TestContext.WriteLine("Greeting profile "+runtime.Latest.ProfileId+"@"+runtime.Latest.ProfileRevision);
+            Assert.AreNotEqual(received[0].Author,received[1].Author);
+            var roster=runtime.LobbyConfiguration;
+            foreach(var message in received)Assert.AreEqual(roster.ParticipantName(message.Author),message.Name);
+            Assert.AreNotEqual(roster.Participants[received[0].Author].Team,roster.Participants[received[1].Author].Team);
+            Assert.AreNotEqual(catalog[received[0].Text].Mood,catalog[received[1].Text].Mood);
+            var firstClip=Resources.Load<AudioClip>("Sfx/Voice/"+catalog[received[0].Text].Key);
+            Assert.IsNotNull(firstClip);
+            Assert.GreaterOrEqual(received[0].Created-start,AiGreetingLines.StartDelaySeconds);
+            Assert.GreaterOrEqual(received[1].Created-received[0].Created,firstClip.length+AiGreetingLines.GapSeconds);
+            Assert.Less(received[1].Created-received[0].Created,firstClip.length+AiGreetingLines.GapSeconds+.75);
+            Assert.Greater(runtime.Latest.Tick,0);
+            Assert.AreEqual(PlayableMatchOutcome.Playing,runtime.Latest.Outcome);
+            Assert.IsTrue(Get<VisualElement>("chatFeed").Query<Label>("chat-message").ToList()
+                .Any(row=>row.text.StartsWith("[All]")&&row.text.Contains(received[1].Text)));
+            Assert.AreEqual(2,Get<int>("nextAiGreeting"));
+        }
+        finally { runtime.RequestStop(); }
+        while(!runtime.IsStopped)yield return null;
+        Set("runtime",null);
+    }
+
     private void SetFirstSeatAi()
     {
         var lobby=Get<VisualElement>("lobbyScreen");
@@ -584,15 +713,38 @@ public sealed class NativeLobbyUiTests
         var enemyHq=runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId).Overview.Buildings.Single(b=>b.Owner==PlayableOwner.Enemy&&b.Kind==PlayableBuildingKind.Headquarters);
         domain.GetType().GetMethod("Damage",Flags).Invoke(domain,new object[]{enemyHq.Id,100000});runtime.RequestPause(false);
         yield return Wait(()=>runtime.Latest.Outcome==PlayableMatchOutcome.TeamWon);Call("UpdateFrame");
-        Assert.NotNull(runtime.Result);Assert.AreEqual(1,runtime.Result.WinnerTeam);Assert.AreEqual(DisplayStyle.Flex,Get<PostMatchResultsView>("postMatch").Root.style.display.value);
+        Assert.NotNull(runtime.Result);Assert.AreEqual(1,runtime.Result.WinnerTeam);
+        Assert.IsNull(Get<PostMatchResultsView>("postMatch"));
+        Set("spectatorPerspective",null);Call("UpdateFrame");
+        Assert.IsTrue(Get<VisualElement>("chatFeed").Query<Label>("chat-message").ToList().Any(row=>row.text.StartsWith("[All]")));
+        yield return Wait(()=>{Call("UpdateFrame");return Get<PostMatchResultsView>("postMatch")!=null;});
+        Assert.AreEqual(DisplayStyle.Flex,Get<PostMatchResultsView>("postMatch").Root.style.display.value);
         Set("preparing",true);Call("Restart");yield return Wait(()=>runtime.IsStopped);Call("UpdateFrame");
         runtime=Get<PlayableRuntime>("runtime");yield return Wait(()=>runtime.Latest.Paused);
         Assert.True(Get<bool>("spectatorMode"));Assert.IsNull(Get<PlayableOwner?>("spectatorPerspective"));Assert.False(Get<bool>("spectatorCollapsed"));
         runtime.RequestStop();yield return Wait(()=>runtime.IsStopped);Set("runtime",null);
-        Call("ShowLobby");draft.Participants[0].Human=true;draft.Participants[0].DeviceId=0;Call("RebuildRoster");Call("RefreshLobbyValidation");
-        Set("matchSetup",draft.Copy());Call("StartSession");runtime=Get<PlayableRuntime>("runtime");yield return Wait(()=>runtime.Latest.Paused);
-        Assert.False(Get<bool>("spectatorMode"));Assert.True(Get<Spacewars.Input.PlayableInput>("input").CommandInputEnabled);
-        runtime.RequestStop();yield return Wait(()=>runtime.IsStopped);Set("runtime",null);
+        var keyboard=UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Keyboard>();
+        var mouse=UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Mouse>();
+        try
+        {
+            // The paused restart above used a synthetic preparation flag.
+            Set("preparing",false);
+            Call("ShowLobby");Call("BindLobbyDevices");
+            draft.Participants[0].Human=true;draft.Participants[0].DeviceId=0;Call("RebuildRoster");Call("RefreshLobbyValidation");
+            Assert.True(Get<Button>("launchButton").enabledSelf);
+            Call("LaunchLobbyMatch");
+            Assert.True(Get<bool>("preparing"),"Human launch must enter normal preparation");
+            yield return Wait(()=>{Call("UpdateFrame");return !Get<bool>("preparing")&&!Get<bool>("inLobby");});
+            runtime=Get<PlayableRuntime>("runtime");Call("UpdateFrame");
+            Assert.False(Get<bool>("spectatorMode"));Assert.True(Get<Spacewars.Input.PlayableInput>("input").CommandInputEnabled);
+            runtime.RequestStop();yield return Wait(()=>runtime.IsStopped);Set("runtime",null);
+        }
+        finally
+        {
+            Get<PlayableRuntime>("runtime")?.RequestStop();
+            UnityEngine.InputSystem.InputSystem.RemoveDevice(keyboard);
+            UnityEngine.InputSystem.InputSystem.RemoveDevice(mouse);
+        }
     }
     [UnityTest] public IEnumerator EightPlayerTestMapSelectsAndRendersOneOpenTexturedGround()
     {
@@ -606,7 +758,9 @@ public sealed class NativeLobbyUiTests
         Assert.AreEqual(1,Get<PlayableMapTerrain>("lobbyTerrain").Texture.GetPixels32().Distinct().Count());
         setup.HasExplicitSeed=true;setup.ExplicitSeed=7108;
         yield return CaptureViewerFrame("ai-eight-player-lobby",false);
-        Set("preparing",true);Set("matchSetup",setup.Copy());Call("RecreateMapPresentation");Call("StartSession");
+        Set("preparing",true);Set("matchSetup",setup.Copy());
+        yield return (IEnumerator)typeof(PlayableBootstrap).GetMethod("PrepareMapPresentation",Flags).Invoke(app,null);
+        Call("StartSession");
         var runtime=Get<PlayableRuntime>("runtime");
         try
         {
@@ -717,9 +871,9 @@ public sealed class NativeLobbyUiTests
             yield return Shot("foundry-results");var generation=runtime.Generation;Call("Restart");yield return Wait(()=>runtime.IsStopped);Call("UpdateFrame");
             var next=Get<PlayableRuntime>("runtime");Assert.Greater(next.Generation,generation);Assert.AreEqual(6,next.Latest.Participants.Count);Assert.True(next.Latest.ActiveProfile.AuthoredMap is FoundryMap);
             Call("ReturnToLobby");yield return Wait(()=>next.IsStopped);Call("UpdateFrame");Assert.True(Get<bool>("inLobby"));
-            lobby.Q<DropdownField>("lobby-map-choice").value="Дальний берег (2)";Assert.AreEqual(2,Get<NativeLobbyConfiguration>("lobbySetup").Capacity(Get<PlayableProfile>("profile")));
+            lobby.Q<DropdownField>("lobby-map-choice").value="Переправа (2)";Assert.AreEqual(2,Get<NativeLobbyConfiguration>("lobbySetup").LobbyCapacity(Get<PlayableProfile>("profile")));
             Get<Button>("launchButton").Focus();Get<NativeMenuNavigation>("menuNavigation").Activate();yield return Wait(()=>Get<PlayableRuntime>("runtime")!=null&&!Get<bool>("preparing"));
-            var two=Get<PlayableRuntime>("runtime");Assert.True(two.Latest.ActiveProfile.AuthoredMap is ThreeCrossingsMap);Assert.AreEqual(2,two.LobbyConfiguration.Capacity(two.Latest.ActiveProfile));Assert.False(two.LobbyConfiguration.Foundry);two.RequestStop();yield return Wait(()=>two.IsStopped);Set("runtime",null);
+            var crossings=Get<PlayableRuntime>("runtime");Assert.True(crossings.Latest.ActiveProfile.AuthoredMap is ThreeCrossingsMap);Assert.AreEqual(4,crossings.LobbyConfiguration.Capacity(crossings.Latest.ActiveProfile));Assert.False(crossings.LobbyConfiguration.Foundry);crossings.RequestStop();yield return Wait(()=>crossings.IsStopped);Set("runtime",null);
         }
         finally{Get<PlayableRuntime>("runtime")?.RequestStop();panel.targetTexture=null;Get<Camera>("cameraView").targetTexture=null;scene.RemoveFromHierarchy();image.Release();backdrop.Release();UnityEngine.Object.Destroy(image);UnityEngine.Object.Destroy(backdrop);UnityEngine.InputSystem.InputSystem.RemoveDevice(keyboard);UnityEngine.InputSystem.InputSystem.RemoveDevice(mouse);}
     }
@@ -750,7 +904,8 @@ public sealed class NativeLobbyUiTests
             setup.Participants[0].Name="Алексей";setup.Participants[1].Name="Орион";setup.Participants[2].Name="Вега";setup.Participants[2].Team=2;setup.Participants[2].Difficulty=AiDifficulty.Veteran;setup.Participants[3].Name="Мария";
             typeof(PlayableBootstrap).GetField("lobbyActionError",Flags).SetValue(app,null);Call("RebuildRoster");Call("RefreshLobbyPreview");Get<Button>("launchButton").Focus();yield return Shot("premium-lobby-four");
             lobby.Q<DropdownField>("lobby-device-3").Focus();yield return Shot("premium-lobby-device-focus");
-            foreach(var participant in setup.Participants)participant.Human=false;Call("RebuildRoster");Call("RefreshLobbyValidation");
+            foreach(var participant in setup.Participants){participant.Human=false;participant.ScreenSlot=-1;}
+            Call("RebuildRoster");Call("RefreshLobbyValidation");
             Assert.True(setup.Spectator);Assert.True(Get<Button>("launchButton").enabledSelf);StringAssert.Contains("ЗРИТЕЛЯ",lobby.Q<Label>("lobby-mode-reason").text);
             yield return Shot("premium-lobby-spectator");
             Call("LaunchLobbyMatch");float deadline=Time.realtimeSinceStartup+10;while(Get<bool>("preparing")&&Time.realtimeSinceStartup<deadline)yield return null;

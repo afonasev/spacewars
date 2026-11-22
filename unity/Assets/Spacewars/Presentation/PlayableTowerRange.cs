@@ -16,14 +16,20 @@ namespace Spacewars.Presentation
         public int RangeRelaySiteId {get;private set;}
         public GameObject TowerRangeVisual=>towerRangeObject;
         public static double TowerActionRange(PlayableProfile current,PlayableBuildingKind kind)
-        {return kind==PlayableBuildingKind.GaussTower?current.GaussRange:TerritoryRules.Defensive(kind)?current.TurretRange:0;}
-        public void RenderTowerRange(PlayableSnapshot view,ISet<int> selected,int preferred=0,bool visible=true,int relaySiteId=0)
+        {return TerritoryRules.DefenseRange(current,kind);}
+        public void RenderTowerRange(PlayableSnapshot view,ISet<int> selected,int preferred=0,bool visible=true,int relaySiteId=0,int hovered=0)
         {
             PlayableBuildingSnapshot chosen=null;
             if(visible&&view!=null&&selected!=null)foreach(var building in view.Buildings)
             {
                 if(building.Owner!=view.Owner||building.Phase!=ConstructionPhase.Ready||building.Health<=0||!TerritoryRules.Defensive(building.Kind)||!selected.Contains(building.Id))continue;
                 if(chosen==null||building.Id==preferred||chosen.Id!=preferred&&building.Id<chosen.Id)chosen=building;
+            }
+            if(visible&&view!=null&&hovered>0)foreach(var building in view.Buildings)
+            {
+                if(building.Id==hovered&&building.Phase==ConstructionPhase.Ready&&building.Health>0&&
+                    TerritoryRules.Defensive(building.Kind)&&(view.Vision==null||view.Vision.IsVisible(building.Position)))
+                {chosen=building;relaySiteId=0;break;}
             }
             // Only visible site snapshots drive the selected relay radius.
             TerritorySiteSnapshot relay=null;

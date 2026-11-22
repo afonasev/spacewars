@@ -1,0 +1,1940 @@
+{
+  "schema": 2,
+  "baseline": "v0.6.19",
+  "balance_reviewed": true,
+  "entries": [
+    {
+      "category_ru": "Юниты",
+      "category_en": "Units",
+      "ru": "«Игла» ведёт огонь по наземным целям с дальней дистанции. Заказ открывает готовый научный центр.",
+      "en": "Igla fires at ground targets from long range. A completed science center unlocks production.",
+      "highlight": true,
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.20-igla.png",
+          "source_commit": "b09833014026d6bebd2f05087463853a28a460a1",
+          "ru": "Модели «Вепря» слева и «Иглы» справа.",
+          "en": "Vepr model on the left and Igla on the right."
+        }
+      ]
+    },
+    {
+      "category_ru": "Юниты",
+      "category_en": "Units",
+      "ru": "«Цербер» атакует двумя бортовыми струями и может задеть союзников. Заказ открывает улучшенный научный центр.",
+      "en": "Cerberus attacks with two side-mounted jets that can hit allies. An upgraded science center unlocks production.",
+      "highlight": true,
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.20-cerberus.png",
+          "source_commit": "96f3f2c1a6f345b05302bec9dd805763be22697d",
+          "ru": "«Цербер» ведёт огонь. Кадр из сцены просмотра модели.",
+          "en": "Cerberus fires in the model review scene."
+        }
+      ]
+    },
+    {
+      "category_ru": "Карты и режимы",
+      "category_en": "Maps and modes",
+      "ru": "Тактические карты по Tab показывают вид игрового поля сверху с деталями местности и построек.",
+      "en": "The Tab tactical maps show an overhead view of the battlefield with terrain and building details.",
+      "highlight": true,
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.20-tab-null-dock.png",
+          "source_commit": "8fba92fa1401e6b66ba080e5e1fdd38d1b140726",
+          "ru": "Тактическая карта «Нулевого дока» в матче.",
+          "en": "The Null Dock tactical map during a match."
+        }
+      ]
+    },
+    {
+      "category_ru": "Карты и режимы",
+      "category_en": "Maps and modes",
+      "ru": "В режиме разделённого экрана каждый игрок видит свой туман войны и свои отметки на тактической карте.",
+      "en": "In split-screen, each player sees their own fog of war and markers on the tactical map."
+    },
+    {
+      "category_ru": "Карты и режимы",
+      "category_en": "Maps and modes",
+      "ru": "На тактической карте «Нулевого дока» видны площадки двух ретрансляторов и границы зон захвата.",
+      "en": "The Null Dock tactical map shows both relay platforms and their capture boundaries.",
+      "highlight": true,
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.20-tab-null-dock-relays.png",
+          "source_commit": "7ee210b444432128e41ca137b72c80bdd6a2fb5a",
+          "ru": "Площадки и зоны захвата ретрансляторов «Нулевого дока».",
+          "en": "The Null Dock relay platforms and capture zones."
+        }
+      ]
+    },
+    {
+      "category_ru": "Карты и режимы",
+      "category_en": "Maps and modes",
+      "ru": "«Море Молчания» добавляет лунную карту с обсерваториями, мостами и восемью стартовыми местами.",
+      "en": "Sea of Silence adds a lunar map with observatories, bridges and eight starting positions.",
+      "highlight": true,
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.20-sea-of-silence.png",
+          "source_commit": "97d29fa353f26651c290179b34dc672d24a8716a",
+          "ru": "Общий вид «Моря Молчания».",
+          "en": "Overview of Sea of Silence."
+        }
+      ]
+    },
+    {
+      "category_ru": "Карты и режимы",
+      "category_en": "Maps and modes",
+      "ru": "Добавлен режим доминирования за ретрансляторы",
+      "en": "Added relay domination",
+      "highlight": true,
+      "balance": {
+        "before": {
+          "ru": "Захват объектов давал преимущество в обычном матче",
+          "en": "Taking objectives gave an advantage in a standard match"
+        },
+        "after": {
+          "ru": "В доминировании удержание ретрансляторов приближает команду к победе по очкам",
+          "en": "In domination, holding relays brings a team closer to victory on points"
+        }
+      }
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Юниты, которые освобождаются в разное время, выполняют общий приказ из очереди и занимают каждый своё место в строю.",
+      "en": "Units that finish earlier orders at different times can execute the same queued move and take separate formation slots."
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Когда отряд ИИ отходит, подкрепления в пути получают безопасный маршрут к своим зданиям.",
+      "en": "When an AI army retreats, reinforcements still on the way can redirect to safety at friendly buildings."
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Приказ «Атаковать на ходу» сохраняется и восстанавливается, когда навигация заново прокладывает боевой маршрут.",
+      "en": "Attack-move orders survive saving and loading after navigation rebuilds a combat route."
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Юниты движутся по независимым маршрутам",
+      "en": "Units move along independent routes",
+      "highlight": true,
+      "balance": {
+        "before": {
+          "ru": "Участники наземной группы подстраивали движение под общий марш",
+          "en": "Ground group members adjusted movement to the shared march"
+        },
+        "after": {
+          "ru": "Каждый юнит следует собственному маршруту к назначенной позиции",
+          "en": "Each unit follows its own route to its assigned position"
+        }
+      }
+    },
+    {
+      "category_ru": "Орбитальные способности",
+      "category_en": "Orbital abilities",
+      "ru": "Орбитальное подкрепление доставляет юнитов на подходящую площадку. При выборе места видны позиции высадки.",
+      "en": "Orbital reinforcements deliver units to a valid landing area. Targeting shows their arrival positions.",
+      "highlight": true
+    },
+    {
+      "category_ru": "Орбитальные способности",
+      "category_en": "Orbital abilities",
+      "ru": "Ядерный удар предупреждает о зоне попадания. Прицел показывает, доступна ли выбранная точка.",
+      "en": "A nuclear strike warns players around the impact area. The reticle shows whether the target is valid.",
+      "highlight": true,
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.20-strike.png",
+          "source_commit": "b52a6bb522bb1e6a363b546a6af40b0b3750b1fe",
+          "ru": "Прицел на доступной точке.",
+          "en": "Reticle on a valid target."
+        }
+      ]
+    },
+    {
+      "category_ru": "Юниты",
+      "category_en": "Units",
+      "ru": "«Скат» ремонтирует союзников с воздуха и поворачивается по направлению полёта.",
+      "en": "Skat repairs allies from the air and turns to face its flight direction."
+    },
+    {
+      "category_ru": "Юниты",
+      "category_en": "Units",
+      "ru": "После исследования «Ракетная установка» «Исследователь» выпускает по две ракеты и может стрелять на ходу.",
+      "en": "After the Rocket Launcher research, Explorers fire two rockets per salvo and can shoot on the move."
+    },
+    {
+      "category_ru": "Юниты",
+      "category_en": "Units",
+      "ru": "Новые машины оставляют траки и обломки.",
+      "en": "New ground vehicles leave tracks and wrecks."
+    },
+    {
+      "category_ru": "Юниты",
+      "category_en": "Units",
+      "ru": "Портреты новых юнитов видны при производстве и в итогах матча.",
+      "en": "New unit portraits appear in production and match results."
+    },
+    {
+      "category_ru": "Карты и режимы",
+      "category_en": "Maps and modes",
+      "ru": "В лобби доступны дуэли и свободные бои на картах с достаточным числом стартовых мест. «Переправа» остаётся картой 1×1.",
+      "en": "Lobby supports duels and free-for-all on maps with enough starts. Crossings remains a 1v1 map."
+    },
+    {
+      "category_ru": "Карты и режимы",
+      "category_en": "Maps and modes",
+      "ru": "В Нова-Сити переработаны районы и проходы вокруг площади.",
+      "en": "Nova City has reworked districts and passages around the forum."
+    },
+    {
+      "category_ru": "Карты и режимы",
+      "category_en": "Maps and modes",
+      "ru": "Окна Нова-Сити загораются вслед за видимым движением на улице.",
+      "en": "Nova City windows light up with visible street activity."
+    },
+    {
+      "category_ru": "Карты и режимы",
+      "category_en": "Maps and modes",
+      "ru": "Площадки шахт и часть строительных площадок развёрнуты по местным дорогам и настилам.",
+      "en": "Mine pads and some construction pads now follow nearby roads and decks."
+    },
+    {
+      "category_ru": "Карты и режимы",
+      "category_en": "Maps and modes",
+      "ru": "Обновлены дороги, рельеф и площадки на «Переправе» и «Базальтовом венце».",
+      "en": "Crossings and Basalt Crown have updated roads, terrain and yards."
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Выпущенные ботом подкрепления идут к действующей цели штурма.",
+      "en": "AI reinforcements head toward the active assault objective after leaving production."
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Боты удерживают полезные гарнизоны и возобновляют атакующее движение после боя.",
+      "en": "Bots retain useful garrisons and resume attack-move after combat."
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Боты ищут подходы в обход башен и занимают позиции для защиты ретрансляторов и шахт.",
+      "en": "Bots seek approaches around towers and take positions to defend relays and mines."
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Исправлены остановки техники у выходов фабрик, на стыках поверхностей и при восстановлении маршрутов.",
+      "en": "Fixed movement stalls at factory exits and surface seams and during route recovery."
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Прямой приказ игрока остаётся в очереди, если цель скрылась из виду. Юнит возобновит атаку, когда снова увидит цель.",
+      "en": "A player-issued direct attack stays queued when its target leaves sight. The unit resumes the attack when it can see the target again."
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Одиночный приказ движения ведёт юнит к указанной точке или к ближайшей доступной позиции, если точка закрыта.",
+      "en": "A single-unit move goes to the selected point or the nearest reachable spot when the point is blocked."
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Боты учитывают производство и ремонт во время длительной атаки.",
+      "en": "Bots account for production and repair during sustained attacks."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Тактическая карта Tab открывается в перспективе текущего игрока и сохраняет выбывших игроков в списке.",
+      "en": "The Tab map follows the current player perspective and keeps eliminated players in the roster."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Список на карте Tab показывает имена противников отдельной группой.",
+      "en": "The Tab roster groups opponent names together."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Игровой контроллер перебирает последние пять событий кнопкой вверх.",
+      "en": "The controller Up button cycles through the last five match events."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Выбор группы с геймпада сохраняет положение камеры.",
+      "en": "Selecting a group with a gamepad leaves the camera in place."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Выбор отдельного юнита стал точнее на загруженном экране.",
+      "en": "Single-unit selection is easier on busy screens."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "График армии учитывает события производства.",
+      "en": "The army chart counts production events."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Итоги матча показывают доход от захваченных ретрансляторов.",
+      "en": "Match results show income from captured relays."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Значки улучшений используют шевроны по уровню исследования.",
+      "en": "Upgrade icons use chevrons to show research tiers."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Добавлена настройка отображения обломков.",
+      "en": "Added a setting for wreck rendering."
+    },
+    {
+      "category_ru": "Полигон и лаборатория",
+      "category_en": "Proving ground and lab",
+      "ru": "На полигоне можно удалить выбранные юниты.",
+      "en": "Selected units can be deleted at the proving ground."
+    },
+    {
+      "category_ru": "Полигон и лаборатория",
+      "category_en": "Proving ground and lab",
+      "ru": "Сброс полигона восстанавливает исходную расстановку.",
+      "en": "Reset restores the original proving-ground arrangement."
+    },
+    {
+      "category_ru": "Полигон и лаборатория",
+      "category_en": "Proving ground and lab",
+      "ru": "Исследования на полигоне объединены по группам.",
+      "en": "Proving-ground research is grouped by upgrade line."
+    },
+    {
+      "category_ru": "Полигон и лаборатория",
+      "category_en": "Proving ground and lab",
+      "ru": "Параметры баланса и ИИ входят в один профиль по умолчанию.",
+      "en": "Balance and AI settings now share one default profile."
+    },
+    {
+      "category_ru": "Звук",
+      "category_en": "Audio",
+      "ru": "«Вепрь», «Исследователь», «Игла», «Цербер» и «Скат» получили радиореплики.",
+      "en": "Vepr, Explorer, Igla, Cerberus and Skat have radio responses."
+    },
+    {
+      "category_ru": "Звук",
+      "category_en": "Audio",
+      "ru": "Обновлены звуки оружия «Вепря», «Исследователя», «Ястреба» и «Шквала».",
+      "en": "Updated weapon sounds for Vepr, Explorer, Hawk and Shkval."
+    },
+    {
+      "category_ru": "Звук",
+      "category_en": "Audio",
+      "ru": "Боты озвучивают поражение перед экраном итогов.",
+      "en": "Bots acknowledge defeat before the results screen."
+    },
+    {
+      "category_ru": "Звук",
+      "category_en": "Audio",
+      "ru": "Обновлён звук обрушения зданий.",
+      "en": "Updated the sound of building collapse."
+    },
+    {
+      "category_ru": "Звук",
+      "category_en": "Audio",
+      "ru": "Спуск ядерной ракеты получил отдельный звук.",
+      "en": "Nuclear missile descent has its own sound."
+    },
+    {
+      "category_ru": "Орбитальные способности",
+      "category_en": "Orbital abilities",
+      "ru": "Пересмотрена лестница эскалации",
+      "en": "Escalation progression was revised",
+      "balance": {
+        "before": {
+          "ru": "Обычный набор включал пять ступеней",
+          "en": "The standard progression had five tiers"
+        },
+        "after": {
+          "ru": "В обычном матче доступно четыре способности",
+          "en": "A standard match offers four abilities"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Шахты истощают запас",
+      "en": "Mines deplete their reserves",
+      "balance": {
+        "before": {
+          "ru": "Площадки давали доход без истощения",
+          "en": "Sites kept generating income without depletion"
+        },
+        "after": {
+          "ru": "Площадка начинает с запасом и после истощения даёт часть обычного дохода",
+          "en": "A site starts with reserves and yields a share of normal income after depletion"
+        }
+      }
+    },
+    {
+      "category_ru": "Приказы и ИИ",
+      "category_en": "Orders and AI",
+      "ru": "Эксперт и Читер разделяют настройки игры",
+      "en": "Expert and Cheater use distinct difficulty settings",
+      "balance": {
+        "before": {
+          "ru": "Преимущество в доходе было связано с настройками поведения высокого уровня",
+          "en": "The income advantage was coupled to high-difficulty behavior settings"
+        },
+        "after": {
+          "ru": "Читер получает отдельную надбавку к доходу. Эксперт играет без неё",
+          "en": "Cheater receives a separate income bonus. Expert plays without it"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — угол наведения",
+      "en": "Cerberus aim arc",
+      "balance": {
+        "before": null,
+        "after": 30,
+        "unit": {
+          "ru": "°",
+          "en": "°"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — охлаждение огнемёта",
+      "en": "Cerberus weapon cooldown",
+      "balance": {
+        "before": null,
+        "after": 1,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — стоимость",
+      "en": "Cerberus cost",
+      "balance": {
+        "before": null,
+        "after": 400,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — урон",
+      "en": "Cerberus damage",
+      "balance": {
+        "before": null,
+        "after": 20,
+        "unit": {
+          "ru": "HP",
+          "en": "HP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — время производства",
+      "en": "Cerberus production time",
+      "balance": {
+        "before": null,
+        "after": 45,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — дальность открытия огня",
+      "en": "Cerberus engagement range",
+      "balance": {
+        "before": null,
+        "after": 2.5,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — непрерывная работа огнемёта",
+      "en": "Cerberus continuous firing time",
+      "balance": {
+        "before": null,
+        "after": 2,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — здоровье",
+      "en": "Cerberus health",
+      "balance": {
+        "before": null,
+        "after": 400,
+        "unit": {
+          "ru": "HP",
+          "en": "HP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — мест в армии",
+      "en": "Cerberus army slots",
+      "balance": {
+        "before": null,
+        "after": 10,
+        "unit": {
+          "ru": "слоты",
+          "en": "slots"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — дальность",
+      "en": "Cerberus range",
+      "balance": {
+        "before": null,
+        "after": 4,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — скорость",
+      "en": "Cerberus speed",
+      "balance": {
+        "before": null,
+        "after": 2.4,
+        "unit": {
+          "ru": "м/с",
+          "en": "m/s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Цербер» — радиус обзора",
+      "en": "Cerberus vision radius",
+      "balance": {
+        "before": null,
+        "after": 13,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Урон по строящемуся зданию",
+      "en": "Damage against buildings under construction",
+      "balance": {
+        "before": 1.5,
+        "after": 2,
+        "unit": {
+          "ru": "×",
+          "en": "×"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Защитные системы II — стоимость исследования",
+      "en": "Defensive systems II research cost",
+      "balance": {
+        "before": 300,
+        "after": 250,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Защитные системы III — стоимость исследования",
+      "en": "Defensive systems III research cost",
+      "balance": {
+        "before": 400,
+        "after": 300,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Ракеты «Исследователя» — стоимость исследования",
+      "en": "Explorer rockets research cost",
+      "balance": {
+        "before": 300,
+        "after": 200,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Ракеты «Исследователя» — время исследования",
+      "en": "Explorer rockets research time",
+      "balance": {
+        "before": 30,
+        "after": 40,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Исследователь» — здоровье",
+      "en": "Explorer health",
+      "balance": {
+        "before": 70,
+        "after": 80,
+        "unit": {
+          "ru": "HP",
+          "en": "HP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Исследователь» — дальность",
+      "en": "Explorer range",
+      "balance": {
+        "before": 6.5,
+        "after": 7,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Фабрика — время строительства",
+      "en": "Factory build time",
+      "balance": {
+        "before": 15,
+        "after": 20,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Фабрика — время улучшения",
+      "en": "Factory upgrade time",
+      "balance": {
+        "before": 15,
+        "after": 20,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Фабрика — радиус обзора",
+      "en": "Factory vision radius",
+      "balance": {
+        "before": 14,
+        "after": 12,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Гаусс-башня — время строительства",
+      "en": "Gauss tower build time",
+      "balance": {
+        "before": 15,
+        "after": 25,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Гаусс-башня — радиус обзора",
+      "en": "Gauss tower vision radius",
+      "balance": {
+        "before": 11.5,
+        "after": 12,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Ангар — время строительства",
+      "en": "Hangar build time",
+      "balance": {
+        "before": 15,
+        "after": 20,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Ангар — время улучшения",
+      "en": "Hangar upgrade time",
+      "balance": {
+        "before": 15,
+        "after": 20,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Ангар — радиус обзора",
+      "en": "Hangar vision radius",
+      "balance": {
+        "before": 14,
+        "after": 12,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Ястреб» — подготовка к выстрелу",
+      "en": "Hawk shot preparation",
+      "balance": {
+        "before": 2,
+        "after": 1,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Ястреб» — перезарядка",
+      "en": "Hawk reload",
+      "balance": {
+        "before": 2.5,
+        "after": 1,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Ястреб» — интервал внутри залпа",
+      "en": "Hawk time between salvo shots",
+      "balance": {
+        "before": 0.5,
+        "after": 0.8,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Ястреб» — стоимость исследования залпа",
+      "en": "Hawk salvo research cost",
+      "balance": {
+        "before": 300,
+        "after": 200,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Ястреб» — время исследования залпа",
+      "en": "Hawk salvo research time",
+      "balance": {
+        "before": 30,
+        "after": 40,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Ястреб» — подготовка к выстрелу",
+      "en": "Hawk shot preparation",
+      "balance": {
+        "before": 1.5,
+        "after": 0.5,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Ястреб» — интервал внутри залпа",
+      "en": "Hawk time between salvo shots",
+      "balance": {
+        "before": 0.18,
+        "after": 0.2,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Штаб — время строительства",
+      "en": "Headquarters build time",
+      "balance": {
+        "before": 25,
+        "after": 40,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Штаб — радиус захвата",
+      "en": "Headquarters capture radius",
+      "balance": {
+        "before": 4.5,
+        "after": 5,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Штаб — время захвата",
+      "en": "Headquarters capture time",
+      "balance": {
+        "before": 5,
+        "after": 10,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Штаб — радиус обзора",
+      "en": "Headquarters vision radius",
+      "balance": {
+        "before": 22,
+        "after": 18,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — стоимость",
+      "en": "Igla cost",
+      "balance": {
+        "before": null,
+        "after": 250,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — урон",
+      "en": "Igla damage",
+      "balance": {
+        "before": null,
+        "after": 16,
+        "unit": {
+          "ru": "HP",
+          "en": "HP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — время производства",
+      "en": "Igla production time",
+      "balance": {
+        "before": null,
+        "after": 25,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — угол наведения",
+      "en": "Igla aim arc",
+      "balance": {
+        "before": null,
+        "after": 15,
+        "unit": {
+          "ru": "°",
+          "en": "°"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — здоровье",
+      "en": "Igla health",
+      "balance": {
+        "before": null,
+        "after": 90,
+        "unit": {
+          "ru": "HP",
+          "en": "HP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — мест в армии",
+      "en": "Igla army slots",
+      "balance": {
+        "before": null,
+        "after": 3,
+        "unit": {
+          "ru": "слоты",
+          "en": "slots"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — подготовка к выстрелу",
+      "en": "Igla shot preparation",
+      "balance": {
+        "before": null,
+        "after": 0.2,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — дальность",
+      "en": "Igla range",
+      "balance": {
+        "before": null,
+        "after": 10,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — перезарядка",
+      "en": "Igla reload",
+      "balance": {
+        "before": null,
+        "after": 1.08,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — скорость",
+      "en": "Igla speed",
+      "balance": {
+        "before": null,
+        "after": 4,
+        "unit": {
+          "ru": "м/с",
+          "en": "m/s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Игла» — радиус обзора",
+      "en": "Igla vision radius",
+      "balance": {
+        "before": null,
+        "after": 13,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Шахта — время строительства",
+      "en": "Mine build time",
+      "balance": {
+        "before": 15,
+        "after": 20,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Шахта — радиус захвата",
+      "en": "Mine capture radius",
+      "balance": {
+        "before": 3,
+        "after": 4,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Шахта — время захвата",
+      "en": "Mine capture time",
+      "balance": {
+        "before": 5,
+        "after": 7,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Шахта — доход после истощения",
+      "en": "Mine income after depletion",
+      "balance": {
+        "before": null,
+        "after": 20,
+        "unit": {
+          "ru": "%",
+          "en": "%"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Шахта — начальный запас",
+      "en": "Mine starting reserves",
+      "balance": {
+        "before": 0,
+        "after": 1500,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Шахта — радиус обзора",
+      "en": "Mine vision radius",
+      "balance": {
+        "before": 16,
+        "after": 14,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — перезарядка продвинутой способности",
+      "en": "Escalation advanced ability cooldown",
+      "balance": {
+        "before": 60,
+        "after": 70,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — перезарядка базовой способности",
+      "en": "Escalation basic ability cooldown",
+      "balance": {
+        "before": 30,
+        "after": 45,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — перезарядка общая способности",
+      "en": "Escalation shared ability cooldown",
+      "balance": {
+        "before": 10,
+        "after": 0,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — длительность взлома",
+      "en": "Escalation control hack duration",
+      "balance": {
+        "before": 30,
+        "after": 45,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — радиус обзора мины-ловушки",
+      "en": "Escalation trap mine vision radius",
+      "balance": {
+        "before": 5,
+        "after": 10,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — длительность ремонта наноботами",
+      "en": "Escalation nanobot repair duration",
+      "balance": {
+        "before": null,
+        "after": 8,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — задержка реакции Эксперта на предупреждение об ударе",
+      "en": "Escalation Expert reaction time to strike warnings",
+      "balance": {
+        "before": null,
+        "after": 0.1,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — радиус сканирования",
+      "en": "Escalation scan radius",
+      "balance": {
+        "before": 10,
+        "after": 8,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — порог ступени 2",
+      "en": "Escalation tier 2 threshold",
+      "balance": {
+        "before": 500,
+        "after": 1000,
+        "unit": {
+          "ru": "опыт",
+          "en": "XP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — порог ступени 3",
+      "en": "Escalation tier 3 threshold",
+      "balance": {
+        "before": 1000,
+        "after": 2000,
+        "unit": {
+          "ru": "опыт",
+          "en": "XP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — порог ступени 4",
+      "en": "Escalation tier 4 threshold",
+      "balance": {
+        "before": 2000,
+        "after": 4000,
+        "unit": {
+          "ru": "опыт",
+          "en": "XP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Эскалация — перезарядка высшей способности",
+      "en": "Escalation ultimate ability cooldown",
+      "balance": {
+        "before": 90,
+        "after": 120,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Форпост — время строительства",
+      "en": "Outpost build time",
+      "balance": {
+        "before": 20,
+        "after": 30,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Форпост — радиус захвата",
+      "en": "Outpost capture radius",
+      "balance": {
+        "before": 3.5,
+        "after": 5,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Форпост — время захвата",
+      "en": "Outpost capture time",
+      "balance": {
+        "before": 5,
+        "after": 10,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Форпост — радиус обзора",
+      "en": "Outpost vision radius",
+      "balance": {
+        "before": 18,
+        "after": 16,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "НПЗ — время строительства",
+      "en": "Refinery build time",
+      "balance": {
+        "before": 10,
+        "after": 15,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "НПЗ — стоимость",
+      "en": "Refinery cost",
+      "balance": {
+        "before": 250,
+        "after": 150,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "НПЗ — доход после улучшения за цикл",
+      "en": "Refinery upgraded income per cycle",
+      "balance": {
+        "before": 20,
+        "after": 15,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "НПЗ — радиус обзора",
+      "en": "Refinery vision radius",
+      "balance": {
+        "before": 14,
+        "after": 12,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Усиленный бетон II — время исследования",
+      "en": "Reinforced concrete II research time",
+      "balance": {
+        "before": 30,
+        "after": 45,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Ретранслятор — время захвата",
+      "en": "Relay capture time",
+      "balance": {
+        "before": 5,
+        "after": 15,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Ретранслятор — радиус обзора",
+      "en": "Relay vision radius",
+      "balance": {
+        "before": 10,
+        "after": 14,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Ремонтная вышка — время строительства",
+      "en": "Repair tower build time",
+      "balance": {
+        "before": 15,
+        "after": 20,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Ремонтная вышка — здоровье",
+      "en": "Repair tower health",
+      "balance": {
+        "before": 200,
+        "after": 150,
+        "unit": {
+          "ru": "HP",
+          "en": "HP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Ремонтная вышка — дальность",
+      "en": "Repair tower range",
+      "balance": {
+        "before": 10,
+        "after": 7,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Научный центр — время строительства",
+      "en": "Science center build time",
+      "balance": {
+        "before": 20,
+        "after": 30,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Научный центр — здоровье",
+      "en": "Science center health",
+      "balance": {
+        "before": 250,
+        "after": 200,
+        "unit": {
+          "ru": "HP",
+          "en": "HP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Научный центр — радиус обзора",
+      "en": "Science center vision radius",
+      "balance": {
+        "before": 14,
+        "after": 12,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Шквал» — урон",
+      "en": "Shkval damage",
+      "balance": {
+        "before": 10,
+        "after": 20,
+        "unit": {
+          "ru": "HP",
+          "en": "HP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Шквал» — урон при прямом попадании",
+      "en": "Shkval direct hit damage",
+      "balance": {
+        "before": 20,
+        "after": 40,
+        "unit": {
+          "ru": "HP",
+          "en": "HP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Шквал» — интервал залпов",
+      "en": "Shkval salvo interval",
+      "balance": {
+        "before": 1800,
+        "after": 2700,
+        "unit": {
+          "ru": "мс",
+          "en": "ms"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Наведение «Шквала» — стоимость исследования",
+      "en": "Shkval guidance research cost",
+      "balance": {
+        "before": 300,
+        "after": 200,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Шквал» — множитель интервала залпов с наведением",
+      "en": "Shkval guided salvo interval multiplier",
+      "balance": {
+        "before": null,
+        "after": 0.8,
+        "unit": {
+          "ru": "×",
+          "en": "×"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Наведение «Шквала» — время исследования",
+      "en": "Shkval guidance research time",
+      "balance": {
+        "before": 30,
+        "after": 40,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Шквал» — скорость",
+      "en": "Shkval speed",
+      "balance": {
+        "before": 12,
+        "after": 8.4,
+        "unit": {
+          "ru": "м/с",
+          "en": "m/s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Скат» — ускорение",
+      "en": "Skat acceleration",
+      "balance": {
+        "before": null,
+        "after": 7,
+        "unit": {
+          "ru": "м/с²",
+          "en": "m/s²"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Скат» — замедление при торможении",
+      "en": "Skat braking deceleration",
+      "balance": {
+        "before": null,
+        "after": 12,
+        "unit": {
+          "ru": "м/с²",
+          "en": "m/s²"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Скат» — стоимость",
+      "en": "Skat cost",
+      "balance": {
+        "before": null,
+        "after": 200,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Скат» — здоровье",
+      "en": "Skat health",
+      "balance": {
+        "before": null,
+        "after": 60,
+        "unit": {
+          "ru": "HP",
+          "en": "HP"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Скат» — мест в армии",
+      "en": "Skat army slots",
+      "balance": {
+        "before": null,
+        "after": 3,
+        "unit": {
+          "ru": "слоты",
+          "en": "slots"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Скат» — время производства",
+      "en": "Skat production time",
+      "balance": {
+        "before": null,
+        "after": 20,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Скат» — дальность ремонта",
+      "en": "Skat repair range",
+      "balance": {
+        "before": null,
+        "after": 6,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Скат» — скорость ремонта",
+      "en": "Skat repair rate",
+      "balance": {
+        "before": null,
+        "after": 3,
+        "unit": {
+          "ru": "ед./с",
+          "en": "HP/s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Скат» — скорость",
+      "en": "Skat speed",
+      "balance": {
+        "before": null,
+        "after": 6,
+        "unit": {
+          "ru": "м/с",
+          "en": "m/s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "«Скат» — радиус обзора",
+      "en": "Skat vision radius",
+      "balance": {
+        "before": null,
+        "after": 15,
+        "unit": {
+          "ru": "м",
+          "en": "m"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Шасси «Вепря» — время исследования",
+      "en": "Vepr chassis research time",
+      "balance": {
+        "before": 30,
+        "after": 40,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Турель — время строительства",
+      "en": "Turret build time",
+      "balance": {
+        "before": 15,
+        "after": 20,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Турель — выстрелов в очереди",
+      "en": "Turret shots per burst",
+      "balance": {
+        "before": 6,
+        "after": 8,
+        "unit": {
+          "ru": "выстрелы",
+          "en": "shots"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Турель — скорость",
+      "en": "Turret speed",
+      "balance": {
+        "before": 32,
+        "after": 35,
+        "unit": {
+          "ru": "м/с",
+          "en": "m/s"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Турель — разброс",
+      "en": "Turret spread",
+      "balance": {
+        "before": 5,
+        "after": 4,
+        "unit": {
+          "ru": "°",
+          "en": "°"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Оружейные системы II — стоимость исследования",
+      "en": "Weapon systems II research cost",
+      "balance": {
+        "before": 300,
+        "after": 250,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Оружейные системы III — стоимость исследования",
+      "en": "Weapon systems III research cost",
+      "balance": {
+        "before": 400,
+        "after": 300,
+        "unit": {
+          "ru": "кр",
+          "en": "credits"
+        }
+      }
+    },
+    {
+      "category_ru": "Баланс матча",
+      "category_en": "Match balance",
+      "ru": "Время защиты новых обломков",
+      "en": "New wreck protection time",
+      "balance": {
+        "before": 1,
+        "after": 2,
+        "unit": {
+          "ru": "с",
+          "en": "s"
+        }
+      }
+    }
+  ]
+}

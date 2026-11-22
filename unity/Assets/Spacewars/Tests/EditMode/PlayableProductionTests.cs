@@ -131,6 +131,27 @@ namespace Spacewars.Tests.EditMode
             Send(PlayableCommandKind.QueueTank,a);Assert.True(State(a).Repeat);Assert.False(State(a).Orders.Single().Active);
         }
 
+        [Test] public void AiRepeatWaitsForFundingAndStopsWithoutChargingForAnObsoleteChoice()
+        {
+            Create();int factory=Factory();int before=View().Credits;
+            bool? permission=false;
+            Func<PlayableOwner,int,PlayableEntityKind,bool?> admission=(owner,id,kind)=>{
+                Assert.AreEqual(PlayableOwner.Player,owner);Assert.AreEqual(factory,id);Assert.AreEqual(PlayableEntityKind.Tank,kind);
+                return permission;
+            };
+            Call("ConfigureAiProductionRepeat",admission);
+            Call("SetAiProductionRepeat",factory,"player-1",PlayableEntityKind.Tank);
+            Advance();Assert.True(State(factory).Repeat);Assert.IsEmpty(State(factory).Orders);
+            Assert.AreEqual(before,View().Credits);
+            permission=true;
+            Advance();Assert.AreEqual(profile.TankCreditCost,State(factory).Orders.Single().PaidCost);
+            Assert.AreEqual(before-profile.TankCreditCost,View().Credits);
+            permission=null;
+            Advance(profile.TankProductionSeconds);Release(factory,park:true);Advance();
+            Assert.False(State(factory).Repeat);Assert.IsEmpty(State(factory).Orders);
+            Assert.AreEqual(before-profile.TankCreditCost,View().Credits);
+        }
+
         [Test] public void MixedManualOrdersFollowActiveRepeatThenSeriesResumes()
         {
             Create();int f=Factory();Pay();Send(PlayableCommandKind.ToggleRepeatProduction,f);Advance();

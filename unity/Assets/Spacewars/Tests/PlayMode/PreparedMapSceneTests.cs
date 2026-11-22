@@ -16,12 +16,51 @@ public sealed class PreparedMapSceneTests
     const BindingFlags Flags=BindingFlags.NonPublic|BindingFlags.Instance;
     static Type Authoring=>AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Spacewars.Editor.PreparedMapsAuthoring")).First(t=>t!=null);
     static void Author(string method)=>Authoring.GetMethod(method).Invoke(null,null);
-    static readonly string[] Maps={"ThreeCrossings","Foundry","MossHighland","BasaltCrown","WhiteMeridian","CrimsonGrove","AntennaCity","NullDock","AiTest","Campaign","ProvingGround","Diagnostic","Nereida"};
+    static string[] Maps => (string[])Authoring.GetField("Maps").GetValue(null);
     static IPlayableTerrain Map(string key)=>(IPlayableTerrain)Authoring.GetMethod("Map").Invoke(null,new object[]{key});
     static PlayableProfile Profile(string key)=>(PlayableProfile)Authoring.GetMethod("Profile").Invoke(null,new object[]{key});
     static string Output=>Environment.GetEnvironmentVariable("SPACEWARS_PREPARED_MAP_QA")??Path.GetFullPath("../.local/prepared-map-cache/qa");
     [SetUp] public void Setup(){Directory.CreateDirectory(Output);PreparedMapCache.DirectoryOverride=Path.Combine(Output,"variants",Guid.NewGuid().ToString("N"));PreparedMapCache.BypassReads=false;}
     [TearDown] public void Cleanup(){PreparedMapCache.DirectoryOverride=null;PreparedMapCache.BypassReads=false;}
+    [UnityTest, Timeout(180000)]
+    public IEnumerator CrossingsIndustrialEquipmentSurvivesPreparedWorldRestore()
+    {
+        var profile = Profile("ThreeCrossings");
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool fromCache = pass == 1;
+            PreparedMapCache.BypassReads = !fromCache;
+            var host = new GameObject("Crossings scenery cache");
+            PlayableWorld world = null;
+            try
+            {
+                world = new PlayableWorld(host.transform, profile, staged: true);
+                yield return world.Preparation;
+                Assert.AreEqual(fromCache, world.PreparationCacheHit);
+
+                var equipment = world.GraphicsRoot.GetComponentsInChildren<ModelDetailLod>()
+                    .Where(lod => lod.name == "Yard — BankPump" || lod.name == "Yard — MineWorkModule")
+                    .ToArray();
+                Assert.AreEqual(1, equipment.Count(lod => lod.name == "Yard — BankPump"));
+                Assert.AreEqual(4, equipment.Count(lod => lod.name == "Yard — MineWorkModule"));
+                foreach (var lod in equipment)
+                {
+                    int full = lod.OriginalMeshes.Single().vertexCount;
+                    int normal = lod.NormalMeshes.Single().vertexCount;
+                    int far = lod.FarMeshes.Single().vertexCount;
+                    Assert.Less(normal, full, lod.name);
+                    Assert.Less(far, normal, lod.name);
+                }
+            }
+            finally
+            {
+                world?.Dispose();
+                Object.Destroy(host);
+            }
+            yield return null;
+        }
+    }
+
     static string Fingerprint(Transform root,PlayableWorld world=null)
     {
         var material=world==null?null:(Material)typeof(PlayableWorld).GetField("material",Flags).GetValue(world);
@@ -34,7 +73,16 @@ public sealed class PreparedMapSceneTests
         bool bakeComplete=false;Author("BeginBake");
         try{foreach(string key in Maps){var host=new GameObject("Generate "+key);PlayableWorld world=null;PlayableMapTerrain mini=null;var clock=Stopwatch.StartNew();
             try{if(key=="Nereida"){host.AddComponent<NereidaPreview>().Build(NereidaPreview.LoadProfile());clock.Stop();fingerprints[key]=Fingerprint(host.transform);}
-                else{var p=Profile(key);world=new PlayableWorld(host.transform,p,staged:true);yield return world.Preparation;mini=new PlayableMapTerrain(p,staged:true);yield return mini.Preparation;clock.Stop();Assert.False(world.PreparationCacheHit,key);mini.ShowPublicTerrain();minimaps[key]=mini.Texture.GetRawTextureData();fingerprints[key]=Fingerprint(world.GraphicsRoot,world);}
+                else{var p=Profile(key);world=new PlayableWorld(host.transform,p,staged:true);yield return world.Preparation;mini=new PlayableMapTerrain(p,staged:true);yield return mini.Preparation;using var tactical = new PlayableTacticalMapTerrain(p, staged: true);yield return tactical.Preparation;
+                    fingerprints[key]=Fingerprint(world.GraphicsRoot,world);
+                    if (SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
+                    {
+                        if (p.AuthoredMap == null)
+                            foreach (var obstacle in PlayableMap.SolidObstacles(p)) world.Obstacle(obstacle);
+                        using var overhead = new PlayableTacticalMapTerrain(p, staged: true, overheadSource: world);
+                        yield return overhead.Preparation;
+                    }
+                    clock.Stop();Assert.False(world.PreparationCacheHit,key);Assert.False(tactical.PreparationCacheHit,key+" TAB terrain");mini.ShowPublicTerrain();minimaps[key]=mini.Texture.GetRawTextureData();}
                 timings[key]=clock.Elapsed.TotalSeconds;UnityEngine.Debug.Log("MAP_GENERATED "+key+" "+timings[key]);
             }finally{mini?.Dispose();world?.Dispose();Object.Destroy(host);}yield return null;
         }bakeComplete=true;}finally{Author(bakeComplete?"EndBake":"AbortBake");}

@@ -1,4 +1,5 @@
 """Validate build-owned tracked outputs before restoring their exact baseline bytes."""
+import hashlib
 import json
 import pathlib
 import re
@@ -12,9 +13,37 @@ LAB = 'unity/Assets/Spacewars/Resources/NativeLabCatalog.json'
 MAPS = 'unity/Assets/Spacewars/Content/Resources/PreparedMaps/'
 
 
+def release_profile(root, version):
+    """Reject authoring histories before issuing a publishable build identity."""
+    raw = (pathlib.Path(root) / LAB).read_bytes()
+    catalog = json.loads(raw)
+    if catalog.get('schema') != 2 or catalog.get('releaseVersion') != version:
+        raise ValueError('release profile is not bound to the build version')
+    profiles = catalog.get('profiles', [])
+    if len(profiles) != 1 or profiles[0].get('id') != catalog.get('defaultId') or catalog.get('defaultId') != 'spacewars-default':
+        raise ValueError('shipping catalog requires exactly one Default profile')
+    profile = profiles[0]
+    rows = profile.get('versions', [])
+    if len(rows) != 1:
+        raise ValueError('intermediate profile versions cannot ship')
+    row = rows[0]
+    revision = row.get('revision')
+    ai = row.get('aiProfile', {})
+    if (type(revision) is not int or revision < 1 or profile.get('release') != [revision]
+            or catalog.get('profileDefaultsVersion') != revision or row.get('releaseVersion') != version
+            or row.get('data', {}).get('revision') != revision
+            or ai.get('id') != profile['id'] or ai.get('revision') != revision):
+        raise ValueError('balance and AI must share the release profile identity')
+    if any(not isinstance(row.get(key), dict) or not row[key] for key in ('data', 'audio', 'aiProfile', 'modelDetail')) or not ai.get('fields'):
+        raise ValueError('release profile requires complete balance, AI, audio and detail snapshots')
+    return {'id': profile['id'], 'revision': revision, 'release_version': version,
+            'catalog_sha256': hashlib.sha256(raw).hexdigest()}
+
+
 def generated(path):
     return (path in (SCENE, SETTINGS, PIPELINE, GLOBAL, LAB)
-            or re.fullmatch(re.escape(MAPS) + r'(?:(?:World|Minimap|Preview)-[A-Za-z0-9]+\.bytes|schema\.json|stamp\.txt)', path) is not None
+            or re.fullmatch(re.escape(MAPS) + r'(?:World|Minimap|TacticalMinimap|OverheadBattle|Preview)-[A-Za-z0-9]+\.bytes', path) is not None
+            or path in (MAPS + 'schema.json', MAPS + 'stamp.txt', MAPS + 'overhead-stamp.txt')
             or path.startswith('unity/Assets/Spacewars/Content/Resources/StyleA/') and path.endswith('-foundation-concrete.mat'))
 
 

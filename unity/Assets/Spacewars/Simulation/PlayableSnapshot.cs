@@ -6,11 +6,24 @@ using System.Linq;
 namespace Spacewars.Simulation
 {
     public enum PlayableOwner { Player, Enemy, Third, Fourth, Fifth, Sixth, Seventh, Eighth }
-    public enum PlayableEntityKind { Tank, Explorer, Shkval, Hawk }
+    public enum PlayableEntityKind { Tank, Explorer, Shkval, Hawk, Skat, Cerberus, Igla }
     public enum PlayableBuildingKind { Headquarters, Factory, Refinery, Outpost, Mine, ScientificCenter, Hangar, SentryTurret, RepairTower, GaussTower, RelayTower }
+    public readonly struct PlayableDominationSnapshot
+    {
+        public const double WarningSeconds=90;
+        public int LeadingTeam {get;}
+        public int ScoringTeam {get;}
+        public double Score {get;}
+        public double SecondsToVictory {get;}
+        public bool Rising => LeadingTeam!=0&&LeadingTeam==ScoringTeam;
+        public bool WarningActive => Rising&&SecondsToVictory<=WarningSeconds+1e-9;
+        public PlayableDominationSnapshot(int leadingTeam,int scoringTeam,double score,double secondsToVictory)
+        {LeadingTeam=leadingTeam;ScoringTeam=scoringTeam;Score=score;SecondsToVictory=secondsToVictory;}
+    }
+
     public enum PlayableMatchOutcome { Playing, PlayerWon, PlayerLost, TeamWon, ManuallyFinished }
-    public enum PlayableTacticalOrderKind { Move, AttackMove, Attack, Follow }
-    public enum PlayableRouteTargetKind { VisibleEnemy, PublicObjective, FriendlyAnchor }
+    public enum PlayableTacticalOrderKind { Move, AttackMove, Attack, Follow, Repair }
+    public enum PlayableRouteTargetKind { VisibleEnemy, PublicObjective, FriendlyAnchor, TerritorialPosition, EnemyApproach }
     // Computed by authority from the current owner projection; no hidden target or path is published.
     public sealed class PlayableArtillerySupportSnapshot
     {
@@ -121,7 +134,13 @@ namespace Spacewars.Simulation
         public ShkvalCellsSnapshot(double[] cells){if(cells==null||cells.Length!=4)throw new System.ArgumentException("Four Shkval cells required");a=cells[0];b=cells[1];c=cells[2];d=cells[3];}
         public double Remaining(int cell)=>cell==0?a:cell==1?b:cell==2?c:cell==3?d:throw new System.ArgumentOutOfRangeException(nameof(cell));
     }
-    public sealed class PlayableEntitySnapshot { public PlayableEntitySnapshot(int id,PlayableOwner owner,PlayableEntityKind kind,NavPoint position,int health,bool moving,int targetId,double hullHeading,double turretHeading,PlayableTacticalOrderSnapshot currentOrder=null,bool upgraded=false,bool held=false,NavigationOutcome navigationOutcome=NavigationOutcome.Idle,PlayableOrderStamp orderStamp=null,PlayableSpatialCompletion completion=null,NavLocation? location=null,PlayableUnitQueueSnapshot queue=null,double maxHealth=0,double? exactHealth=null,int weaponSystemsLevel=0,int defensiveSystemsLevel=0,double altitude=0,double pitch=0,double roll=0,bool departing=false,double weaponPitch=0,int weaponSequence=0,double weaponReload=0,ShkvalCellsSnapshot shkvalCells=null){ShkvalCells=shkvalCells;WeaponSequence=weaponSequence;WeaponReload=weaponReload;WeaponPitch=weaponPitch;Altitude=altitude;Pitch=pitch;Roll=roll;Departing=departing;WeaponSystemsLevel=weaponSystemsLevel;DefensiveSystemsLevel=defensiveSystemsLevel;MaxHealth=maxHealth;ExactHealth=exactHealth;Queue=queue;Location=location;Completion=completion;OrderStamp=orderStamp;NavigationOutcome=navigationOutcome;Held=held;Upgraded=upgraded;Id=id;Owner=owner;Kind=kind;Position=position;Health=health;Moving=moving;TargetId=targetId;HullHeading=hullHeading;TurretHeading=turretHeading;CurrentOrder=currentOrder?.Copy();} public ShkvalCellsSnapshot ShkvalCells{get;} public int WeaponSequence{get;} public double WeaponReload{get;} public double WeaponPitch{get;} public double Altitude{get;} public double Pitch{get;} public double Roll{get;} public bool Departing{get;} public PlayableUnitQueueSnapshot Queue{get;} public NavLocation? Location{get;} public PlayableSpatialCompletion Completion{get;} public PlayableOrderStamp OrderStamp{get;} public int Id{get;} public PlayableOwner Owner{get;} public PlayableEntityKind Kind{get;} public NavPoint Position{get;} public int Health{get;} public int WeaponSystemsLevel{get;} public int DefensiveSystemsLevel{get;} public double MaxHealth{get;} public double? ExactHealth{get;} public bool Moving{get;} public int TargetId{get;} public double HullHeading{get;} public double TurretHeading{get;} public PlayableTacticalOrderSnapshot CurrentOrder{get;} public bool Upgraded{get;} public bool Held{get;} public NavigationOutcome NavigationOutcome{get;} }
+    public readonly struct CerberusWeaponPose
+    {
+        public readonly double LeftYaw,RightYaw,LeftLength,RightLength,LeftHeat,RightHeat;
+        public CerberusWeaponPose(double ly,double ry,double ll,double rl,double lh,double rh)
+        {LeftYaw=ly;RightYaw=ry;LeftLength=ll;RightLength=rl;LeftHeat=lh;RightHeat=rh;}
+    }
+    public sealed class PlayableEntitySnapshot { public PlayableEntitySnapshot(int id,PlayableOwner owner,PlayableEntityKind kind,NavPoint position,int health,bool moving,int targetId,double hullHeading,double turretHeading,PlayableTacticalOrderSnapshot currentOrder=null,bool upgraded=false,bool held=false,NavigationOutcome navigationOutcome=NavigationOutcome.Idle,PlayableOrderStamp orderStamp=null,PlayableSpatialCompletion completion=null,NavLocation? location=null,PlayableUnitQueueSnapshot queue=null,double maxHealth=0,double? exactHealth=null,int weaponSystemsLevel=0,int defensiveSystemsLevel=0,double altitude=0,double pitch=0,double roll=0,bool departing=false,double weaponPitch=0,int weaponSequence=0,double weaponReload=0,ShkvalCellsSnapshot shkvalCells=null,double materializationProgress=1,double stasisRemaining=0,bool rocketLauncher=false,CerberusWeaponPose? flames=null,BallisticPoint? iglaBeam=null){IglaBeam=iglaBeam;Flames=flames;RocketLauncher=rocketLauncher;StasisRemaining=stasisRemaining;MaterializationProgress=materializationProgress;ShkvalCells=shkvalCells;WeaponSequence=weaponSequence;WeaponReload=weaponReload;WeaponPitch=weaponPitch;Altitude=altitude;Pitch=pitch;Roll=roll;Departing=departing;WeaponSystemsLevel=weaponSystemsLevel;DefensiveSystemsLevel=defensiveSystemsLevel;MaxHealth=maxHealth;ExactHealth=exactHealth;Queue=queue;Location=location;Completion=completion;OrderStamp=orderStamp;NavigationOutcome=navigationOutcome;Held=held;Upgraded=upgraded;Id=id;Owner=owner;Kind=kind;Position=position;Health=health;Moving=moving;TargetId=targetId;HullHeading=hullHeading;TurretHeading=turretHeading;CurrentOrder=currentOrder?.Copy();} public BallisticPoint? IglaBeam{get;} public CerberusWeaponPose? Flames{get;} public double StasisRemaining{get;} public double MaterializationProgress{get;} public ShkvalCellsSnapshot ShkvalCells{get;} public int WeaponSequence{get;} public double WeaponReload{get;} public double WeaponPitch{get;} public double Altitude{get;} public double Pitch{get;} public double Roll{get;} public bool Departing{get;} public PlayableUnitQueueSnapshot Queue{get;} public NavLocation? Location{get;} public PlayableSpatialCompletion Completion{get;} public PlayableOrderStamp OrderStamp{get;} public int Id{get;} public PlayableOwner Owner{get;} public PlayableEntityKind Kind{get;} public NavPoint Position{get;} public int Health{get;} public int WeaponSystemsLevel{get;} public int DefensiveSystemsLevel{get;} public double MaxHealth{get;} public double? ExactHealth{get;} public bool Moving{get;} public int TargetId{get;} public double HullHeading{get;} public double TurretHeading{get;} public PlayableTacticalOrderSnapshot CurrentOrder{get;} public bool Upgraded{get;} public bool RocketLauncher{get;} public bool Held{get;} public NavigationOutcome NavigationOutcome{get;} }
     public sealed class PlayableProductionOrderSnapshot
     {
         public PlayableProductionOrderSnapshot(long id,PlayableEntityKind kind,int paidCost,int populationCost,double duration,double remaining,bool active,bool isUpgrade=false,string blockedReason=null)
@@ -162,7 +181,7 @@ namespace Spacewars.Simulation
         public IReadOnlyList<PlayableProductionOrderSnapshot> Orders{get;} public bool Repeat{get;} public PlayableEntityKind RepeatKind{get;}
         public int QueueCount{get;} public double ProductionProgress{get;} public NavPoint Rally{get;} public bool HasRally{get;} public NavPoint? PendingRally{get;}
     }
-    public sealed class PlayableBuildingSnapshot { public PlayableBuildingSnapshot(int id,PlayableOwner owner,PlayableBuildingKind kind,NavPoint position,int health,double progress,int queueCount,double productionProgress,NavPoint rally,int siteId=0,int slotId=0,int parentId=0,ConstructionPhase phase=ConstructionPhase.Ready,string blockedReason=null,double heading=0,bool includePrivateState=true,PlayableProductionOrderSnapshot[] orders=null,bool repeat=false,PlayableBuildingLifecycleSnapshot lifecycle=null,PlayableRefineryUpgradeSnapshot upgrade=null,bool refineryUpgraded=false,PlayableEntityKind repeatKind=PlayableEntityKind.Tank,PlayableResearchOrderSnapshot[] research=null,bool hasRally=false,NavPoint? pendingRally=null,double? exactHealth=null,int launchPhase=0,double launchTime=0,PlayableEntityKind? launchKind=null,bool launchUpgraded=false,double maxHealth=0,PlayableTurretSnapshot turret=null,PlayableRepairTowerSnapshot healing=null,bool scientificCenterUpgraded=false,bool producerUpgraded=false,double systemFailureRemaining=0){SystemFailureRemaining=systemFailureRemaining;ProducerUpgraded=producerUpgraded;ScientificCenterUpgraded=scientificCenterUpgraded;Healing=healing;Turret=turret;MaxHealth=maxHealth;LaunchKind=launchKind;LaunchUpgraded=launchUpgraded;LaunchPhase=launchPhase;LaunchTime=launchTime;ExactHealth=exactHealth;RefineryUpgraded=refineryUpgraded;PrivateState=includePrivateState?new PlayableBuildingPrivateState(queueCount,productionProgress,rally,orders,repeat,lifecycle,upgrade,repeatKind,research,hasRally,pendingRally):null;SiteId=siteId;SlotId=slotId;ParentId=parentId;Phase=phase;BlockedReason=blockedReason;Heading=heading;Id=id;Owner=owner;Kind=kind;Position=position;Health=health;Progress=progress;QueueCount=PrivateState?.QueueCount??0;ProductionProgress=PrivateState?.ProductionProgress??0;Rally=PrivateState?.Rally??default(NavPoint);} public int Id{get;} public PlayableOwner Owner{get;} public PlayableBuildingKind Kind{get;} public NavPoint Position{get;} public int Health{get;} public PlayableRepairTowerSnapshot Healing{get;} public PlayableTurretSnapshot Turret{get;} public double MaxHealth{get;} public double? ExactHealth{get;} public double Progress{get;} public PlayableEntityKind? LaunchKind{get;} public bool LaunchUpgraded{get;} public int LaunchPhase{get;} public double LaunchTime{get;} public double SystemFailureRemaining{get;} public bool SystemsDisabled=>SystemFailureRemaining>0; public bool ScientificCenterUpgraded{get;} public bool ProducerUpgraded{get;} public bool ModelUpgraded=>RefineryUpgraded||ScientificCenterUpgraded||ProducerUpgraded; public bool RefineryUpgraded{get;} public PlayableBuildingPrivateState PrivateState{get;} public int QueueCount{get;} public double ProductionProgress{get;} public NavPoint Rally{get;} public int SiteId{get;} public int SlotId{get;} public int ParentId{get;} public ConstructionPhase Phase{get;} public string BlockedReason{get;} public double Heading{get;} }
+    public sealed class PlayableBuildingSnapshot { public PlayableBuildingSnapshot(int id,PlayableOwner owner,PlayableBuildingKind kind,NavPoint position,int health,double progress,int queueCount,double productionProgress,NavPoint rally,int siteId=0,int slotId=0,int parentId=0,ConstructionPhase phase=ConstructionPhase.Ready,string blockedReason=null,double heading=0,bool includePrivateState=true,PlayableProductionOrderSnapshot[] orders=null,bool repeat=false,PlayableBuildingLifecycleSnapshot lifecycle=null,PlayableRefineryUpgradeSnapshot upgrade=null,bool refineryUpgraded=false,PlayableEntityKind repeatKind=PlayableEntityKind.Tank,PlayableResearchOrderSnapshot[] research=null,bool hasRally=false,NavPoint? pendingRally=null,double? exactHealth=null,int launchPhase=0,double launchTime=0,PlayableEntityKind? launchKind=null,bool launchUpgraded=false,double maxHealth=0,PlayableTurretSnapshot turret=null,PlayableRepairTowerSnapshot healing=null,bool scientificCenterUpgraded=false,bool producerUpgraded=false,double systemFailureRemaining=0,double boostRemaining=0,bool boostRepairing=false,double? boostWorkRemaining=null,bool boostWearDamage=false,bool boostSelling=false,int concreteLevel=0,int weaponSystemsLevel=0){ConcreteLevel=concreteLevel;WeaponSystemsLevel=weaponSystemsLevel;BoostSelling=boostSelling;BoostWearDamage=boostWearDamage;BoostRemaining=boostRemaining;BoostRepairing=boostRepairing;BoostWorkRemaining=boostWorkRemaining;SystemFailureRemaining=systemFailureRemaining;ProducerUpgraded=producerUpgraded;ScientificCenterUpgraded=scientificCenterUpgraded;Healing=healing;Turret=turret;MaxHealth=maxHealth;LaunchKind=launchKind;LaunchUpgraded=launchUpgraded;LaunchPhase=launchPhase;LaunchTime=launchTime;ExactHealth=exactHealth;RefineryUpgraded=refineryUpgraded;PrivateState=includePrivateState?new PlayableBuildingPrivateState(queueCount,productionProgress,rally,orders,repeat,lifecycle,upgrade,repeatKind,research,hasRally,pendingRally):null;SiteId=siteId;SlotId=slotId;ParentId=parentId;Phase=phase;BlockedReason=blockedReason;Heading=heading;Id=id;Owner=owner;Kind=kind;Position=position;Health=health;Progress=progress;QueueCount=PrivateState?.QueueCount??0;ProductionProgress=PrivateState?.ProductionProgress??0;Rally=PrivateState?.Rally??default(NavPoint);} public int Id{get;} public PlayableOwner Owner{get;} public PlayableBuildingKind Kind{get;} public NavPoint Position{get;} public int Health{get;} public PlayableRepairTowerSnapshot Healing{get;} public PlayableTurretSnapshot Turret{get;} public double MaxHealth{get;} public double? ExactHealth{get;} public double Progress{get;} public PlayableEntityKind? LaunchKind{get;} public bool LaunchUpgraded{get;} public int LaunchPhase{get;} public double LaunchTime{get;} public double BoostRemaining{get;} public int ConcreteLevel{get;} public int WeaponSystemsLevel{get;} public bool BoostSelling{get;} public bool BoostWearDamage{get;} public bool BoostRepairing{get;} public double? BoostWorkRemaining{get;} public double SystemFailureRemaining{get;} public bool SystemsDisabled=>SystemFailureRemaining>0; public bool ScientificCenterUpgraded{get;} public bool ProducerUpgraded{get;} public bool ModelUpgraded=>RefineryUpgraded||ScientificCenterUpgraded||ProducerUpgraded; public bool RefineryUpgraded{get;} public PlayableBuildingPrivateState PrivateState{get;} public int QueueCount{get;} public double ProductionProgress{get;} public NavPoint Rally{get;} public int SiteId{get;} public int SlotId{get;} public int ParentId{get;} public ConstructionPhase Phase{get;} public string BlockedReason{get;} public double Heading{get;} }
     // Visual launch binding; ballistic flight and contacts remain authoritative and unchanged.
     public sealed class ShkvalLaunchSnapshot
     {
@@ -172,8 +191,12 @@ namespace Spacewars.Simulation
     }
     public sealed class PlayableProjectileSnapshot
     {
-        public PlayableProjectileSnapshot(int id,int ownerId,int targetId,NavPoint position,PlayableEntityKind kind=PlayableEntityKind.Tank,double heading=0,double height=1,double pitch=0,PlayableOwner faction=PlayableOwner.Player,double age=0,bool visible=true,PlayableImpactMarker marker=null,ShkvalLaunchSnapshot launch=null)
-        {Launch=launch;Id=id;OwnerId=ownerId;TargetId=targetId;Position=position;Kind=kind;Heading=heading;Height=height;Pitch=pitch;Faction=faction;Age=age;Visible=visible;Marker=marker;}
+        public PlayableProjectileSnapshot(int id,int ownerId,int targetId,NavPoint position,PlayableEntityKind kind=PlayableEntityKind.Tank,double heading=0,double height=1,double pitch=0,PlayableOwner faction=PlayableOwner.Player,double age=0,bool visible=true,PlayableImpactMarker marker=null,ShkvalLaunchSnapshot launch=null,long? directLaunchTick=null,int directBarrel=0,bool rocket=false)
+        {Rocket=rocket;DirectLaunchTick=directLaunchTick;DirectBarrel=directBarrel;Launch=launch;Id=id;OwnerId=ownerId;TargetId=targetId;Position=position;Kind=kind;Heading=heading;Height=height;Pitch=pitch;Faction=faction;Age=age;Visible=visible;Marker=marker;}
+        // Transient presentation metadata. Restored shots resume from their in-flight pose.
+        public bool Rocket{get;}
+        public long? DirectLaunchTick{get;}
+        public int DirectBarrel{get;}
         public ShkvalLaunchSnapshot Launch{get;}
         public int Id{get;}public int OwnerId{get;}public int TargetId{get;}public NavPoint Position{get;}public PlayableEntityKind Kind{get;}public double Heading{get;}public double Height{get;}public double Pitch{get;}public PlayableOwner Faction{get;}public double Age{get;}public bool Visible{get;}public PlayableImpactMarker Marker{get;}
     }
@@ -190,39 +213,110 @@ namespace Spacewars.Simulation
     public sealed class PlayableRuntimeMetrics { public PlayableRuntimeMetrics(double tickCpuMilliseconds,double tickIntervalMilliseconds,double commandLatencyMilliseconds,int commandBacklog,int errors,int navigationPending=0,int missedDeadlines=0,double maximumTickCpu=0){NavigationPending=navigationPending;MissedDeadlines=missedDeadlines;MaximumTickCpu=maximumTickCpu;TickCpuMilliseconds=tickCpuMilliseconds;TickIntervalMilliseconds=tickIntervalMilliseconds;CommandLatencyMilliseconds=commandLatencyMilliseconds;CommandBacklog=commandBacklog;Errors=errors;} public int NavigationPending{get;} public int MissedDeadlines{get;} public double MaximumTickCpu{get;} public double TickCpuMilliseconds{get;} public double TickIntervalMilliseconds{get;} public double CommandLatencyMilliseconds{get;} public int CommandBacklog{get;} public int Errors{get;} }
     public sealed class PlayableSnapshot
     {
+#if UNITY_INCLUDE_TESTS
+        [ThreadStatic] internal static long EnvelopeCopiesForTests;
+#endif
+        private PlayableSnapshot CopyEnvelope()
+        {
+#if UNITY_INCLUDE_TESTS
+            EnvelopeCopiesForTests++;
+#endif
+            return (PlayableSnapshot)MemberwiseClone();
+        }
+        private static class EmptyCollection<T>
+        { internal static readonly System.Collections.ObjectModel.ReadOnlyCollection<T> Value=Array.AsReadOnly(Array.Empty<T>()); }
+        private static System.Collections.ObjectModel.ReadOnlyCollection<T> Close<T>(T[] values)
+            =>values==null||values.Length==0?EmptyCollection<T>.Value:Array.AsReadOnly((T[])values.Clone());
+        private static System.Collections.ObjectModel.ReadOnlyCollection<T> CloseRequired<T>(T[] values)
+            =>values.Length==0?EmptyCollection<T>.Value:Array.AsReadOnly((T[])values.Clone());
+        // One synchronous publication supplies these already detached values. Keep
+        // the fluent API's array ownership rules, without six envelope copies.
+        internal PlayableSnapshot WithPresentation(OrbitalMineSnapshot[] mines,OrbitalMineBlastSnapshot[] blasts,
+            OrbitalEscalationSnapshot orbital,OrbitalScanSnapshot[] scans,OrbitalScanLine[] lines,
+            OrbitalScanTriangle[] triangles,PlayableTeamSignal[] signals,PlayableMatchEvent[] events)
+        {
+            var copy=CopyEnvelope();
+            copy.Mines=Array.AsReadOnly(mines);copy.MineBlasts=Array.AsReadOnly(blasts);
+            copy.Orbital=orbital;copy.OrbitalScans=Array.AsReadOnly(scans);
+            copy.ScanLines=Array.AsReadOnly(lines);copy.ScanTriangles=Array.AsReadOnly(triangles??Array.Empty<OrbitalScanTriangle>());
+            copy.TeamSignals=Close(signals);copy.MatchEvents=Close(events);return copy;
+        }
         public IReadOnlyList<OrbitalMineSnapshot> Mines{get;private set;}=Array.Empty<OrbitalMineSnapshot>();
         public IReadOnlyList<OrbitalMineBlastSnapshot> MineBlasts{get;private set;}=Array.Empty<OrbitalMineBlastSnapshot>();
-        public PlayableSnapshot WithMines(OrbitalMineSnapshot[] mines,OrbitalMineBlastSnapshot[] blasts){var copy=(PlayableSnapshot)MemberwiseClone();copy.Mines=Array.AsReadOnly(mines);copy.MineBlasts=Array.AsReadOnly(blasts);return copy;}
+        public PlayableSnapshot WithMines(OrbitalMineSnapshot[] mines,OrbitalMineBlastSnapshot[] blasts){var copy=CopyEnvelope();copy.Mines=Array.AsReadOnly(mines);copy.MineBlasts=Array.AsReadOnly(blasts);return copy;}
         public IReadOnlyList<OrbitalScanLine> ScanLines{get;private set;}=Array.Empty<OrbitalScanLine>();
         public IReadOnlyList<OrbitalScanTriangle> ScanTriangles{get;private set;}=Array.Empty<OrbitalScanTriangle>();
-        public PlayableSnapshot WithScanLines(OrbitalScanLine[] lines,OrbitalScanTriangle[] triangles=null){var copy=(PlayableSnapshot)MemberwiseClone();copy.ScanLines=Array.AsReadOnly(lines);copy.ScanTriangles=Array.AsReadOnly(triangles??Array.Empty<OrbitalScanTriangle>());return copy;}
+        public PlayableSnapshot WithScanLines(OrbitalScanLine[] lines,OrbitalScanTriangle[] triangles=null){var copy=CopyEnvelope();copy.ScanLines=Array.AsReadOnly(lines);copy.ScanTriangles=Array.AsReadOnly(triangles??Array.Empty<OrbitalScanTriangle>());return copy;}
         public IReadOnlyList<OrbitalScanSnapshot> OrbitalScans{get;private set;}=Array.Empty<OrbitalScanSnapshot>();
-        public PlayableSnapshot WithOrbitalScans(OrbitalScanSnapshot[] scans){var copy=(PlayableSnapshot)MemberwiseClone();copy.OrbitalScans=Array.AsReadOnly(scans);return copy;}
+        public PlayableSnapshot WithOrbitalScans(OrbitalScanSnapshot[] scans){var copy=CopyEnvelope();copy.OrbitalScans=Array.AsReadOnly(scans);return copy;}
         public OrbitalEscalationSnapshot Orbital{get;private set;}=OrbitalEscalationSnapshot.Empty;
-        public PlayableSnapshot WithOrbital(OrbitalEscalationSnapshot state){var copy=(PlayableSnapshot)MemberwiseClone();copy.Orbital=state;return copy;}
+        public PlayableSnapshot WithOrbital(OrbitalEscalationSnapshot state){var copy=CopyEnvelope();copy.Orbital=state;return copy;}
 
         public IReadOnlyList<PlayableMatchEvent> MatchEvents{get;private set;}=Array.Empty<PlayableMatchEvent>();
-        public PlayableSnapshot WithMatchEvents(PlayableMatchEvent[] events){var copy=(PlayableSnapshot)MemberwiseClone();copy.MatchEvents=Array.AsReadOnly((PlayableMatchEvent[])(events??Array.Empty<PlayableMatchEvent>()).Clone());return copy;}
+        public PlayableSnapshot WithMatchEvents(PlayableMatchEvent[] events){var copy=CopyEnvelope();copy.MatchEvents=Close(events);return copy;}
         public IReadOnlyList<PlayableTeamSignal> TeamSignals{get;private set;}=Array.Empty<PlayableTeamSignal>();
-        public PlayableSnapshot WithTeamSignals(PlayableTeamSignal[] signals){var copy=(PlayableSnapshot)MemberwiseClone();copy.TeamSignals=Array.AsReadOnly((PlayableTeamSignal[])(signals??Array.Empty<PlayableTeamSignal>()).Clone());return copy;}
+        public PlayableSnapshot WithTeamSignals(PlayableTeamSignal[] signals){var copy=CopyEnvelope();copy.TeamSignals=Close(signals);return copy;}
         public IReadOnlyList<PlayableBuildingDestruction> BuildingDestructions{get;}
         public IReadOnlyList<PlayableWreckSnapshot> Wrecks{get;}
 
-        public IReadOnlyList<PlayableGroundTrail> GroundTrails{get;}
+        public IReadOnlyList<PlayableGroundTrail> GroundTrails{get;private set;}
+        internal PlayableSnapshot WithFrameTrails(PlayableGroundTrail[] detached)
+        {
+            var copy = CopyEnvelope();
+            copy.GroundTrails = Array.AsReadOnly(detached);
+            return copy;
+        }
+        internal PlayableSnapshot WithFrameMetrics(PlayableRuntimeMetrics metrics)
+        {
+            var copy = CopyEnvelope();
+            copy.Metrics = metrics;
+            return copy;
+        }
         public CampaignMissionView Mission{get;}
         public IReadOnlyList<Spacewars.Simulation.Ai.AiIntelEnvelope> IntelEnvelopes{get;}
-        public PlayableSnapshot(string profileId,int profileRevision,long generation,int seed,long sequence,long tick,RuntimeStatus status,bool paused,PlayableMatchOutcome outcome,int credits,NavGeometry geometry,PlayableEntitySnapshot[] entities,PlayableBuildingSnapshot[] buildings,PlayableProjectileSnapshot[] projectiles,PlayableRuntimeMetrics metrics,string failure,TerritorySiteSnapshot[] sites=null,double incomePerSecond=0,TeamVisionSnapshot vision=null,TerritorySite[] discoveredSites=null,PlayablePopulationSnapshot population=null,PlayableImpactSnapshot[] impacts=null,PlayableResearchAvailabilitySnapshot[] researchAvailability=null,PlayableResearchOrderSnapshot[] ownerResearch=null,PlayablePublicScoutObjective[] publicScoutObjectives=null,PlayableCenterDamageSnapshot[] ownCenterDamage=null,PlayableRouteProof[] routeProofs=null,PlayableArtillerySupportSnapshot[] artillerySupport=null,PlayableOwner owner=PlayableOwner.Player,double? exactCredits=null,string ownerId=null,int team=-1,OfflineParticipant[] participants=null,PlayableProfile activeProfile=null,int homeSiteId=0,bool ownerEliminated=false,double settledIncome=0,Spacewars.Simulation.Ai.AiIntelEnvelope[] intelEnvelopes=null,PlayableSoundEvent[] sounds=null,PlayableIncomeEvent[] incomeEvents=null,CampaignMissionView mission=null,PlayableGroundTrail[] groundTrails=null,PlayableBuildingDestruction[] buildingDestructions=null,PlayableWreckSnapshot[] wrecks=null,TerritorySite[] publicSites=null)
-        {PublicSites=Array.AsReadOnly((TerritorySite[])(publicSites??discoveredSites??sites?.Select(s=>s.Site).ToArray()??Array.Empty<TerritorySite>()).Clone());Wrecks=Array.AsReadOnly((PlayableWreckSnapshot[])(wrecks??Array.Empty<PlayableWreckSnapshot>()).Clone());BuildingDestructions=Array.AsReadOnly((PlayableBuildingDestruction[])(buildingDestructions??Array.Empty<PlayableBuildingDestruction>()).Clone());GroundTrails=Array.AsReadOnly((PlayableGroundTrail[])(groundTrails??Array.Empty<PlayableGroundTrail>()).Clone());Mission=mission;IncomeEvents=Array.AsReadOnly((PlayableIncomeEvent[])(incomeEvents??Array.Empty<PlayableIncomeEvent>()).Clone());Sounds=System.Array.AsReadOnly((PlayableSoundEvent[])(sounds??System.Array.Empty<PlayableSoundEvent>()).Clone());IntelEnvelopes=Array.AsReadOnly((intelEnvelopes??Array.Empty<Spacewars.Simulation.Ai.AiIntelEnvelope>()).ToArray());SettledIncome=settledIncome;OwnerEliminated=ownerEliminated;HomeSiteId=homeSiteId>0?homeSiteId:(sites??Array.Empty<TerritorySiteSnapshot>()).Where(x=>x.Owner==owner&&x.Site.Kind==PlayableBuildingKind.Headquarters).OrderBy(x=>x.Site.Id).Select(x=>x.Site.Id).FirstOrDefault();ActiveProfile=activeProfile;OwnerId=ownerId??(owner==PlayableOwner.Player?"player-1":"enemy-1");Team=team<0?(int)owner:team;Participants=Array.AsReadOnly((OfflineParticipant[])(participants??Array.Empty<OfflineParticipant>()).Clone());ExactCredits=exactCredits??credits;Owner=owner;ArtillerySupport=Array.AsReadOnly((PlayableArtillerySupportSnapshot[])(artillerySupport??Array.Empty<PlayableArtillerySupportSnapshot>()).Clone());RouteProofs=Array.AsReadOnly(Array.ConvertAll(routeProofs??Array.Empty<PlayableRouteProof>(),x=>x.Copy()));OwnCenterDamage=Array.AsReadOnly(Array.ConvertAll(ownCenterDamage??Array.Empty<PlayableCenterDamageSnapshot>(),x=>x.Copy()));PublicScoutObjectives=Array.AsReadOnly((PlayablePublicScoutObjective[])(publicScoutObjectives??new PlayablePublicScoutObjective[0]).Clone());ResearchAvailability=Array.AsReadOnly((PlayableResearchAvailabilitySnapshot[])(researchAvailability??new PlayableResearchAvailabilitySnapshot[0]).Clone());OwnerResearch=Array.AsReadOnly((PlayableResearchOrderSnapshot[])(ownerResearch??Array.Empty<PlayableResearchOrderSnapshot>()).Clone());Impacts=Array.AsReadOnly((PlayableImpactSnapshot[])(impacts??new PlayableImpactSnapshot[0]).Clone());Population=population;Vision=vision;DiscoveredSites=Array.AsReadOnly((TerritorySite[])(discoveredSites??new TerritorySite[0]).Clone());Sites=Array.AsReadOnly((TerritorySiteSnapshot[])(sites??new TerritorySiteSnapshot[0]).Clone());IncomePerSecond=incomePerSecond;ProfileId=profileId;ProfileRevision=profileRevision;Generation=generation;Seed=seed;Sequence=sequence;Tick=tick;Status=status;Paused=paused;Outcome=outcome;Credits=credits;Geometry=geometry;Entities=Array.AsReadOnly((PlayableEntitySnapshot[])entities.Clone());Buildings=Array.AsReadOnly((PlayableBuildingSnapshot[])buildings.Clone());Projectiles=Array.AsReadOnly((PlayableProjectileSnapshot[])projectiles.Clone());Metrics=metrics;Failure=failure;}
+        public IReadOnlyList<KnownRelay> MapRelayControl{get;}
+        public PlayableDominationSnapshot? Domination{get;}
+        public PlayableSnapshot(string profileId,int profileRevision,long generation,int seed,long sequence,long tick,RuntimeStatus status,bool paused,PlayableMatchOutcome outcome,int credits,NavGeometry geometry,PlayableEntitySnapshot[] entities,PlayableBuildingSnapshot[] buildings,PlayableProjectileSnapshot[] projectiles,PlayableRuntimeMetrics metrics,string failure,TerritorySiteSnapshot[] sites=null,double incomePerSecond=0,TeamVisionSnapshot vision=null,TerritorySite[] discoveredSites=null,PlayablePopulationSnapshot population=null,PlayableImpactSnapshot[] impacts=null,PlayableResearchAvailabilitySnapshot[] researchAvailability=null,PlayableResearchOrderSnapshot[] ownerResearch=null,PlayablePublicScoutObjective[] publicScoutObjectives=null,PlayableCenterDamageSnapshot[] ownCenterDamage=null,PlayableRouteProof[] routeProofs=null,PlayableArtillerySupportSnapshot[] artillerySupport=null,PlayableOwner owner=PlayableOwner.Player,double? exactCredits=null,string ownerId=null,int team=-1,OfflineParticipant[] participants=null,PlayableProfile activeProfile=null,int homeSiteId=0,bool ownerEliminated=false,double settledIncome=0,Spacewars.Simulation.Ai.AiIntelEnvelope[] intelEnvelopes=null,PlayableSoundEvent[] sounds=null,PlayableIncomeEvent[] incomeEvents=null,CampaignMissionView mission=null,PlayableGroundTrail[] groundTrails=null,PlayableBuildingDestruction[] buildingDestructions=null,PlayableWreckSnapshot[] wrecks=null,TerritorySite[] publicSites=null,KnownRelay[] mapRelayControl=null,int relayTransferRecipients=0,Dictionary<PlayableOwner,double> relayRecipientIncome=null,PlayableDominationSnapshot? domination=null)
+        {
+            Domination=domination;
+            RelayTransferRecipients=relayTransferRecipients;
+            RelayRecipientIncome=relayRecipientIncome==null?NoRelayRecipientIncome:
+                new System.Collections.ObjectModel.ReadOnlyDictionary<PlayableOwner,double>(new Dictionary<PlayableOwner,double>(relayRecipientIncome));
+            MapRelayControl=Close(mapRelayControl);
+            PublicSites=Close(publicSites??discoveredSites??sites?.Select(s=>s.Site).ToArray());Wrecks=Close(wrecks);BuildingDestructions=Close(buildingDestructions);GroundTrails=Close(groundTrails);Mission=mission;IncomeEvents=Close(incomeEvents);Sounds=Close(sounds);IntelEnvelopes=Close(intelEnvelopes);SettledIncome=settledIncome;OwnerEliminated=ownerEliminated;HomeSiteId=homeSiteId>0?homeSiteId:(sites??Array.Empty<TerritorySiteSnapshot>()).Where(x=>x.Owner==owner&&x.Site.Kind==PlayableBuildingKind.Headquarters).OrderBy(x=>x.Site.Id).Select(x=>x.Site.Id).FirstOrDefault();ActiveProfile=activeProfile;OwnerId=ownerId??(owner==PlayableOwner.Player?"player-1":"enemy-1");Team=team<0?(int)owner:team;Participants=Close(participants);ExactCredits=exactCredits??credits;Owner=owner;ArtillerySupport=Close(artillerySupport);RouteProofs=Array.AsReadOnly(Array.ConvertAll(routeProofs??Array.Empty<PlayableRouteProof>(),x=>x.Copy()));OwnCenterDamage=Array.AsReadOnly(Array.ConvertAll(ownCenterDamage??Array.Empty<PlayableCenterDamageSnapshot>(),x=>x.Copy()));PublicScoutObjectives=Close(publicScoutObjectives);ResearchAvailability=Close(researchAvailability);OwnerResearch=Close(ownerResearch);Impacts=Close(impacts);Population=population;Vision=vision;DiscoveredSites=Close(discoveredSites);Sites=Close(sites);IncomePerSecond=incomePerSecond;ProfileId=profileId;ProfileRevision=profileRevision;Generation=generation;Seed=seed;Sequence=sequence;Tick=tick;Status=status;Paused=paused;Outcome=outcome;Credits=credits;Geometry=geometry;entityRows=CloseRequired(entities);buildingRows=CloseRequired(buildings);Projectiles=CloseRequired(projectiles);Metrics=metrics;Failure=failure;}
         public double SettledIncome{get;} public bool OwnerEliminated{get;} public int HomeSiteId{get;} public string OwnerId{get;} public int Team{get;} public IReadOnlyList<OfflineParticipant> Participants{get;}
+        public int RelayTransferRecipients {get;}
+        private static readonly IReadOnlyDictionary<PlayableOwner,double> NoRelayRecipientIncome=
+            new System.Collections.ObjectModel.ReadOnlyDictionary<PlayableOwner,double>(new Dictionary<PlayableOwner,double>());
+        public IReadOnlyDictionary<PlayableOwner,double> RelayRecipientIncome {get;}
         public bool IsHostile(PlayableOwner other)=>Participants.Count==0?other!=Owner:Participants[(int)other].Team!=Team;
         public PlayablePopulationSnapshot Population{get;} public TeamVisionSnapshot Vision{get;} public IReadOnlyList<TerritorySite> DiscoveredSites{get;} public IReadOnlyList<TerritorySite> PublicSites{get;} public IReadOnlyList<TerritorySiteSnapshot> Sites{get;} public IReadOnlyList<PlayableResearchAvailabilitySnapshot> ResearchAvailability{get;} public IReadOnlyList<PlayableResearchOrderSnapshot> OwnerResearch{get;} public IReadOnlyList<PlayablePublicScoutObjective> PublicScoutObjectives{get;} public double IncomePerSecond{get;}
         public IReadOnlyList<PlayableImpactSnapshot> Impacts{get;}
         public IReadOnlyList<PlayableSoundEvent> Sounds{get;}
         public IReadOnlyList<PlayableIncomeEvent> IncomeEvents{get;}
         public IReadOnlyList<PlayableCenterDamageSnapshot> OwnCenterDamage{get;}
-        public IReadOnlyList<PlayableRouteProof> RouteProofs{get;}
-        public IReadOnlyList<PlayableArtillerySupportSnapshot> ArtillerySupport{get;}
+        public IReadOnlyList<PlayableRouteProof> RouteProofs{get;private set;}
+        internal PlayableSnapshot WithDecisionRoutes(PlayableRouteProof[] proofs)
+        {
+            var copy=CopyEnvelope();copy.RouteProofs=Close(proofs);return copy;
+        }
+        public IReadOnlyList<PlayableArtillerySupportSnapshot> ArtillerySupport{get;private set;}
+        internal PlayableSnapshot WithDecisionArtillery(PlayableArtillerySupportSnapshot[] support)
+        {
+            var copy=CopyEnvelope();copy.ArtillerySupport=Close(support);return copy;
+        }
         public PlayableProfile ActiveProfile {get;}
-        public PlayableOwner Owner{get;} public string ProfileId{get;} public int ProfileRevision{get;} public long Generation{get;} public int Seed{get;} public long Sequence{get;} public long Tick{get;} public RuntimeStatus Status{get;} public bool Paused{get;} public PlayableMatchOutcome Outcome{get;} public int Credits{get;} public double ExactCredits{get;} public NavGeometry Geometry{get;} public IReadOnlyList<PlayableEntitySnapshot> Entities{get;} public IReadOnlyList<PlayableBuildingSnapshot> Buildings{get;} public IReadOnlyList<PlayableProjectileSnapshot> Projectiles{get;} public PlayableRuntimeMetrics Metrics{get;} public string Failure{get;}
+        private readonly IReadOnlyList<PlayableEntitySnapshot> entityRows;
+        private Func<IReadOnlyList<PlayableEntitySnapshot>> readEntityRows;
+        private readonly IReadOnlyList<PlayableBuildingSnapshot> buildingRows;
+        private Func<IReadOnlyList<PlayableBuildingSnapshot>> readBuildingRows;
+        // Called only while constructing a fresh, unpublished envelope.
+        internal void SetFrameRows(Func<IReadOnlyList<PlayableEntitySnapshot>> units, Func<IReadOnlyList<PlayableBuildingSnapshot>> buildings)
+        {
+            readEntityRows = units;
+            readBuildingRows = buildings;
+        }
+
+        public PlayableOwner Owner{get;} public string ProfileId{get;} public int ProfileRevision{get;} public long Generation{get;} public int Seed{get;} public long Sequence{get;} public long Tick{get;} public RuntimeStatus Status{get;} public bool Paused{get;} public PlayableMatchOutcome Outcome{get;} public int Credits{get;} public double ExactCredits{get;} public NavGeometry Geometry{get;} public IReadOnlyList<PlayableEntitySnapshot> Entities => readEntityRows?.Invoke() ?? entityRows; public IReadOnlyList<PlayableBuildingSnapshot> Buildings => readBuildingRows?.Invoke() ?? buildingRows; public IReadOnlyList<PlayableProjectileSnapshot> Projectiles{get;} public PlayableRuntimeMetrics Metrics{get;private set;} public string Failure{get;}
     }
 }

@@ -7,6 +7,7 @@ using Spacewars.Input;
 using Spacewars.Presentation;
 using Spacewars.Simulation;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace Spacewars.Input.Tests
 {
@@ -59,6 +60,116 @@ namespace Spacewars.Input.Tests
             Call("Select",new Vector2(a.x-10,Math.Min(a.y,b.y)-10),new Vector2(b.x+10,Math.Max(a.y,b.y)+10),true);CollectionAssert.AreEquivalent(new[]{1,2,3},Selection);
             var point=Screen(view.Entities[0].Position);Call("SelectSameType",point);CollectionAssert.AreEquivalent(new[]{1,2},Selection);
         }
+        [TestCase(10)]
+        [TestCase(24)]
+        public void NearMissSelectsOneUnitAndDoubleClickUsesThatUnitsVisibleType(float zoom)
+        {
+            camera.orthographicSize=zoom;
+            var view=Get<PlayableSnapshot>("view");
+            var profile=PlayableProfile.Default;
+            var clicked=view.Entities[1];
+            var center=Screen(clicked.Position);
+            var radius=(float)(PlayableUnitRules.Radius(profile,clicked.Kind)*profile.TargetPickRadiusMultiplier);
+            var rim=camera.WorldToScreenPoint(new Vector3(0,.5f,0)+camera.transform.right*radius);
+            var point=center+Vector2.up*(Vector2.Distance(center,rim)+(float)profile.SelectionDragPixels);
+
+            Assert.Zero((int)Call("Pick",point,false),"Command targeting still uses the exact zone.");
+            Call("Select",point,point,false);
+            CollectionAssert.AreEquivalent(new[]{2},Selection);
+            Call("SelectSameType",point);
+            CollectionAssert.AreEquivalent(new[]{1,2},Selection);
+
+            var outside=point+Vector2.up*(float)(2*profile.SelectionDragPixels);
+            Call("Select",outside,outside,false);
+            Assert.IsEmpty(Selection);
+        }
+
+        [Test]
+        public void OverlappingToleranceChoosesTheNearestOwnUnit()
+        {
+            var profile=PlayableProfile.Default;
+            var body=new Vector3(0,.5f,0);
+            float pixelsPerMeter=Vector2.Distance(camera.WorldToScreenPoint(body),
+                camera.WorldToScreenPoint(body+Vector3.right));
+            double radius=PlayableUnitRules.Radius(profile,PlayableEntityKind.Tank)*profile.TargetPickRadiusMultiplier;
+            double margin=profile.SelectionDragPixels/pixelsPerMeter;
+            Set("view",Snapshot(new[]{
+                Unit(9,PlayableEntityKind.Tank,-radius-1.5*margin,0),
+                Unit(10,PlayableEntityKind.Tank,radius+.5*margin,0)
+            },Array.Empty<PlayableBuildingSnapshot>()));
+            var point=Screen(default);
+            Assert.Zero((int)Call("Pick",point,false));
+            Call("Select",point,point,false);
+            CollectionAssert.AreEquivalent(new[]{10},Selection);
+        }
+
+        [Test]
+        public void AircraftTypeSelectionUsesItsVisibleBodyInsteadOfGroundProjection()
+        {
+            var units=new[]{
+                new PlayableEntitySnapshot(20,PlayableOwner.Player,PlayableEntityKind.Hawk,
+                    new NavPoint(0,0),100,false,0,0,0,altitude:3),
+                new PlayableEntitySnapshot(21,PlayableOwner.Player,PlayableEntityKind.Hawk,
+                    new NavPoint(4,0),100,false,0,0,0,altitude:3),
+                new PlayableEntitySnapshot(22,PlayableOwner.Player,PlayableEntityKind.Hawk,
+                    new NavPoint(0,0),0,false,0,0,0,altitude:3),
+                new PlayableEntitySnapshot(23,PlayableOwner.Player,PlayableEntityKind.Hawk,
+                    new NavPoint(0,0),100,false,0,0,0,altitude:60)};
+            Set("view",Snapshot(units,Array.Empty<PlayableBuildingSnapshot>()));
+            var world=Get<PlayableWorld>("world");
+            var boundsArgs=new object[]{camera,units[0],null};
+            Assert.True((bool)typeof(PlayableWorld).GetMethod("HawkScreenBounds",F).Invoke(world,boundsArgs));
+            var bounds=(Rect)boundsArgs[2];
+            var point=new Vector2(bounds.xMin-(float)PlayableProfile.Default.SelectionDragPixels,bounds.center.y);
+            Call("Select",point,point,false);
+            CollectionAssert.AreEquivalent(new[]{20},Selection);
+            Call("SelectSameType",point);
+            CollectionAssert.AreEquivalent(new[]{20,21},Selection);
+        }
+
+        [Test] public void InspectingForeignUnitClearsRecipientsAndUsesOnlyItsLiveUpgrades()
+        {
+            var enemy=new PlayableEntitySnapshot(5,PlayableOwner.Enemy,PlayableEntityKind.Tank,
+                new NavPoint(8,0),100,false,0,0,0,upgraded:true,weaponSystemsLevel:3,defensiveSystemsLevel:2);
+            Set("view",Snapshot(new[]{Unit(1,PlayableEntityKind.Tank,0,0),enemy},Array.Empty<PlayableBuildingSnapshot>()));
+            Selection.Add(1);
+            var point=Screen(enemy.Position);
+            Call("Select",point,point,false);
+            Assert.IsEmpty(Selection);
+            Assert.AreEqual(enemy.Id,Get<int>("inspectionEntityId"));
+            Call("UpdatePrecisionContext",new object[]{null});
+            var row=Get<VisualElement>("root").Q("applied-upgrades");
+            Assert.AreEqual(3,row.childCount);
+            Assert.NotNull(row.Q("applied-upgrade-weapon-systems-3"));
+            Assert.NotNull(row.Q("applied-upgrade-defensive-systems-2"));
+            Assert.AreEqual(DisplayStyle.Flex,row.Q("applied-upgrade-tankHybridUpgraded").Q("portrait-upgrade-mark").style.display.value);
+            Call("ToggleSelectionRoster",false);
+            Assert.AreEqual(DisplayStyle.Flex,row.style.display.value);
+            Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("root").Q("context-health").style.display.value);
+
+            Set("view",Snapshot(new[]{Unit(1,PlayableEntityKind.Tank,0,0)},Array.Empty<PlayableBuildingSnapshot>()));
+            Call("ValidateInspection");
+            Assert.Zero(Get<int>("inspectionEntityId"));
+            Assert.IsEmpty(Selection);
+        }
+
+        [Test] public void InspectsBuildingUnderConstructionWithoutOpeningItsActions()
+        {
+            var enemy=new PlayableBuildingSnapshot(20,PlayableOwner.Enemy,PlayableBuildingKind.Factory,
+                new NavPoint(8,0),50,.5,0,0,default,phase:ConstructionPhase.Constructing,
+                includePrivateState:false,concreteLevel:2);
+            Set("view",Snapshot(Array.Empty<PlayableEntitySnapshot>(),new[]{enemy}));
+            var point=Screen(enemy.Position,1);
+            Call("Select",point,point,false);
+            Assert.AreEqual(enemy.Id,Get<int>("inspectionEntityId"));
+            Assert.IsEmpty(Selection);
+            Assert.IsEmpty((OfflinePadAction[])Call("CurrentBattleActions"));
+            Call("UpdatePrecisionContext",enemy);
+            Assert.AreEqual(1,Get<VisualElement>("root").Q("applied-upgrades").childCount);
+            Call("ToggleSelectionRoster",false);
+            Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("root").Q("selection-stats").style.display.value);
+        }
+
         [Test] public void HostileHoverAndHomeUseRealPresentationGeometry()
         {
             var view=Get<PlayableSnapshot>("view");Assert.True((bool)Call("HostileAt",Screen(view.Entities[4].Position)));Assert.False((bool)Call("HostileAt",Screen(view.Entities[0].Position)));
@@ -70,6 +181,19 @@ namespace Spacewars.Input.Tests
             Selection.Add(1);Selection.Add(2);Call("KeyboardSelection",3,true,1d);Selection.Clear();Call("KeyboardSelection",3,false,2d);CollectionAssert.AreEquivalent(new[]{1,2},Selection);
             Call("KeyboardSelection",0,false,3d);CollectionAssert.AreEquivalent(new[]{1,2,3,4},Selection);
             Selection.Clear();Selection.Add(10);Call("KeyboardSelection",5,true,4d);Selection.Clear();Call("KeyboardSelection",5,false,5d);CollectionAssert.AreEquivalent(new[]{10},Selection);
+        }
+        [Test] public void OfflineCameraOrbitKeepsItsTargetAndResetsThePose()
+        {
+            var config=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text);
+            var state=new OfflinePadCamera(4,7,config);state.Apply(camera);
+            var homePosition=camera.transform.position;var homeRotation=camera.transform.rotation;
+            var target=new Vector3(4,0,7);
+            state.Rotate(55);state.Apply(camera);
+            Assert.Greater(Quaternion.Angle(homeRotation,camera.transform.rotation),50);
+            var at=camera.WorldToViewportPoint(target);
+            Assert.That(at.x,Is.EqualTo(.5f).Within(.001f));Assert.That(at.y,Is.EqualTo(.5f).Within(.001f));
+            state.Reset();state.Apply(camera);
+            Assert.AreEqual(homePosition,camera.transform.position);Assert.AreEqual(homeRotation,camera.transform.rotation);
         }
         [Test] public void OfflineResolverUsesTheSameNearestContextTargetAndMirroredPan()
         {

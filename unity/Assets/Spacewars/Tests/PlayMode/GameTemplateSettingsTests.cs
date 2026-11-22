@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 using Spacewars.Presentation;
 using UnityEngine;
@@ -26,6 +27,17 @@ public sealed class GameTemplateSettingsTests
     {
         NativePreferenceWriter.Flush=PlayerPrefs.Save;nav.Dispose();UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);
         foreach(var key in new[]{"spacewars.display.width","spacewars.display.height","spacewars.display.fullscreen",NativeDevicePreferences.Prefix+"frameLimit"}){if(saved.TryGetValue(key,out var value))PlayerPrefs.SetInt(key,value);else PlayerPrefs.DeleteKey(key);}restoreAll();PlayerPrefs.Save();Application.targetFrameRate=oldLimit;
+    }
+    [UnityTest] public IEnumerator EverySettingsParameterExplainsItsEffectOnFocusAndHover()
+    {
+        foreach(string section in new[]{"Видео","Звук","Управление","Интерфейс"}){
+            nav.ActivateElement(page.Q<Button>("settings-tab-"+section));yield return null;
+            var fields=page.Q("settings-group-"+section).Query<VisualElement>().ToList().Where(e=>e is Toggle||e is Slider||e is DropdownField).ToArray();Assert.IsNotEmpty(fields);
+            foreach(var field in fields){
+                Assert.Greater(field.tooltip.Length,20,field.name);field.Focus();yield return null;Assert.AreEqual(field.tooltip,page.Q<Label>("settings-help").text,field.name+" focus");
+                using(var evt=PointerEnterEvent.GetPooled()){evt.target=field;field.SendEvent(evt);}Assert.AreEqual(field.tooltip,page.Q<Label>("settings-help").text,field.name+" hover");
+            }
+        }
     }
     [UnityTest] public IEnumerator PreviewCancelAndConfirmPreserveCorrectPreferencesAndFocus()
     {

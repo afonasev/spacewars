@@ -70,6 +70,7 @@ namespace Spacewars.Presentation
         private void DriveRoutePerformanceEvidence()
         {
             if(!routePerformanceEvidence||quitting||runtime==null||view==null||inLobby||preparing)return;
+            if(ObserverPerformanceRequested){DriveObserverPerformance();return;}
             if(SplitScreenPerformanceRequested){DriveSplitScreenPerformance();return;}
             float now=Time.realtimeSinceStartup;
             if(routePerformanceStarted<0){

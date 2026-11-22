@@ -20,7 +20,7 @@ namespace Spacewars.Tests.EditMode
         [Test] public void MatchBotNamesAreUniqueStableAndDoNotMutateLobby()
         {
             var lobby=new NativeLobbyConfiguration{AiTestMap=true};lobby.InitializeParticipants();
-            CollectionAssert.AreEqual(new[]{"Кадет","Боец","Ветеран"},NativeLobbyConfiguration.DifficultyNames);
+            CollectionAssert.AreEqual(new[]{"Кадет","Боец","Ветеран","Эксперт","Читер"},NativeLobbyConfiguration.DifficultyNames);
             for(int i=0;i<lobby.Participants.Count;i++)lobby.Participants[i].Difficulty=(AiDifficulty)(i%3);
             for(int launch=0;launch<20;launch++)
             {

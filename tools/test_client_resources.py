@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from tools.test_release_pipeline import write_release_profile_fixture
+
 import deduplicate_client_resources as resources
 
 spec = importlib.util.spec_from_file_location('client_build', pathlib.Path(__file__).parent/'native-release/build.py')
@@ -62,6 +64,7 @@ class ClientResourcesTests(unittest.TestCase):
             player = root/'unity/Builds/release/windows'
             player.mkdir(parents=True)
             def run(command, **kwargs):
+                write_release_profile_fixture(root, kwargs['env']['SPACEWARS_RELEASE_VERSION'])
                 (player/'Player.exe').write_bytes(b'game')
                 dll=player/build.WINDOWS_RECAST;dll.parent.mkdir(parents=True)
                 dll.write_bytes((pathlib.Path(__file__).resolve().parents[1]/'unity/Assets/Spacewars/Plugins/x86_64/spacewars_recast.dll').read_bytes())
@@ -79,34 +82,89 @@ class ClientResourcesTests(unittest.TestCase):
             self.assertEqual(record['channel'], 'test')
             self.assertTrue(record['test_match_logging'])
 
-    def test_macos_bundle_is_resealed_before_inventory_binding(self):
+    def run_macos_build(self, failure=None):
+        # Exercise the actual build CLI and validator; only platform commands are fake.
+        import hashlib
+        import subprocess
+        from native_plugins import RECAST_EXPORTS
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
             player = root/'unity/Builds/release/macOS/Player.app'
             (player/'Contents').mkdir(parents=True)
+            source = root/'unity/Assets/Spacewars/Plugins/macOS'/build.MACOS_RECAST_NAME
+            source.parent.mkdir(parents=True)
+            if failure != 'missing':
+                source.write_bytes(b'fixture plugin')
+            plugin = player/'Contents/PlugIns'/build.MACOS_RECAST_NAME
+            events = []
             def run(command, **kwargs):
+                write_release_profile_fixture(root, kwargs['env']['SPACEWARS_RELEASE_VERSION'])
                 (player/'Contents/Player').write_bytes(b'game')
                 (player/'Contents/Player.pdb').write_bytes(b'debug')
                 (root/'.local/bound-build-macos-universal.log').write_text('NATIVE_RELEASE_BUILD_PASS')
                 return type('Exit', (), {'returncode': 0})()
-            signed = []
+            def inspect(command, **kwargs):
+                self.assertEqual(command[-1], str(plugin))
+                self.assertEqual(plugin.read_bytes(), source.read_bytes())
+                events.append(command[0])
+                if command[0] == 'lipo':
+                    self.assertEqual(command[1], '-archs')
+                    return 'arm64' if failure == 'architecture' else 'arm64 x86_64'
+                self.assertEqual(command[:2], ['nm', '-gU'])
+                exports = RECAST_EXPORTS - ({'sw_recast_build_layered'} if failure == 'exports' else set())
+                return '\n'.join('0000 T _' + name for name in sorted(exports))
             def codesign(command):
                 self.assertFalse((player/'Contents/Player.pdb').exists())
-                signed.append(command)
+                events.append(command)
+                if failure == 'plugin-sign' and command[-1] == str(plugin):
+                    raise subprocess.CalledProcessError(1, command)
+                if failure == 'bundle-sign' and command[-1] == str(player):
+                    raise subprocess.CalledProcessError(1, command)
                 if '--force' in command:
-                    (player/'Contents/CodeSignature').write_bytes(b'resealed')
+                    if command[-1] == str(plugin):
+                        plugin.write_bytes(b'signed fixture plugin')
+                    else:
+                        (player/'Contents/CodeSignature').write_bytes(b'resealed')
                 return 0
             def git(*args):
                 return b'abc\n' if args == ('rev-parse', 'HEAD') else b''
             args = ['build.py', '--platform', 'macos-universal', '--version', '0.0.1']
-            with patch.object(build, 'ROOT', root), patch.object(build, 'git', side_effect=git), patch.object(build.subprocess, 'run', side_effect=run), patch.object(build.subprocess, 'check_call', side_effect=codesign), patch.object(sys, 'argv', args), contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(build.main(), 0)
-            record = json.loads((player.parent/'native-build.json').read_text())
+            identity = player.parent/'native-build.json'
+            with patch.object(build, 'ROOT', root), patch.object(build, 'git', side_effect=git), patch.object(build.subprocess, 'run', side_effect=run), patch.object(build.subprocess, 'check_output', side_effect=inspect), patch.object(build.subprocess, 'check_call', side_effect=codesign), patch.object(sys, 'argv', args), contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    self.assertEqual(build.main(), 0)
+                except (ValueError, FileNotFoundError, subprocess.CalledProcessError):
+                    self.assertFalse(identity.exists(), 'Failed staging/signing must never bind a build')
+                    raise
+            record = json.loads(identity.read_text())
+            self.assertEqual(events, [
+                'lipo', 'nm',
+                ['codesign', '--force', '--sign', '-', str(plugin)],
+                ['codesign', '--verify', '--strict', str(plugin)],
+                ['codesign', '--force', '--sign', '-', '--preserve-metadata=identifier,entitlements,flags', str(player)],
+                ['codesign', '--verify', '--strict', str(player)],
+            ])
             self.assertIn('Contents/CodeSignature', record['files'])
             self.assertNotIn('Contents/Player.pdb', record['files'])
-            self.assertEqual(len(signed), 2)
-            self.assertIn('--preserve-metadata=identifier,entitlements,flags', signed[0])
-            self.assertEqual(signed[1], ['codesign', '--verify', '--strict', str(player)])
+            self.assertEqual(record['files']['Contents/PlugIns/'+build.MACOS_RECAST_NAME], {
+                'size': plugin.stat().st_size, 'sha256': hashlib.sha256(plugin.read_bytes()).hexdigest()})
+            self.assertEqual(source.read_bytes(), b'fixture plugin')
+
+    def test_macos_bundle_is_resealed_before_inventory_binding(self):
+        self.run_macos_build()
+
+    def test_macos_invalid_plugin_never_binds_inventory(self):
+        for failure, message in [('architecture', 'arm64 and x86_64'), ('exports', 'ABI exports missing')]:
+            with self.subTest(failure=failure), self.assertRaisesRegex(ValueError, message):
+                self.run_macos_build(failure)
+        with self.assertRaises(FileNotFoundError):
+            self.run_macos_build('missing')
+
+    def test_macos_signing_failure_never_binds_inventory(self):
+        import subprocess
+        for failure in ['plugin-sign', 'bundle-sign']:
+            with self.subTest(failure=failure), self.assertRaises(subprocess.CalledProcessError):
+                self.run_macos_build(failure)
 
     def test_committed_aliases_retain_exact_bytes_importers_and_valid_references(self):
         self.assertGreater(resources.verify(resources.ROOT)['verified_aliases'], 0)

@@ -64,6 +64,40 @@ namespace Spacewars.Simulation
         public IDisposable ClaimScratch(long admittedBytes)
         {if(!(allocator is INavStorageScratchAllocator scratch))throw new InvalidOperationException("Missing physical scratch allocator.");return scratch.ClaimScratch(admittedBytes);}
     }
+    // Local factories still pay the enclosing reservation and use its ledger.
+    // Only the birth pins have a shorter lifetime. Returned objects and adopted
+    // children survive through their explicit owner and edge references.
+    internal sealed class NavStorageLocalBirths : INavStorageReservation, INavStorageScratchAllocator, INavStorageLedgerIdentity, IDisposable
+    {
+        private readonly INavStorageReservation reservation;
+        private NavOwnedStorage births;
+
+        internal NavStorageLocalBirths(INavStorageReservation reservation){this.reservation=reservation;}
+        public bool TryReserve(long bytes)=>reservation.TryReserve(bytes);
+        public object Identity=>(reservation as INavStorageLedgerIdentity)?.Identity;
+        public bool Owns(NavOwnedStorage storage)=>reservation is INavStorageLedgerIdentity ledger&&ledger.Owns(storage);
+        public IDisposable ClaimScratch(long admittedBytes)
+            =>((INavStorageScratchAllocator)reservation).ClaimScratch(admittedBytes);
+
+        public void Register(NavOwnedStorage storage)
+        {
+            if(reservation is INavStorageLocalBirthAllocator local&&local.TryRegisterLocalBirth(storage)){
+                storage.BirthNext=births;
+                births=storage;
+            }else reservation.Register(storage);
+        }
+
+        public void Dispose()
+        {
+            while(births!=null){
+                var storage=births;
+                births=storage.BirthNext;
+                storage.BirthNext=null;
+                storage.Release();
+            }
+        }
+    }
+
     internal interface INavStorageCaptureLane {bool TryEnterCapture(out long epoch);void ExitCapture(long epoch);}
     internal interface INavStorageLedger { void Released(long bytes); }
     public abstract class NavOwnedStorage

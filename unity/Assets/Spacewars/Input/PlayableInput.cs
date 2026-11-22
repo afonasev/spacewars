@@ -14,9 +14,11 @@ namespace Spacewars.Input
         // Index zero selects the whole army; other indices assign/recall groups.
         public Action<int, bool, double> SelectionKey;
         public Action ResetCamera;
+        public Action DeleteSelection;
         public Action FocusLatestEvent;
         public Action<bool> OpenChat;
-        public Func<bool> IsTextEntryActive;
+        public Func<bool> IsTextEntryActive,ChatOverridesHudFocus;
+        public Action SubmitTextEntry,CancelTextEntry;
         private bool waitForNeutral;
         public void SuppressUntilNeutral(){ClearMode();waitForNeutral=true;}
         public float DoubleClickMilliseconds = 450, SelectionDragPixels = 5;
@@ -49,6 +51,14 @@ namespace Spacewars.Input
         public Keyboard AssignedKeyboard;
         private Mouse SeatMouse {get{var device=AssignedMouse??Mouse.current;return device?.added==true?device:null;}}
         private Keyboard SeatKeyboard {get{var device=AssignedKeyboard??Keyboard.current;return device?.added==true?device:null;}}
+        public bool TryWorldPointer(out Vector2 point)
+        {
+            point=default;
+            var mouse=SeatMouse;
+            if(!HasFocus||!WorldAllowed||mouse==null||SignalModal?.Invoke()==true)return false;
+            point=mouse.position.ReadValue();
+            return IsPointerOverUi?.Invoke(point)!=true;
+        }
         public Func<bool> CanReadWorld;
         private bool WorldAllowed=>WorldInputEnabled&&IsTextEntryActive?.Invoke()!=true&&!waitForNeutral&&(CanReadWorld?.Invoke()!=false);
         private bool CommandAllowed=>WorldAllowed&&CommandInputEnabled;
@@ -96,7 +106,7 @@ namespace Spacewars.Input
                 {
                     bool Pressed(Key key) => keyboardEvent[key].ReadValueFromEvent(evt, out var value) && value > 0 && !keyboardEvent[key].isPressed;
                     bool Held(Key key) => keyboardEvent[key].ReadValueFromEvent(evt, out var value) ? value > 0 : keyboardEvent[key].isPressed;
-                    foreach(var command in new[]{Key.Enter,Key.NumpadEnter,Key.Escape,Key.F12,Key.Tab,Key.H,Key.S,Key.Space})
+                    foreach(var command in new[]{Key.Enter,Key.NumpadEnter,Key.Escape,Key.F12,Key.Tab,Key.H,Key.S,Key.Space,Key.Delete,Key.Backspace})
                         if(Pressed(command))pointerEdges.Enqueue(new PointerEdge {Command=command,Shift=Held(Key.LeftShift)||Held(Key.RightShift)});
                     if(WorldAllowed)
                     {
@@ -143,7 +153,17 @@ namespace Spacewars.Input
         {
             if (!HasFocus) { pointerEdges.Clear(); return; }
             var keyboard = SeatKeyboard;
-            if(IsTextEntryActive?.Invoke()==true){ClearMode();return;}
+            if(IsTextEntryActive?.Invoke()==true)
+            {
+                while(pointerEdges.Count>0)
+                {
+                    var command=pointerEdges.Dequeue().Command;
+                    if(command==Key.Enter||command==Key.NumpadEnter){SubmitTextEntry?.Invoke();break;}
+                    if(command==Key.Escape){CancelTextEntry?.Invoke();break;}
+                }
+                ClearMode();
+                return;
+            }
             if(waitForNeutral)
             {
                 ClearMode();var heldMouse=SeatMouse;
@@ -158,12 +178,21 @@ namespace Spacewars.Input
                 if(SignalModal?.Invoke()==true&&edge.Command!=Key.None){if(edge.Command==Key.Escape)CancelSignal?.Invoke();continue;}
                 if(edge.Command!=Key.None)
                 {
+                    if(edge.Command==Key.Enter||edge.Command==Key.NumpadEnter)
+                    {
+                        if(WorldAllowed&&(!uiFocus||ChatOverridesHudFocus?.Invoke()==true))
+                        {
+                            OpenChat?.Invoke(edge.Shift);
+                            if(IsTextEntryActive?.Invoke()==true){ClearMode();return;}
+                        }
+                        continue;
+                    }
                     if(uiFocus)continue;
-                    if(edge.Command==Key.Enter||edge.Command==Key.NumpadEnter){if(WorldAllowed){OpenChat?.Invoke(edge.Shift);if(IsTextEntryActive?.Invoke()==true){ClearMode();return;}}}
-                    else if(edge.Command==Key.Escape){if(attackMode||dragging||mapDrag>0)ResetMode();else if(CancelContext?.Invoke()!=true)TogglePause?.Invoke();}
+                    if(edge.Command==Key.Escape){if(attackMode||dragging||mapDrag>0)ResetMode();else if(CancelContext?.Invoke()!=true)TogglePause?.Invoke();}
                     else if(edge.Command==Key.F12)Capture?.Invoke();
                     else if(WorldAllowed)
                     {
+                        if(edge.Command==Key.Delete||edge.Command==Key.Backspace){if(CommandAllowed)DeleteSelection?.Invoke();continue;}
                         lastClickTime=double.NegativeInfinity;ResetMode();
                         if(edge.Command==Key.Space)FocusLatestEvent?.Invoke();
                         else if(edge.Command==Key.Tab)ToggleMap?.Invoke();

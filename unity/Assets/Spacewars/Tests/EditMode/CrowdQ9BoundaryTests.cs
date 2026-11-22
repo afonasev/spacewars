@@ -8,6 +8,80 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class CrowdQ9BoundaryTests
     {
+        [TestCase(1)] [TestCase(3)] [TestCase(8)] [TestCase(32)]
+        public void ReachStripesMatchExhaustiveSpeedsAndNeighborRows(int cap)
+        {
+            var profile=Profile(cap);
+            var random=new Random(3127);
+            var a=Enumerable.Range(0,160).Select(i=>new NavMotionBody {
+                Id=160-i, Position=new NavPoint((random.Next(60)-30)*.5+(i/80)*64,(random.Next(80)-40)*.5),
+                Radius=.625,Speed=i%3==0?4:7,Active=i%5!=0,Potential=i%10==0 }).ToArray();
+            // Exercise both sides of contact and full-reach boundaries at one ULP.
+            a[1].Position = new NavPoint(0, 0);
+            double contact = a[1].Radius + a[2].Radius;
+            double reach = contact + (a[1].Speed + a[2].Speed) * profile.CrowdLookaheadSeconds;
+            for (int k = -1; k <= 1; k++)
+            {
+                a[4 + k].Position = new NavPoint(BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(contact) + k), 0);
+                a[8 + k].Speed = a[2].Speed;
+                a[8 + k].Position = new NavPoint(BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(reach) + k), 0);
+            }
+            // Moving one isolated peer beyond the index bound forces the full
+            // reference traversal without rounding any coordinates under test.
+            a[a.Length - 1].Position = new NavPoint(500, 500);
+            var b=(NavMotionBody[])a.Clone();
+            b[b.Length - 1].Position = new NavPoint(131072, 500);
+            (int[] counts,int[] peers) Solve(NavMotionBody[] bodies)
+            {
+                var peers=new int[bodies.Length*NavCrowdMotion.NeighborCapacity];
+                var counts=new int[bodies.Length];var labels=new int[bodies.Length];
+                NavCrowdMotion.Neighbors(bodies,peers,counts,profile,Dt,labels);
+                Assert.True(counts.Any(n=>n<0));
+                NavCrowdMotion.ConstrainOverflowComponents(bodies,peers,counts,labels,new double[bodies.Length],profile,Dt);
+                return (counts,peers);
+            }
+            var indexed=Solve(a);var exhaustive=Solve(b);
+            CollectionAssert.AreEqual(exhaustive.counts,indexed.counts);
+            CollectionAssert.AreEqual(exhaustive.peers,indexed.peers);
+            for(int i=0;i<a.Length;i++){
+                Assert.AreEqual(BitConverter.DoubleToInt64Bits(b[i].Speed),BitConverter.DoubleToInt64Bits(a[i].Speed));
+            }
+        }
+
+        [Test]
+        public void IndexedSweepsMatchAllPairsAcrossBlockBoundaries()
+        {
+            // Binary fractions preserve separations under translation. The
+            // translated fixture exceeds the index's supported coordinate range.
+            const int shift = 131072;
+            var bodies = new NavMotionBody[81];
+            var reference = new NavMotionBody[bodies.Length];
+            var proposals = new NavMotionProposal[bodies.Length];
+            var expected = new NavMotionProposal[bodies.Length];
+            for (int i = 0; i < bodies.Length; i++)
+            {
+                double x = (i / 3) * 6 + i % 3;
+                double vx = i % 3 == 2 ? 0 : 1;
+                bodies[i] = new NavMotionBody { Id = 90 - i, Radius = .5, Position = new NavPoint(x, 0) };
+                reference[i] = bodies[i];
+                reference[i].Position = new NavPoint(x + shift, 0);
+                proposals[i] = new NavMotionProposal { Position = new NavPoint(x + vx, 0), Velocity = new NavPoint(vx, 0) };
+                expected[i] = proposals[i];
+                expected[i].Position = new NavPoint(x + shift + vx, 0);
+            }
+            NavCrowdMotion.ResolveJoint(reference, expected, 1);
+            NavCrowdMotion.ResolveJoint(bodies, proposals, 1);
+            Assert.True(expected[7].JointRefused);
+            Assert.True(expected[6].JointRefused); // refusal propagates from row 7
+            for (int i = 0; i < bodies.Length; i++)
+            {
+                Assert.AreEqual(expected[i].Position.X - shift, proposals[i].Position.X);
+                Assert.AreEqual(expected[i].Velocity, proposals[i].Velocity);
+                Assert.AreEqual(expected[i].JointRefused, proposals[i].JointRefused);
+                Assert.AreEqual(expected[i].JointFirstRefuser, proposals[i].JointFirstRefuser);
+            }
+        }
+
         private const double Dt=1d/30d;
         private static NavigationProfile Profile(int cap)
         {
@@ -162,7 +236,7 @@ namespace Spacewars.Tests.EditMode
         }
         private static int[] IncidentOnly(NavMotionBody[] bodies,double[] ceilings,NavigationProfile profile){
             var neighbors=new int[bodies.Length*NavCrowdMotion.NeighborCapacity];var counts=new int[bodies.Length];NavCrowdMotion.Neighbors(bodies,neighbors,counts,profile,Dt);
-            typeof(NavCrowdMotion).GetMethod("ReclaimIncidentCapacity",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic).Invoke(null,new object[]{bodies,counts,ceilings,profile,Dt});
+            NavCrowdMotion.ReclaimIncidentCapacityForTests(bodies,counts,ceilings,profile,Dt);
             AssertActiveExactCounts(bodies,counts,profile,Dt);return counts;
         }
         [TestCase(false,false)] [TestCase(true,false)] [TestCase(false,true)] [TestCase(true,true)] public void IncidentCapacityRespectsFullActiveOrPotentialPeerAndReversedStorage(bool potential,bool overflow){

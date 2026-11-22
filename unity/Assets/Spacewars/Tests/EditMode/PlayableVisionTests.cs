@@ -23,6 +23,23 @@ namespace Spacewars.Tests.EditMode
             Assert.False(vision.IsVisible(new NavPoint(13.1,0)));
             Assert.False(vision.IsVisible(new NavPoint(double.NaN,0)));
         }
+        [Test] public void DetachedDiscoveryLookupMatchesLiveCellsAndRetainsHistory()
+        {
+            var vision=new PlayableVision(1,32,24,4,1.5);
+            vision.Refresh(new[]{Source(-12,-4,7),Source(20,8,9)},Empty);
+            var snapshot=vision.Snapshot();
+            for(int x=-33;x<=33;x++)
+                for(int z=-25;z<=25;z++)
+                {
+                    var point=new NavPoint(x,z);
+                    Assert.AreEqual(vision.IsDiscovered(point),snapshot.IsDiscovered(point));
+                }
+            vision.Refresh(new[]{Source(0,0,4)},Empty);
+            Assert.True(vision.IsDiscovered(default));
+            Assert.False(snapshot.IsDiscovered(default));
+            Assert.False(snapshot.IsDiscovered(new NavPoint(double.NaN,0)));
+            Assert.False(snapshot.IsDiscovered(new NavPoint(0,double.PositiveInfinity)));
+        }
         [Test] public void AlliedSourcesUnionWhileOpposingKnowledgeRemainsIndependent()
         {
             var a=new PlayableVision(1,32,32,4,1.5);var b=new PlayableVision(2,32,32,4,1.5);
@@ -81,6 +98,32 @@ namespace Spacewars.Tests.EditMode
             v.Refresh(new[]{Source(0,0)},new[]{Building()});v.Refresh(new[]{Source(-25,0,3)},new[]{Building(2)});
             Assert.AreEqual(1,v.Snapshot().KnownBuildings.Single().Id);
             v.Refresh(new[]{Source(0,0)},new[]{Building(2)});Assert.AreEqual(2,v.Snapshot().KnownBuildings.Single().Id);
+        }
+        [Test] public void RelayObservationUsesCurrentSightAndLatchesNeutralOwnership()
+        {
+            var vision=new PlayableVision(1,32,32,4,1.5);
+            var relay=new TerritorySite(8,PlayableBuildingKind.RelayTower,default,Array.Empty<TerritorySlot>());
+            void Observe(PlayableOwner? owner)=>vision.ObserveRelays(
+                new[]{new TerritorySiteSnapshot(relay,owner,owner,1,false,0,true)});
+            Observe(PlayableOwner.Enemy);
+            Assert.IsEmpty(vision.Snapshot().KnownRelays);
+
+            vision.Refresh(new[]{Source(0,0)},Empty);
+            Observe(PlayableOwner.Enemy);
+            var enemy=vision.Snapshot();
+            Assert.AreEqual(PlayableOwner.Enemy,enemy.KnownRelays.Single().Owner);
+            Observe(PlayableOwner.Enemy);
+            Assert.AreSame(enemy,vision.Snapshot());
+
+            vision.Refresh(new[]{Source(25,0,2)},Empty);
+            Observe(null);
+            Assert.AreEqual(PlayableOwner.Enemy,vision.Snapshot().KnownRelays.Single().Owner);
+            vision.Refresh(new[]{Source(0,0)},Empty);
+            Observe(null);
+            var neutral=vision.Snapshot();
+            Assert.AreEqual(relay.Id,neutral.KnownRelays.Single().SiteId);
+            Assert.IsNull(neutral.KnownRelays.Single().Owner);
+            Assert.AreEqual(PlayableOwner.Enemy,enemy.KnownRelays.Single().Owner);
         }
         [Test] public void PendingHasNoVisionAndFoundationUsesReleaseMultiplier()
         {

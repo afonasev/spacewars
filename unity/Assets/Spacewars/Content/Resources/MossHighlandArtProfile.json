@@ -1,6 +1,6 @@
 {
   "id": "moss-highland-wet-v1",
-  "revision": 11,
+  "revision": 13,
   "detailTile": 9,
   "variantScale": 13,
   "variantBlend": 0.06,
@@ -54,6 +54,8 @@
   "apronCompaction": 0.55,
   "apronSoilValue": 0.85,
   "cliffFaceContrast": 0.35,
+  "plateauRimWidth": 1.35,
+  "plateauEdgeContrast": 0.8,
   "cliffEdgeInset": 0.4,
   "cliffChipDepth": 0.55,
   "cliffFractureScale": 1.75,

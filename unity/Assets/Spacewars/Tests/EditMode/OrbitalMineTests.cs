@@ -32,20 +32,28 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,minePoint));
             Call("DamageWithOwner",scout,10000d,0,(PlayableOwner?)null);Call("RefreshVision");
             Assert.True(View().Vision.IsVisible(new NavPoint(-24.9,0)));Assert.False(View().Vision.IsVisible(new NavPoint(-25.1,0)));Assert.AreEqual(1,View().Mines.Count);Assert.Zero(View(PlayableOwner.Enemy).Mines.Count);
+            var spectator=(PlayableSpectatorFrame)Call("SpectatorSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+            var own=spectator.Perspective(PlayableOwner.Player);var enemy=spectator.Perspective(PlayableOwner.Enemy);
+            Assert.True(own.Vision.IsVisible(new NavPoint(-24.9,0)));
+            Assert.AreEqual(minePoint,PlayableMapView.Marks(own,true).Single(m=>m.State==MapMarkState.OrbitalMine).Position);
+            Assert.False(PlayableMapView.Marks(enemy,true).Any(m=>m.State==MapMarkState.OrbitalMine));
+            Assert.False(PlayableMapView.Marks(own).Any(m=>m.State==MapMarkState.OrbitalMine));
             Spawn(new NavPoint(-20,3),PlayableOwner.Enemy);Call("RefreshVision");Assert.AreEqual(1,View(PlayableOwner.Enemy).Mines.Count);
         }
         [TestCase(PlayableEntityKind.Tank,20)][TestCase(PlayableEntityKind.Explorer,0)][TestCase(PlayableEntityKind.Shkval,0)]
         public void ContactDealsOnlyEightyToPrimaryAndFiftyToFriendlySplash(PlayableEntityKind kind,int remaining)
         {
-            int friendly=Spawn(new NavPoint(-10,0));int enemy=Spawn(new NavPoint(-8,0),PlayableOwner.Enemy,kind);
-            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,new NavPoint(-8,0)));Call("AdvanceMines");Call("RefreshVision");var view=View();
+            int friendly=Spawn(new NavPoint(-10,0));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,new NavPoint(-8,0)));
+            int enemy=Spawn(new NavPoint(-8,0),PlayableOwner.Enemy,kind);Call("AdvanceMines");Call("RefreshVision");var view=View();
             Assert.Zero(view.Mines.Count);Assert.AreEqual(1,view.MineBlasts.Count);Assert.AreEqual(1.4,view.MineBlasts[0].Radius);
             Assert.AreEqual(remaining,view.Entities.SingleOrDefault(e=>e.Id==enemy)?.Health??0);Assert.AreEqual(50,view.Entities.Single(e=>e.Id==friendly).Health);
         }
         [Test] public void LethalBlastNotifiesVictimAndMineOwnerWithoutGrantingVisionOrLeakingTargets()
         {
-            Spawn(new NavPoint(-10,0));int enemy=Spawn(new NavPoint(-8,0),PlayableOwner.Enemy,PlayableEntityKind.Explorer);
+            Spawn(new NavPoint(-10,0));
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,new NavPoint(-8,0)));
+            int enemy=Spawn(new NavPoint(-8,0),PlayableOwner.Enemy,PlayableEntityKind.Explorer);
             Call("AdvanceMines");Call("RefreshVision");
             var own=View();var victim=View(PlayableOwner.Enemy);
             Assert.False(victim.Entities.Any(u=>u.Id==enemy));
@@ -84,6 +92,46 @@ namespace Spacewars.Tests.EditMode
             Call("AdvanceMines");Assert.Zero(View().Mines.Count);Assert.AreEqual(2,domain.Snapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7).MineBlasts.Count);
             var bytes=domain.CaptureWorldBytes(7,"mine-refusal");var restored=PlayableDomain.RestoreWorldBytes(bytes,profile,7,"mine-refusal");try{CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"mine-refusal"));}finally{restored.DestroyOwnedNavigation();}
         }
+        [Test] public void EnemyClearanceRejectsPlacementWithoutSpendingCooldown()
+        {
+            var enemy = new NavPoint(-8,0);
+            Spawn(new NavPoint(-10,0));
+            Spawn(enemy,PlayableOwner.Enemy);
+            foreach(var point in new[]{enemy,new NavPoint(-12,0)})
+                Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Send(PlayableCommandKind.UseOrbital,point));
+            Assert.Zero(View().Orbital.Abilities.Single().Remaining);
+            Assert.Zero(View().Orbital.CommonRemaining);
+            Assert.IsEmpty(View().Mines);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,new NavPoint(-16,0)));
+
+            var origin = new NavPoint(0,0);
+            var radius = profile.MineEnemyClearanceRadius;
+            Assert.AreEqual(7.2,radius,1e-9);
+            Assert.True(OrbitalMinePlacement.Blocks(profile,new NavPoint(0,radius),origin,null));
+            Assert.False(OrbitalMinePlacement.Blocks(profile,new NavPoint(0,radius+.01),origin,null));
+        }
+
+        [Test] public void CustomEnemyClearanceSurvivesWorldRestore()
+        {
+            var data=profile.CopyData();
+            data.orbitalMineEnemyClearanceTankBodies=6;
+            var custom=PlayableProfile.Create(data,profile.AuthoredMap);
+            var source=new PlayableDomain(custom,1,false);
+            PlayableDomain restored=null;
+            try
+            {
+                var bytes=source.CaptureWorldBytes(7,"mine-clearance");
+                restored=PlayableDomain.RestoreWorldBytes(bytes,custom,7,"mine-clearance");
+                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"mine-clearance"));
+                Assert.Throws<ArgumentException>(()=>PlayableDomain.RestoreWorldBytes(bytes,profile,7,"mine-clearance"));
+            }
+            finally
+            {
+                restored?.DestroyOwnedNavigation();
+                source.DestroyOwnedNavigation();
+            }
+        }
+
         [Test] public void FractionalCapacityRejectedAndMineRadiusIsIndependent()
         {
             var data=profile.CopyData();data.orbitalMineCapacity=2.5;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));data.orbitalMineCapacity=3;data.shkvalBlastRadius=.7;

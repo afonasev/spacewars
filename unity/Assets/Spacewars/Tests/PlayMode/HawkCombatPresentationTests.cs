@@ -34,7 +34,7 @@ public sealed class HawkCombatPresentationTests
             var rendered=world.Tank(a,true,PlayableEntityKind.Hawk);bool fired=false;int reversals=0,lastSign=1;double first=-1;
             for(int tick=1;tick<=180;tick++)
             {
-                domain.Step(1d/30);var view=View();var entity=view.Entities.Single(e=>e.Id==a);world.AdvanceAircraftAnimation(view,tick/30d);world.UpdateAircraft(rendered,entity,view);
+                domain.Step(1d/30);var view=View();var entity=view.Entities.Single(e=>e.Id==a);world.UpdateMatchAnimation(view);world.UpdateAircraft(rendered,entity,view);
                 double yaw=(double)air.GetType().GetField("YawVelocity").GetValue(air);
                 if(Math.Abs(yaw)>.01){int sign=Math.Sign(yaw);if(sign!=lastSign)reversals++;lastSign=sign;}
                 var expected=Quaternion.Euler((float)entity.Pitch,90-(float)entity.HullHeading*Mathf.Rad2Deg,(float)entity.Roll);

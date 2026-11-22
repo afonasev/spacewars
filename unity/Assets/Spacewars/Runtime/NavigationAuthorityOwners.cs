@@ -139,7 +139,10 @@ namespace Spacewars.Runtime
         }
         private void ValidateAnswerRoles(NavRetainedArray<NavOwnedStorage> entries,int role)
         {
-            if(entries==null||entries.Count>NavMailbox<NavigationAnswer>.Capacity)throw new ArgumentException("Invalid answer BODY role capacity.");
+            // The barrier accumulates paid receipts across mailbox drains. Its
+            // exact request catalog bounds it; the transport's 256 slots do not.
+            int maximum=role==128?RequestCatalog.Count:NavMailbox<NavigationAnswer>.Capacity;
+            if(entries==null||entries.Count>maximum)throw new ArgumentException("Invalid answer BODY role capacity.");
             foreach(var entry in entries){if(entry==null)continue;if(!(entry is NavigationHostAnswer answer))throw new ArgumentException("Invalid answer BODY role kind.");bool found=false;for(int i=0;i<RequestCatalog.Count;i++)if(ReferenceEquals(RequestCatalog[i],answer.RequestOwner)&&(RequestRoles[i]&role)!=0){found=true;break;}if(!found)throw new ArgumentException("Answer request has no exact catalog role.");}
         }
         public void WritePhysicalBody(NavPhysicalBodyWriter writer)
@@ -259,8 +262,16 @@ namespace Spacewars.Runtime
             // All validation and ownership transfer precede this allocation-free install.
             for(int i=0;i<record.Members.Length;i++){
                 var member=(NavigationAuthorityMember)next.Members[i];var value=member.Data;var target=record.Members[i];
-                target.MobilityRevision=value.MobilityRevision;target.Phase=value.Phase;target.Reservation=value.Reservation;
-                target.FormationReleased=value.FormationReleased;target.ContactTick=value.ContactTick;target.ContactPhase=member.ContactPhase;
+                // A successful observation normally only advances the stamp. Retained
+                // immutable versions still have their own admitted member and phase text.
+                target.ContactTick=value.ContactTick;
+                target.ContactPhase=member.ContactPhase;
+                if(target.FormationReleased==value.FormationReleased&&target.Phase==value.Phase&&
+                    target.MobilityRevision==value.MobilityRevision&&target.Reservation==value.Reservation)continue;
+                target.FormationReleased=value.FormationReleased;
+                target.Phase=value.Phase;
+                target.MobilityRevision=value.MobilityRevision;
+                target.Reservation=value.Reservation;
             }
             var data=next.Data;record.MarchVersion=data.MarchVersion;record.MarchProfileRevision=data.MarchProfileRevision;record.MarchStretch=data.MarchStretch;record.MarchAnchor=data.MarchAnchor;record.MarchInitialized=data.MarchInitialized;record.FormationPlan=next.Formation;record.FormationVersion=next.Formation==null?0:1;record.FormationSeal=next.Formation?.Seal;version=next;generation++;
         }
@@ -593,7 +604,7 @@ namespace Spacewars.Runtime
                 allocating.Clear();liveArrivalLeaseTable?.ClearRetirementLinksNoThrow();if(liveArrivalLeaseTable==null)arrivalProjectionLeases.Clear();arrivalLedger.Clear();reservations.Clear();retainedGoals.Clear();
                 PublishLegacyAdmissionNoThrow(null);retiredCrowd=Crowd;Crowd=null;geometry=navigationGeometry=null;profile=null;Requests.CloseNoThrow();Answers.CloseNoThrow();
             }
-            motionSources?.Release();motionSources=null;ReleaseRecastPreparation(null);staged?.Discard();ownedAnswerTracking?.Release();ownedAnswerTracking=null;ownedProbes?.Release();ownedProbes=null;liveProbeAnswers?.Release();liveProbeAnswers=null;liveRegistrations?.Release();liveRegistrations=null;liveArrivalLeaseTable?.Release();liveArrivalLeaseTable=null;if(liveArrivalTables!=null){liveArrivalTables.Release();liveArrivalTables=null;}else{foreach(var attempt in arrivalAttempts.Values)ReleasePhysicalAttemptEdges(attempt);arrivalAttempts.Clear();}trafficAuthority?.Release();trafficAuthority=null;retiredCrowd?.ReleaseCrowdStorage();retiredExecutions?.Release();terrainNameOwners?.Release();terrainNameOwners=null;Answers.ReleaseRetention();transportOwner?.Release();transportOwner=null;bank?.Release();host?.Release();authority?.Release();groupCommandBacking?.ReleaseStorage();groupCommandBacking=null;
+            ClearMotionProofMemo();motionSources?.Release();motionSources=null;ReleaseRecastPreparation(null);staged?.Discard();ownedAnswerTracking?.Release();ownedAnswerTracking=null;ownedProbes?.Release();ownedProbes=null;liveProbeAnswers?.Release();liveProbeAnswers=null;liveRegistrations?.Release();liveRegistrations=null;liveArrivalLeaseTable?.Release();liveArrivalLeaseTable=null;if(liveArrivalTables!=null){liveArrivalTables.Release();liveArrivalTables=null;}else{foreach(var attempt in arrivalAttempts.Values)ReleasePhysicalAttemptEdges(attempt);arrivalAttempts.Clear();}trafficAuthority?.Release();trafficAuthority=null;retiredCrowd?.ReleaseCrowdStorage();retiredExecutions?.Release();terrainNameOwners?.Release();terrainNameOwners=null;Answers.ReleaseRetention();transportOwner?.Release();transportOwner=null;bank?.Release();host?.Release();authority?.Release();groupCommandBacking?.ReleaseStorage();groupCommandBacking=null;
         }
     }
 }

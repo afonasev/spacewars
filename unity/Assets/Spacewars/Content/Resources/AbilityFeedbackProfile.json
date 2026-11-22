@@ -12,5 +12,11 @@
   "maxEffects": 12,
   "startScale": 0.8,
   "sparkLength": 0.2,
-  "emissionGain": 1.8
+  "emissionGain": 1.8,
+  "reinforcementStartOpacity": 0.35,
+  "reinforcementCylinderOpacity": 0.62,
+  "reinforcementCylinderHeight": 1.2,
+  "reinforcementPulseCount": 2,
+  "stasisCylinderRadiusScale": 1.3,
+  "stasisCylinderHeightScale": 1.55
 }

@@ -85,7 +85,7 @@ namespace Spacewars.Presentation
             }
             Apply(phase, doorOpen, clock);
         }
-        public void Drive(PlayableBuildingSnapshot building,long tick,PlayableProfile rules)
+        public void Drive(PlayableBuildingSnapshot building,long tick,PlayableProfile rules,double? animationSeconds=null)
         {
             ExternallyDriven=true;Initialize();
             if(tick<lastTick)foreach(var p in smoke)p.Clear();
@@ -95,7 +95,7 @@ namespace Spacewars.Presentation
             float progress=Mathf.Clamp01((float)(building.LaunchTime/rules.FactoryGateSeconds));
             float opening=stage==FactoryReleaseRules.Opening?progress:stage==FactoryReleaseRules.Driving?1:stage==FactoryReleaseRules.Closing?1-progress:0;
             bool working=available&&stage==0&&building.PrivateState?.Orders.Any(o=>o.Active&&o.Remaining>0)==true;
-            StepPreview(stage!=0?Phase.Rollout:working?Phase.Working:Phase.Idle,opening,tick/30f,delta);
+            StepPreview(stage!=0?Phase.Rollout:working?Phase.Working:Phase.Idle,opening,animationSeconds.HasValue?(float)animationSeconds.Value:tick/30f,delta);
         }
         public void Apply(Phase state, float opening, float seconds)
         {

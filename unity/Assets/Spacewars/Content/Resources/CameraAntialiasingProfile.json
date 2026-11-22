@@ -1,5 +1,6 @@
 {
   "id": "camera-antialiasing-v1",
-  "revision": 2,
-  "mode": 1
+  "revision": 3,
+  "mode": 1,
+  "renderScale": 1
 }

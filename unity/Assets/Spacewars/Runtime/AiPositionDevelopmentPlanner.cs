@@ -29,7 +29,7 @@ namespace Spacewars.Runtime
         }
         internal static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
         internal static bool Live(PlayableBuildingSnapshot b)=>b.PrivateState?.Lifecycle?.Selling!=true&&(b.Health>0||b.Phase!=ConstructionPhase.Ready);
-        internal static double Range(PlayableProfile p,PlayableBuildingKind kind)=>kind==PlayableBuildingKind.GaussTower?p.GaussRange:p.ExplorerRange*p.TurretRangeMultiplier;
+        internal static double Range(PlayableProfile p,PlayableBuildingKind kind)=>TerritoryRules.AiDefenseRange(p,kind);
         private static double Height(PlayableProfile p,NavPoint at)=>p.AuthoredMap?.SupportAt(at)?.HeightAt(at)??0;
         // Use the shared physical terrain/mesh queries, never hidden world buildings.
         public static bool Covers(PlayableAiObservation o,PlayableProfile p,NavPoint from,PlayableBuildingKind kind,NavPoint at,bool air=false,int sourceId=0,int targetId=0)
@@ -105,7 +105,185 @@ namespace Spacewars.Runtime
         }
         private static PlayableAiAction Build(PlayableAiObservation o,TerritorySiteSnapshot site,TerritorySlot slot,PlayableBuildingKind kind)=>
             new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:site.Site.Id,slotId:slot.Id,parentId:site.CenterId,buildingKind:kind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
-        public static IReadOnlyList<AiPositionInvestment> Plan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,PlayableAiOpeningCompositionState opening,AiKnowledgeState knowledge,bool essentialFundsProtected,bool airOpening=false)
+        internal static int ReadySlotCount(PlayableAiObservation o,TerritorySiteSnapshot site)
+        {
+            return site.Site.Slots.Count(slot=>o.Buildings.Any(b=>b.Owner==o.Owner&&b.SiteId==site.Site.Id&&
+                b.SlotId==slot.Id&&b.Phase==ConstructionPhase.Ready&&Live(b)));
+        }
+
+        private static bool ReadyScience(PlayableAiObservation o)=>o.Buildings.Any(b=>b.Owner==o.Owner&&
+            Live(b)&&b.Phase==ConstructionPhase.Ready&&b.Kind==PlayableBuildingKind.ScientificCenter);
+
+        private static bool IsAir(AiKnownContact c)=>c.Building?c.Kind==(int)PlayableBuildingKind.Hangar:c.Kind==(int)PlayableEntityKind.Hawk;
+        private static bool ObservedAir(PlayableAiObservation o)=>o.Entities.Any(u=>o.IsHostile(u.Owner)&&u.Health>0&&u.Kind==PlayableEntityKind.Hawk)||
+            o.Buildings.Any(b=>o.IsHostile(b.Owner)&&Live(b)&&b.Kind==PlayableBuildingKind.Hangar);
+
+        private static AiKnownContact[] RecentEnemies(PlayableAiObservation o,AiProfile ai,AiKnowledgeState knowledge)
+        {
+            long horizon=AiProfile.SecondsToTicks(ai.Value("positionDevelopment.airIntelSeconds"),30);
+            return (knowledge?.Contacts??Array.Empty<AiKnownContact>()).Where(c=>o.IsHostile(c.Owner)&&
+                c.HealthAtLastSeen>0&&c.Confidence>0&&o.Tick-c.LastSeenTick<=horizon).ToArray();
+        }
+
+        internal static bool HasAirEvidence(PlayableAiObservation o,AiProfile ai,AiKnowledgeState knowledge)=>
+            ObservedAir(o)||RecentEnemies(o,ai,knowledge).Any(IsAir);
+
+        internal static NavPoint? ObjectiveThreat(NavPoint center, IReadOnlyList<PlayableEntitySnapshot> units,
+            IReadOnlyList<PlayableBuildingSnapshot> buildings, IReadOnlyList<PlayablePublicScoutObjective> objectives,
+            Func<PlayableOwner,bool> hostile, Func<NavPoint,bool> visible)
+        {
+            NavPoint? Nearest(IEnumerable<NavPoint> points) => points.Where(p => !p.Equals(center))
+                .OrderBy(p => Distance(center,p)).Select(p => (NavPoint?)p).FirstOrDefault();
+            return Nearest(units.Where(u => u.Health>0 && hostile(u.Owner) && visible(u.Position)).Select(u => u.Position))
+                ?? Nearest(buildings.Where(b => b.Health>0 && hostile(b.Owner) && visible(b.Position)).Select(b => b.Position))
+                ?? Nearest(objectives.Where(s => s.Reachable && s.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart)
+                    .Select(s => s.Approach));
+        }
+
+        internal static bool FacesThreat(NavPoint point, NavPoint center, NavPoint? enemy, double clearance) =>
+            enemy.HasValue && (point.X-center.X)*(enemy.Value.X-center.X)+(point.Z-center.Z)*(enemy.Value.Z-center.Z)
+                >= clearance * Distance(center,enemy.Value);
+
+        internal static NavPoint? DefensiveFactoryRally(PlayableAiObservation o, PlayableProfile p, AiProfile ai,
+            AiKnowledgeState knowledge, PlayableBuildingSnapshot factory, NavGeometry geometry)
+        {
+            if(factory==null||factory.Owner!=o.Owner||factory.Kind!=PlayableBuildingKind.Factory||
+                factory.Phase!=ConstructionPhase.Ready||factory.BoostSelling||o.Vision==null)return null;
+            var site=o.Sites.FirstOrDefault(s=>s.Site.Id==factory.SiteId&&s.Owner==o.Owner);
+            if(site==null)return null;
+            var center=site.Site.Position;
+            var bearing=o.Entities.Where(u=>o.IsHostile(u.Owner)&&u.Health>0&&o.Vision.IsVisible(u.Position))
+                .OrderBy(u=>Distance(center,u.Position)).ThenBy(u=>u.Id).Select(u=>(NavPoint?)u.Position).FirstOrDefault()
+                ??RecentEnemies(o,ai,knowledge).OrderByDescending(c=>c.LastSeenTick).ThenBy(c=>Distance(center,c.Position))
+                    .ThenBy(c=>c.Id).Select(c=>(NavPoint?)c.Position).FirstOrDefault()
+                ??o.PublicScoutObjectives.Where(x=>x.Reachable&&x.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&
+                    x.SiteId!=site.Site.Id&&!KnownEmpty(o,knowledge,x.SiteId))
+                    .OrderByDescending(x=>AiPublicEnemyStarts.CanAttack(o,knowledge,x.SiteId)).ThenBy(x=>Distance(center,x.Approach))
+                    .ThenBy(x=>x.SiteId).Select(x=>(NavPoint?)x.Approach).FirstOrDefault();
+            if(!bearing.HasValue||bearing.Value.Equals(center))return null;
+
+            var exit=FactoryReleaseRules.Exit(p,factory.Position,factory.Heading,PlayableEntityKind.Tank);
+            var radius=Math.Max(p.TankCollisionRadius,Math.Max(PlayableUnitRules.Radius(p,PlayableEntityKind.Explorer),
+                PlayableUnitRules.Radius(p,PlayableEntityKind.Shkval)));
+            var towers=AiActiveStrategyPolicy.KnownTowers(o,knowledge);
+            // Anchor the firing arc to the base so a moving contact does not continuously move the flag.
+            var axis=new NavPoint(center.X+1,center.Z);
+            var candidates=PlayableUnitRules.AttackApproachCandidates(p,axis,center,p.TankRange)
+                .Where(at=>(at.X-center.X)*(bearing.Value.X-center.X)+(at.Z-center.Z)*(bearing.Value.Z-center.Z)>0)
+                .OrderBy(at=>Distance(at,bearing.Value));
+            foreach(var at in candidates)
+            {
+                if(!o.Vision.IsVisible(at)||!geometry.IsFree(at,radius)||p.AuthoredMap!=null&&!p.AuthoredMap.SupportsFootprint(at,radius)||
+                    !AiTacticalExecutor.SafePath(o,exit,new[]{at},radius,p)||
+                    towers.Any(t=>Covers(o,p,t.Position,t.Kind,at)))continue;
+                bool forwardFactory=(factory.Position.X-center.X)*(at.X-center.X)+(factory.Position.Z-center.Z)*(at.Z-center.Z)>0;
+                if(forwardFactory&&Distance(exit,at)<=p.FollowDistance)return null;
+                return at;
+            }
+            return null;
+        }
+
+        private static NavPoint? Approach(PlayableAiObservation o,TerritorySiteSnapshot site,NavPoint? direction,double local)
+        {
+            if(!direction.HasValue)return null;
+            var origin=site.Site.Position;
+            double bearingDistance=Distance(origin,direction.Value);
+            return o.RouteProofs.Where(r=>r.Kind==PlayableRouteTargetKind.FriendlyAnchor&&r.TargetId==site.CenterId&&
+                    o.Entities.Any(u=>u.Id==r.UnitId&&u.Owner==o.Owner&&u.Kind!=PlayableEntityKind.Hawk))
+                .SelectMany(r=>r.Path)
+                .Where(at=>Distance(at,origin)<=local&&Distance(at,direction.Value)<bearingDistance)
+                .OrderBy(at=>Distance(at,direction.Value)).Select(at=>(NavPoint?)at).FirstOrDefault();
+        }
+
+        private static NavPoint AimAt(NavPoint from,NavPoint direction,double reach)
+        {
+            double length=Distance(from,direction);
+            return length<=reach?direction:new NavPoint(from.X+(direction.X-from.X)*reach/length,from.Z+(direction.Z-from.Z)*reach/length);
+        }
+
+        internal static bool PredominantlyAir(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiKnowledgeState knowledge)
+        {
+            var visible=o.Entities.Where(u=>o.IsHostile(u.Owner)&&u.Health>0).ToArray();
+            var remembered=RecentEnemies(o,ai,knowledge).Where(c=>!c.Building&&visible.All(u=>u.Id!=c.Id)).ToArray();
+            double KnownPower(bool air)=>MobilePower(visible.Where(u=>(u.Kind==PlayableEntityKind.Hawk)==air).ToArray(),p,ai)+
+                remembered.Where(c=>IsAir(c)==air).Sum(c=>PlayableUnitRules.DamagePerSecond(p,(PlayableEntityKind)c.Kind)*c.Confidence*
+                    ai.Value("utility.forceHorizonSeconds"));
+            return KnownPower(true)>KnownPower(false);
+        }
+
+        internal static int RequiredSentryReserve(PlayableAiObservation o,AiProfile ai,AiKnowledgeState knowledge,AiDifficulty difficulty)
+        {
+            if(AiProfile.BehaviorDifficulty(difficulty)==AiDifficulty.Veteran)return (int)ai.Value("positionDevelopment.veteranSentryReserve");
+            if(HasAirEvidence(o,ai,knowledge))return 1;
+            var ground=RecentEnemies(o,ai,knowledge).Where(c=>!c.Building&&!IsAir(c)).ToArray();
+            var knownOwners=ground.Select(c=>c.Owner).Distinct().ToArray();
+            long revisit=AiProfile.SecondsToTicks(ai.Value("scouting.revisitSeconds"),30);
+            bool sustained=ground.Any(c=>o.Tick-c.LastSeenTick>=revisit)&&ground.Any(c=>c.Visible);
+            bool allOpponentsKnown=knownOwners.Length>0&&o.Participants.Where(p=>p.Team!=o.Team)
+                .All(p=>knownOwners.Contains((PlayableOwner)(p.LogicalPlayer-1)));
+            return sustained&&allOpponentsKnown?0:1;
+        }
+
+        internal static bool PreferSentry(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiKnowledgeState knowledge,int siteId)
+        {
+            var site=o.Sites.FirstOrDefault(s=>s.Site.Id==siteId);
+            if(site==null||!ReadyScience(o)||PredominantlyAir(o,p,ai,knowledge))return true;
+            var threats=o.Entities.Where(u=>o.IsHostile(u.Owner)&&u.Health>0&&
+                Distance(u.Position,site.Site.Position)<=ai.Value("positionDevelopment.localThreatRange")).ToArray();
+            var air=threats.Where(u=>u.Kind==PlayableEntityKind.Hawk).ToArray();
+            var ground=threats.Where(u=>u.Kind!=PlayableEntityKind.Hawk).ToArray();
+            if(air.Length>0&&MobilePower(air,p,ai)>MobilePower(ground,p,ai))return true;
+            return HasAirEvidence(o,ai,knowledge)&&!o.Buildings.Any(b=>b.Owner==o.Owner&&b.SiteId==siteId&&
+                b.Kind==PlayableBuildingKind.SentryTurret&&b.Phase==ConstructionPhase.Ready&&Live(b));
+        }
+
+        internal static PlayableAiAction Retrofit(PlayableAiObservation o,PlayableProfile p,AiProfile ai,
+            AiKnowledgeState knowledge,AiDifficulty difficulty,long freeCredits)
+        {
+            if(o.Tick<AiProfile.SecondsToTicks(ai.Value("positionDevelopment.retrofitSeconds"),30))return null;
+            int reserve=RequiredSentryReserve(o,ai,knowledge,difficulty);
+            var recent=RecentEnemies(o,ai,knowledge);
+            double local=ai.Value("positionDevelopment.localThreatRange");
+            foreach(var site in o.Sites.Where(s=>s.Owner==o.Owner&&s.Ready&&!s.Contested&&s.Site.Slots.Count>0).OrderBy(s=>s.Site.Id))
+            {
+                if(ReadySlotCount(o,site)<site.Site.Slots.Count||!site.Site.TryDefenseSlots(p,out var pads))continue;
+                var towers=o.Buildings.Where(b=>b.Owner==o.Owner&&b.SiteId==site.Site.Id&&Live(b)&&TerritoryRules.ArmedDefense(b.Kind)).ToArray();
+                if(towers.Any(b=>b.Phase!=ConstructionPhase.Ready))continue;
+                bool restoreAir=HasAirEvidence(o,ai,knowledge)&&!towers.Any(b=>b.Kind==PlayableBuildingKind.SentryTurret);
+                if(restoreAir&&pads.Any(slot=>!o.Buildings.Any(b=>b.SiteId==site.Site.Id&&b.SlotId==slot.Id)))continue;
+                bool sentryPreferred=PreferSentry(o,p,ai,knowledge,site.Site.Id);
+                var replacement=restoreAir?PlayableBuildingKind.SentryTurret:PlayableBuildingKind.GaussTower;
+                if(freeCredits<TerritoryRules.Cost(p,replacement)||!restoreAir&&sentryPreferred)continue;
+                var groundContacts=recent.Where(c=>!c.Building&&!IsAir(c)).Select(c=>c.Position)
+                    .Concat(o.Entities.Where(u=>o.IsHostile(u.Owner)&&u.Health>0&&u.Kind!=PlayableEntityKind.Hawk).Select(u=>u.Position))
+                    .Where(at=>Distance(at,site.Site.Position)<=local).Distinct().ToArray();
+                if(!restoreAir&&groundContacts.Length==0)continue;
+                var sentries=towers.Where(b=>b.Kind==PlayableBuildingKind.SentryTurret).ToArray();
+                if(!restoreAir&&sentries.Length<=reserve)continue;
+                // Keep the sentries closest to observed air approaches. If none were seen,
+                // retain the most useful sentry on the known approach.
+                var airFront=recent.Where(IsAir).OrderBy(c=>Distance(c.Position,site.Site.Position))
+                    .Select(c=>(NavPoint?)c.Position).FirstOrDefault()??groundContacts.Select(at=>(NavPoint?)at).FirstOrDefault();
+                var candidates=restoreAir?towers:sentries.OrderBy(b=>airFront.HasValue?Distance(b.Position,airFront.Value):0).ThenBy(b=>b.Id).Skip(reserve);
+                foreach(var tower in candidates.OrderBy(b=>restoreAir&&airFront.HasValue?Distance(b.Position,airFront.Value):0).ThenBy(b=>b.Id))
+                {
+                    if(tower.PrivateState?.Lifecycle?.Repairing==true||pads.All(pad=>pad.Id!=tower.SlotId))continue;
+                    var protectedApproaches=groundContacts.Select(at=>AimAt(site.Site.Position,at,Range(p,PlayableBuildingKind.SentryTurret)))
+                        .Where(at=>Covers(o,p,tower.Position,tower.Kind,at,sourceId:tower.Id)).ToArray();
+                    if(!restoreAir&&(protectedApproaches.Length==0||!protectedApproaches.Any(at=>
+                        Covers(o,p,tower.Position,replacement,at,sourceId:tower.Id))))continue;
+                    if(protectedApproaches.Any(at=>!towers.Any(other=>other.Id!=tower.Id&&
+                        Covers(o,p,other.Position,other.Kind,at,sourceId:other.Id))))continue;
+                    var sell=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.SellBuilding,
+                        new[]{tower.Id},siteId:site.Site.Id,slotId:tower.SlotId,parentId:site.CenterId,buildingKind:replacement,
+                        seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+                    if(AiEconomyAdmission.Reject(o,p,sell)==null)return sell;
+                }
+            }
+            return null;
+        }
+
+        public static IReadOnlyList<AiPositionInvestment> Plan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,PlayableAiOpeningCompositionState opening,AiKnowledgeState knowledge,bool essentialFundsProtected,bool airOpening=false,IReadOnlyList<PlayableAiAction> pending=null,AiDifficulty difficulty=AiDifficulty.Fighter)
         {
             if(o==null||p==null||ai==null||opening==null)throw new ArgumentNullException();
             if(p.ProfileId!=o.ProfileId||p.Revision!=o.ProfileRevision||opening.OwnerId!=o.OwnerId||opening.MatchSeed!=o.Seed)throw new ArgumentException("Foreign position context");
@@ -113,59 +291,116 @@ namespace Spacewars.Runtime
             var result=new List<AiPositionInvestment>();
             if(!essentialFundsProtected){Trace("gate",new{reason="essential funds unprotected"});return result;}
             var enemies=o.Entities.Where(u=>o.IsHostile(u.Owner)&&u.Health>0).ToArray();
-            var remembered=(knowledge?.Contacts??Array.Empty<AiKnownContact>()).Where(c=>o.IsHostile(c.Owner)&&c.HealthAtLastSeen>0&&c.Confidence>0).ToArray();
+            var remembered=RecentEnemies(o,ai,knowledge);
             bool unknown=enemies.Length==0&&!o.Buildings.Any(b=>o.IsHostile(b.Owner)&&b.Health>0)&&remembered.Length==0;
             bool early=opening.Phase==PlayableAiOpeningPhase.Active;
-            bool exception=opening.Opening==PlayableAiOpening.GreedySafe&&(enemies.Length>0||unknown)||(airOpening||opening.Opening==PlayableAiOpening.Air)&&enemies.Count(e=>e.Kind!=PlayableEntityKind.Hawk)>=ai.Value("positionDevelopment.airGroundThreat");
-            Trace("opening",new{early,exception,opening.Phase,opening.Opening});
-            if(early&&!exception){Trace("gate",new{reason="ordinary opening active"});return result;}
+            bool exception=opening.Opening==PlayableAiOpening.GreedySafe&&(enemies.Length>0||unknown)||
+                (airOpening||opening.Opening==PlayableAiOpening.Air)&&enemies.Count(e=>e.Kind!=PlayableEntityKind.Hawk)>=ai.Value("positionDevelopment.airGroundThreat");
+            if(early&&!exception)return result;
+
             double local=ai.Value("positionDevelopment.localThreatRange");
-            bool science=o.Buildings.Any(b=>b.Owner==o.Owner&&Live(b)&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.Kind==PlayableBuildingKind.ScientificCenter);
-            var sites=o.Sites.Where(s=>s.Owner==o.Owner&&s.Ready&&!s.Contested&&s.Site.Slots.Count>0).ToArray();
-            var direction=enemies.OrderBy(e=>sites.Select(s=>Distance(s.Site.Position,e.Position)).DefaultIfEmpty(double.MaxValue).Min()).Select(e=>(NavPoint?)e.Position).FirstOrDefault()??
-                remembered.OrderBy(c=>c.Id).Select(c=>(NavPoint?)c.Position).FirstOrDefault()??o.PublicScoutObjectives.Where(x=>x.Reachable&&x.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&!KnownEmpty(o,knowledge,x.SiteId)).OrderByDescending(x=>AiPublicEnemyStarts.CanAttack(o,knowledge,x.SiteId)).ThenBy(x=>sites.Select(s=>Distance(s.Site.Position,x.Approach)).DefaultIfEmpty(double.MaxValue).Min()).ThenBy(x=>x.SiteId).Select(x=>(NavPoint?)x.Approach).FirstOrDefault();
-            Trace("direction",new{direction,eligibleSites=sites.Select(s=>s.Site.Id).ToArray(),enemies,remembered});
+            bool science=ReadyScience(o);
+            bool knownAir=ObservedAir(o)||remembered.Any(IsAir);
+            bool predominantlyAir=PredominantlyAir(o,p,ai,knowledge);
+            int sentryReserve=RequiredSentryReserve(o,ai,knowledge,difficulty);
+            var sites=o.Sites.Where(s=>s.Owner==o.Owner&&s.Ready&&s.Site.Slots.Count>0).ToArray();
             var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0).ToArray();
-            double nearestHeld=direction.HasValue?sites.Select(s=>Distance(s.Site.Position,direction.Value)).DefaultIfEmpty(double.MaxValue).Min():double.MaxValue;
-            foreach(var site in direction.HasValue?sites.OrderBy(s=>Distance(s.Site.Position,direction.Value)).ThenBy(s=>s.Site.Id):Enumerable.Empty<TerritorySiteSnapshot>())
+            var towers=o.Buildings.Where(b=>b.Owner==o.Owner&&Live(b)&&TerritoryRules.Defensive(b.Kind)).ToArray();
+            var accepted=(pending??Array.Empty<PlayableAiAction>()).Where(a=>a.Kind==PlayableCommandKind.BuildAt&&
+                TerritoryRules.Defensive(a.BuildingKind)&&!o.Buildings.Any(b=>b.SiteId==a.SiteId&&b.SlotId==a.SlotId)).ToArray();
+            int RepairCount(int siteId)=>towers.Count(b=>b.Kind==PlayableBuildingKind.RepairTower&&(siteId==0||b.SiteId==siteId))+
+                accepted.Count(a=>a.BuildingKind==PlayableBuildingKind.RepairTower&&(siteId==0||a.SiteId==siteId));
+            var home=sites.FirstOrDefault(s=>s.Site.Id==o.HomeSiteId);
+            int repairLimit=sites.Length>=ai.Value("positionDevelopment.secondRepairBases")?2:1;
+            bool canRepair=!early&&home!=null&&ReadySlotCount(o,home)>=ai.Value("positionDevelopment.repairHomeBuildings")&&RepairCount(0)<repairLimit;
+            var combatPads=new List<AiPositionInvestment>();
+            var repairPads=new List<AiPositionInvestment>();
+            foreach(var site in sites.Where(s=>!s.Contested).OrderBy(s=>s.Site.Id))
             {
-                var threats=enemies.Where(e=>Distance(e.Position,site.Site.Position)<=local).ToArray();
-                double support=MobilePower(own.Where(u=>Distance(u.Position,site.Site.Position)<=local).ToArray(),p,ai);
-                double staticSupport=o.Buildings.Where(b=>b.Owner==o.Owner&&Live(b)&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&TerritoryRules.ArmedDefense(b.Kind)&&threats.Any(e=>Covers(o,p,b.Position,b.Kind,e.Position,e.Kind==PlayableEntityKind.Hawk,b.Id,e.Id))).Sum(b=>DefensePower(p,ai,b.Kind)*Math.Min(1,b.Health/Math.Max(1,TerritoryRules.MaximumHealth(p,b))));
-                // Evaluate the prospective sentry as well: air/greedy exceptions do
-                // not require an existing ground army. Still decline hopeless fronts.
-                if(MobilePower(threats,p,ai)>(support+staticSupport+DefensePower(p,ai,PlayableBuildingKind.SentryTurret))*ai.Value("positionDevelopment.maximumThreatRatio")){Trace("site-rejected",new{site.Site.Id,reason="hopeless local threat ratio"});continue;}
+                bool headquarters=site.Site.Kind==PlayableBuildingKind.Headquarters;
                 if(early&&site.Site.Id!=o.HomeSiteId)continue;
-                var towers=o.Buildings.Where(b=>b.Owner==o.Owner&&Live(b)&&TerritoryRules.Defensive(b.Kind)).ToArray();
-                bool armedPending=towers.Any(b=>b.SiteId==site.Site.Id&&TerritoryRules.ArmedDefense(b.Kind)&&b.Phase!=ConstructionPhase.Ready);
-                // No speculative second opening tower while another is paid/constructed.
-                if(early&&towers.Any(b=>TerritoryRules.ArmedDefense(b.Kind)))continue;
-                bool ground=threats.Any(e=>e.Kind!=PlayableEntityKind.Hawk),air=threats.Any(e=>e.Kind==PlayableEntityKind.Hawk);
-                var kind=!early&&science&&ground&&!air?PlayableBuildingKind.GaussTower:PlayableBuildingKind.SentryTurret;
-                bool covered=threats.Length>0?threats.All(e=>towers.Any(b=>b.Phase==ConstructionPhase.Ready&&TerritoryRules.ArmedDefense(b.Kind)&&Covers(o,p,b.Position,b.Kind,e.Position,e.Kind==PlayableEntityKind.Hawk,b.Id,e.Id))):
-                    towers.Any(b=>b.SiteId==site.Site.Id&&b.Phase==ConstructionPhase.Ready&&TerritoryRules.ArmedDefense(b.Kind));
-                bool needsCombat=!covered&&!armedPending&&(early||site.Site.Kind==PlayableBuildingKind.Outpost||threats.Length>0);
-                bool localRepair=towers.Any(b=>b.Kind==PlayableBuildingKind.RepairTower&&Distance(b.Position,direction.Value)<=nearestHeld+Range(p,b.Kind)&&
-                    (b.Phase!=ConstructionPhase.Ready?o.RouteProofs.Any(r=>r.TargetId==b.ParentId&&AiTacticalExecutor.WithdrawalRoute(o,r,p)):
-                    own.Any(u=>u.Id==b.Healing?.TargetId&&Distance(u.Position,b.Position)<=Range(p,b.Kind))||o.RouteProofs.Any(r=>r.TargetId==b.Id&&AiTacticalExecutor.WithdrawalRoute(o,r,p))));
-                bool needsRepair=!early&&!localRepair&&own.Any(u=>Distance(u.Position,direction.Value)<=local);
-                Trace("site-needs",new{site.Site.Id,needsCombat,needsRepair,covered,armedPending,ground,air,kind,support,staticSupport});
-                foreach(var desired in new[]{needsCombat?(PlayableBuildingKind?)kind:null,needsRepair?(PlayableBuildingKind?)PlayableBuildingKind.RepairTower:null}.Where(k=>k.HasValue).Select(k=>k.Value))
+                var origin=site.Site.Position;
+                var threats=enemies.Where(e=>Distance(e.Position,origin)<=local).ToArray();
+                var localMemory=remembered.Where(c=>Distance(c.Position,origin)<=local).ToArray();
+                var attackers=o.OwnCenterDamage.Where(hit=>hit.CenterId==site.CenterId).Select(hit=>hit.AttackerId).ToHashSet();
+                var direction=threats.OrderByDescending(e=>attackers.Contains(e.Id)).ThenBy(e=>Distance(e.Position,origin)).Select(e=>(NavPoint?)e.Position).FirstOrDefault()??
+                    localMemory.OrderBy(c=>Distance(c.Position,origin)).ThenBy(c=>c.Id).Select(c=>(NavPoint?)c.Position).FirstOrDefault()??
+                    o.PublicScoutObjectives.Where(x=>x.Reachable&&x.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&!KnownEmpty(o,knowledge,x.SiteId))
+                        .OrderByDescending(x=>AiPublicEnemyStarts.CanAttack(o,knowledge,x.SiteId)).ThenBy(x=>Distance(origin,x.Approach))
+                        .ThenBy(x=>x.SiteId).Select(x=>(NavPoint?)x.Approach).FirstOrDefault();
+                var approach=Approach(o,site,direction,local);
+                var airBearing=remembered.Where(IsAir).OrderBy(c=>Distance(c.Position,origin)).Select(c=>(NavPoint?)c.Position).FirstOrDefault();
+                var front=threats.Length>0?direction:approach??airBearing??(early?direction:null);
+                if(!front.HasValue||!site.Site.TryDefenseSlots(p,out var supportedPads))continue;
+
+                var armed=towers.Where(b=>b.SiteId==site.Site.Id&&TerritoryRules.ArmedDefense(b.Kind)).ToArray();
+                int acceptedCombat=accepted.Count(a=>a.SiteId==site.Site.Id&&TerritoryRules.ArmedDefense(a.BuildingKind));
+                int combatCount=armed.Length+acceptedCombat;
+                bool readyDevelopment=ReadySlotCount(o,site)==site.Site.Slots.Count;
+                double limit=readyDevelopment?supportedPads.Count:ai.Value(headquarters?"positionDevelopment.homeCombatLimit":"positionDevelopment.outpostCombatLimit");
+                bool alreadyBuilding=acceptedCombat>0||armed.Any(b=>b.Phase!=ConstructionPhase.Ready);
+                var available=supportedPads.Where(slot=>!o.Buildings.Any(b=>b.SiteId==site.Site.Id&&b.SlotId==slot.Id)&&
+                    !accepted.Any(a=>a.SiteId==site.Site.Id&&a.SlotId==slot.Id)).ToArray();
+                var ground=threats.Where(e=>e.Kind!=PlayableEntityKind.Hawk).ToArray();
+                var air=threats.Where(e=>e.Kind==PlayableEntityKind.Hawk).ToArray();
+                double groundPower=MobilePower(ground,p,ai),airPower=MobilePower(air,p,ai);
+                int sentries=armed.Count(b=>b.Kind==PlayableBuildingKind.SentryTurret);
+                bool antiAirMissing=knownAir&&sentries==0;
+                var kind=!early&&science&&!predominantlyAir&&groundPower>0&&groundPower>=airPower&&sentries>=sentryReserve?
+                    PlayableBuildingKind.GaussTower:PlayableBuildingKind.SentryTurret;
+                bool needsCombat=early?towers.All(b=>!TerritoryRules.ArmedDefense(b.Kind))&&accepted.All(a=>!TerritoryRules.ArmedDefense(a.BuildingKind)):
+                    threats.Length>0?!StaticDefenseCovers(o,p,threats):
+                    !headquarters&&combatCount==0&&approach.HasValue||antiAirMissing&&readyDevelopment;
+                double support=MobilePower(own.Where(u=>Distance(u.Position,origin)<=local).ToArray(),p,ai);
+                double staticSupport=armed.Where(b=>b.Phase==ConstructionPhase.Ready&&threats.Any(e=>Covers(o,p,b.Position,b.Kind,e.Position,e.Kind==PlayableEntityKind.Hawk,b.Id,e.Id)))
+                    .Sum(b=>DefensePower(p,ai,b.Kind)*Math.Min(1,b.Health/Math.Max(1,TerritoryRules.MaximumHealth(p,b))));
+                if(groundPower+airPower>(support+staticSupport+DefensePower(p,ai,PlayableBuildingKind.SentryTurret))*ai.Value("positionDevelopment.maximumThreatRatio"))continue;
+
+                TerritorySlot combatPad=null;
+                if(needsCombat&&!alreadyBuilding&&combatCount<limit)
                 {
-                    var pads=site.Site.DefenseSlots(p).Where(slot=>!o.Buildings.Any(b=>b.SiteId==site.Site.Id&&b.SlotId==slot.Id)).OrderBy(slot=>Distance(slot.Position,direction.Value)).ThenBy(slot=>slot.Id);
-                    foreach(var pad in pads)
+                    var targets=(kind==PlayableBuildingKind.GaussTower?ground:threats);
+                    combatPad=available.Select(slot=>new
                     {
-                        double length=Distance(pad.Position,direction.Value),reach=Range(p,desired);
-                        // Project the public direction into the actual local weapon arc.
-                        var aim=length<=reach?direction.Value:new NavPoint(pad.Position.X+(direction.Value.X-pad.Position.X)*reach/length,pad.Position.Z+(direction.Value.Z-pad.Position.Z)*reach/length);
-                        bool coveredAim=Covers(o,p,pad.Position,desired,aim);Trace("pad-projection",new{site=site.Site.Id,pad=pad.Id,pad.Position,desired,aim,reach,length,coveredAim});
-                        if(!coveredAim)continue;
-                        if(desired==PlayableBuildingKind.RepairTower&&!o.RouteProofs.Any(r=>r.Kind==PlayableRouteTargetKind.FriendlyAnchor&&r.TargetId==site.CenterId&&Distance(r.Goal,pad.Position)<=Range(p,desired)&&AiTacticalExecutor.WithdrawalRoute(o,r,p)&&own.Any(u=>u.Id==r.UnitId&&AiStaticDefenseSafety.Withdrawal(o,p,u,r.Path,knowledge))))continue;
-                        var action=Build(o,site,pad,desired);string rejected=AiEconomyAdmission.Reject(o,p,action);Trace("pad-admission",new{site=site.Site.Id,pad=pad.Id,desired,rejected});if(rejected!=null&&rejected!="insufficient credits")continue;
-                        result.Add(new AiPositionInvestment(action,ai.Value("positionDevelopment.towerValue")*(1+reach/(reach+Distance(pad.Position,direction.Value))),desired==PlayableBuildingKind.RepairTower?"reachable repair near main battle direction":early?"opening sentry exception":"local compatible defense for held position"));break;
+                        Slot=slot,
+                        Coverage=targets.Count(e=>Covers(o,p,slot.Position,kind,e.Position,e.Kind==PlayableEntityKind.Hawk,targetId:e.Id)),
+                        Approach=Covers(o,p,slot.Position,kind,approach??AimAt(slot.Position,front.Value,Range(p,kind)))
+                    }).Where(x=>x.Coverage>0||x.Approach)
+                        .OrderByDescending(x=>x.Coverage).ThenByDescending(x=>x.Approach)
+                        .ThenBy(x=>Distance(x.Slot.Position,front.Value)).ThenBy(x=>x.Slot.Id).Select(x=>x.Slot).FirstOrDefault();
+                    if(combatPad!=null)
+                    {
+                        var action=Build(o,site,combatPad,kind);
+                        string rejected=AiEconomyAdmission.Reject(o,p,action);
+                        if(rejected==null||rejected=="insufficient credits")
+                            combatPads.Add(new AiPositionInvestment(action,ai.Value("positionDevelopment.towerValue")*
+                                (1+Range(p,kind)/(Range(p,kind)+Distance(combatPad.Position,front.Value))),"compatible defense of local approach"));
                     }
                 }
+
+                if(!canRepair||RepairCount(site.Site.Id)>0||combatPad!=null)continue;
+                // The second site must serve a withdrawal that the first tower cannot serve.
+                var clients=own.Where(u=>Distance(u.Position,origin)<=local&&
+                    (threats.Length>0||PlayableUnitRules.HealthRatio(p,u)<ai.Value("positionDevelopment.repairHealth"))&&
+                    !towers.Any(b=>b.Kind==PlayableBuildingKind.RepairTower&&(Distance(b.Position,u.Position)<=Range(p,b.Kind)||
+                        o.RouteProofs.Any(r=>r.UnitId==u.Id&&r.TargetId==b.Id&&AiTacticalExecutor.WithdrawalRoute(o,r,p))))).ToArray();
+                if(accepted.Any(a=>a.BuildingKind==PlayableBuildingKind.RepairTower)||towers.Any(b=>b.Kind==PlayableBuildingKind.RepairTower&&b.Phase!=ConstructionPhase.Ready))continue;
+                foreach(var pad in available.Where(s=>Distance(s.Position,front.Value)>=Distance(origin,front.Value))
+                    .OrderByDescending(s=>Distance(s.Position,front.Value)).ThenBy(s=>s.Id))
+                {
+                    if(!o.RouteProofs.Any(r=>r.Kind==PlayableRouteTargetKind.FriendlyAnchor&&r.TargetId==site.CenterId&&
+                        Distance(r.Goal,pad.Position)<=Range(p,PlayableBuildingKind.RepairTower)&&AiTacticalExecutor.WithdrawalRoute(o,r,p)&&
+                        clients.Any(u=>u.Id==r.UnitId&&AiStaticDefenseSafety.Withdrawal(o,p,u,r.Path,knowledge))))continue;
+                    var action=Build(o,site,pad,PlayableBuildingKind.RepairTower);
+                    string rejected=AiEconomyAdmission.Reject(o,p,action);
+                    if(rejected!=null&&rejected!="insufficient credits")continue;
+                    repairPads.Add(new AiPositionInvestment(action,ai.Value("positionDevelopment.towerValue")/
+                        (1+clients.Min(u=>Distance(u.Position,pad.Position))/local),"sheltered withdrawal from local front"));
+                    break;
+                }
             }
+            result.AddRange(combatPads);
+            result.AddRange(repairPads);
             if(!early&&science)
             foreach(var refinery in o.Buildings.Where(b=>b.Owner==o.Owner&&Live(b)&&b.Kind==PlayableBuildingKind.Refinery&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Upgrade!=null&&!b.RefineryUpgraded&&!b.PrivateState.Upgrade.Active))
             {

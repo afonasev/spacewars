@@ -30,7 +30,7 @@ namespace Spacewars.Presentation
             int count=0;
             for(int i=0;i<view.Entities.Count;i++){
                 var actor=view.Entities[i];
-                if(actor.Moving&&actor.Kind!=PlayableEntityKind.Hawk&&(view.Vision==null||view.Vision.IsVisible(actor.Position)))count++;
+                if(actor.Moving&&actor.Kind!=PlayableEntityKind.Hawk&&actor.Kind!=PlayableEntityKind.Skat&&(view.Vision==null||view.Vision.IsVisible(actor.Position)))count++;
             }
             return count;
         }

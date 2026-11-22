@@ -4,6 +4,49 @@ using System.Linq;
 using Spacewars.Simulation;
 namespace Spacewars.Presentation
 {
+    // Local input only. It never supplies a projected or confirmed route target.
+    public sealed class PlayableOrderInputPulse
+    {
+        private readonly PlayableCommand intent;
+        private readonly double start;
+        public long Generation=>intent.Generation;
+        public double Ends {get;}
+        public PlayableCommandKind Kind=>intent.Kind;
+        private PlayableOrderInputPulse(PlayableCommand intent,double now,double duration)
+        {this.intent=intent;start=now;Ends=now+duration;}
+        internal static PlayableOrderInputPulse ForIntent(PlayableSnapshot view,PlayableCommand intent,double now,Func<double> duration)
+        {
+            if(view==null||intent.Generation!=view.Generation||intent.PlayerId!=view.OwnerId||intent.EntityIds.Count==0)return null;
+            switch(intent.Kind){
+                case PlayableCommandKind.Move:case PlayableCommandKind.AttackMove:case PlayableCommandKind.Attack:
+                case PlayableCommandKind.RepairTarget:case PlayableCommandKind.Follow:case PlayableCommandKind.Stop:case PlayableCommandKind.Hold:
+                    return new PlayableOrderInputPulse(intent,now,duration());
+                default:return null;
+            }
+        }
+        public IEnumerable<NavLocation> Locations(PlayableSnapshot view)
+        {
+            if(view==null||view.Generation!=Generation||view.OwnerId!=intent.PlayerId)yield break;
+            if(Kind==PlayableCommandKind.Stop||Kind==PlayableCommandKind.Hold){
+                foreach(var unit in view.Entities)
+                    if(unit.Owner==view.Owner&&unit.Health>0&&intent.EntityIds.Contains(unit.Id))
+                        yield return unit.Location??new NavLocation(unit.Position,NavLocation.FlatSurface);
+                yield break;
+            }
+            if(intent.TargetId!=0){
+                var entity=view.Entities.FirstOrDefault(e=>e.Id==intent.TargetId&&e.Health>0);
+                if(entity!=null){yield return entity.Location??new NavLocation(entity.Position,NavLocation.FlatSurface);yield break;}
+                var building=view.Buildings.FirstOrDefault(b=>b.Id==intent.TargetId&&b.Health>0);
+                if(building!=null){yield return new NavLocation(building.Position,NavLocation.FlatSurface);yield break;}
+                var wreck=view.Wrecks.FirstOrDefault(w=>w.Id==intent.TargetId);
+                if(wreck!=null)yield return new NavLocation(wreck.Position,NavLocation.FlatSurface);
+                yield break;
+            }
+            yield return intent.TargetLocation??new NavLocation(intent.Target,NavLocation.FlatSurface);
+        }
+        public double Progress(double now)=>Math.Max(0,Math.Min(1,(now-start)/(Ends-start)));
+    }
+
     // Event windows are presentation only. A transport admission is never a visible order proof.
     public sealed class PlayableOrderMarkers
     {
@@ -14,6 +57,8 @@ namespace Spacewars.Presentation
         readonly List<Flash> recent=new List<Flash>();
         EnvironmentArtProfile art;
         public PlayableOrderMarkers(EnvironmentArtProfile art=null){this.art=art;}
+        public PlayableOrderInputPulse InputPulse(PlayableSnapshot view,PlayableCommand intent,double now)
+            =>PlayableOrderInputPulse.ForIntent(view,intent,now,()=> (art??=EnvironmentArtProfile.Load()).orderInputPulseDuration);
         int[] selectionEvent=Array.Empty<int>();double selectionUntil;
         long generation=-1,tick=-1,snapshot=-1;string owner;
         void Bind(PlayableSnapshot view)

@@ -11,7 +11,7 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class NativeAiTechnologyFundingTests
     {
-        private static PlayableAiObservation View(long tick,int cash,double income=0,bool center=false,double progress=1,PlayableProfile p=null,bool prerequisite=true,bool occupied=false,PlayableEntityKind unit=PlayableEntityKind.Tank,bool secondCenter=false,int? unitCount=null,bool blocked=false)
+        private static PlayableAiObservation View(long tick,int cash,double income=0,bool center=false,double progress=1,PlayableProfile p=null,bool prerequisite=true,bool occupied=false,PlayableEntityKind unit=PlayableEntityKind.Tank,bool secondCenter=false,int? unitCount=null,bool blocked=false,int readyIncome=3,double incomeRate=0,AiDifficulty difficulty=AiDifficulty.Fighter)
         {
             p=p??PlayableProfile.Default;int count=unitCount??(int)AiProfile.Initial.Value("technology.minimumUnitsForScienceCenter");var site=TerritoryRules.Sites(p).First(s=>s.Kind==PlayableBuildingKind.Headquarters);
             var bs=new[]{new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Headquarters,site.Position,400,1,0,0,default(NavPoint),siteId:site.Id),new PlayableBuildingSnapshot(2,PlayableOwner.Player,PlayableBuildingKind.Factory,site.Slots[0].Position,250,1,0,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[0].Id,parentId:1,orders:blocked?new[]{new PlayableProductionOrderSnapshot(1,PlayableEntityKind.Tank,p.TankCreditCost,3,p.TankProductionSeconds,0,true)}:null)};
@@ -19,8 +19,10 @@ namespace Spacewars.Tests.EditMode
             if(occupied)bs=bs.Concat(new[]{new PlayableBuildingSnapshot(3,PlayableOwner.Player,PlayableBuildingKind.Refinery,site.Slots[1].Position,p.RefineryHealth,1,0,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[1].Id,parentId:1)}).ToArray();
             if(center)bs=bs.Concat(new[]{new PlayableBuildingSnapshot(3,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,site.Slots[1].Position,250,progress,0,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[1].Id,parentId:1,phase:progress<1?ConstructionPhase.Constructing:ConstructionPhase.Ready)}).ToArray();
             if(secondCenter)bs=bs.Concat(new[]{new PlayableBuildingSnapshot(4,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,site.Slots[2].Position,250,1,0,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[2].Id,parentId:1,phase:ConstructionPhase.Ready)}).ToArray();
+            bs=bs.Concat(Enumerable.Range(0,readyIncome).Select(i=>new PlayableBuildingSnapshot(200+i,PlayableOwner.Player,
+                PlayableBuildingKind.Mine,new NavPoint(i,-40),(int)Math.Ceiling(p.MineHealth),1,0,0,default,siteId:20+i))).ToArray();
             var units=Enumerable.Range(10,count).Select(i=>new PlayableEntitySnapshot(i,PlayableOwner.Player,unit,new NavPoint(i,0),PlayableUnitRules.Health(p,unit),false,0,0,0)).ToArray();
-            return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,41,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,cash,null,units,bs,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(count*PlayableUnitRules.Population(p,unit),0,p.ArmyCapacity),researchAvailability:AiResearchCatalog.All.Select(d=>new PlayableResearchAvailabilitySnapshot(d.Kind,d.Cost(p),true)).ToArray(),activeProfile:p,homeSiteId:site.Id,settledIncome:income));
+            return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,41,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,cash,null,units,bs,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(count*PlayableUnitRules.Population(p,unit),0,p.ArmyCapacity),researchAvailability:AiResearchCatalog.All.Select(d=>new PlayableResearchAvailabilitySnapshot(d.Kind,d.Cost(p),true)).ToArray(),activeProfile:p,homeSiteId:site.Id,settledIncome:income,incomePerSecond:incomeRate),difficulty);
         }
         private static void Observe(AiTechnologyFunding f,AiBudgetLedger b,AiDecisionArbiter a,PlayableAiObservation o,int protect=0,bool allowed=true,PlayableProfile p=null)
         {p=p??PlayableProfile.Default;b.ObserveBank(o.Credits);b.Expire(o.Tick,e=>!AiTechnologyFunding.IsFunding(e)||f.Valid(e,o,p,b,a));f.Reconcile(o,b,a);var plan=new AiTechnologyPlanner().Plan(o,p,AiProfile.Initial,b.Capture(),preferredFunding:f.Preferred(a));f.Observe(o,p,AiProfile.Initial,b,a,plan,allowed,protect);}
@@ -35,6 +37,35 @@ namespace Spacewars.Tests.EditMode
             var candidates=new AiEconomyPlanner().InfrastructureRequests(o,p,new InfrastructureRequest(PlayableResearchKind.ExplorerAssaultGuns,1));
             Assert.IsNotEmpty(candidates);Assert.True(candidates.All(c=>!c.Legal&&c.Reason=="ready factory or hangar prerequisite"));
         }
+        [Test] public void ReadyIncomeGatesScienceAndKeepsExistingProducerPrerequisite()
+        {
+            var p=PlayableProfile.Default;var ai=AiProfile.Initial;
+            var shortfall=View(0,1000,readyIncome:2);
+            var budget=new AiBudgetLedger(shortfall.OwnerId,shortfall.Generation);budget.ObserveBank(shortfall.Credits);
+            var plan=new AiTechnologyPlanner().Plan(shortfall,p,ai,budget.Capture());
+            Assert.IsNull(plan.Infrastructure);Assert.IsNull(plan.FundingGoal);
+            Assert.AreEqual("ready refinery or mine prerequisite",plan.Reason);
+            var ready=View(0,1000);
+            Assert.NotNull(new AiTechnologyPlanner().Plan(ready,p,ai,budget.Capture()).Infrastructure);
+        }
+
+        [Test]
+        public void ExpertScienceFundingUsesTheCurrentRateWithOneReadyIncomeBuilding()
+        {
+            var p=PlayableProfile.Default;
+            var expert=View(0,1000,readyIncome:1,incomeRate:100,difficulty:AiDifficulty.Expert);
+            var budget=Start(1000);
+            Observe(budget.f,budget.b,budget.a,expert);
+            Assert.AreEqual(PlayableBuildingKind.ScientificCenter,budget.b.Capture().Reserved.Single().Action.BuildingKind);
+
+            var noIncome=View(1,1000,readyIncome:1,difficulty:AiDifficulty.Expert);
+            Observe(budget.f,budget.b,budget.a,noIncome);
+            Assert.IsEmpty(budget.b.Capture().Reserved);
+            var noProducer=View(2,1000,prerequisite:false,readyIncome:1,incomeRate:100,difficulty:AiDifficulty.Expert);
+            Assert.AreEqual("ready factory or hangar prerequisite",
+                new AiTechnologyPlanner().Plan(noProducer,p,AiProfile.Initial,budget.b.Capture()).Reason);
+        }
+
         [Test] public void PartialCurrentMoney_ProtectsScoutAndRenewsOnlyActualGrowth()
         {
             var x=Start();Observe(x.f,x.b,x.a,View(0,176),100);var e=x.b.Capture().Reserved.Single();Assert.AreEqual(76,e.Amount);Assert.AreEqual(100,x.b.Available);Assert.AreEqual(0,x.b.PaidTotal);
@@ -137,12 +168,20 @@ namespace Spacewars.Tests.EditMode
             var bs=baseView.Buildings.Where(b=>b.Id!=factory.Id).Concat(new[]{new PlayableBuildingSnapshot(factory.Id,factory.Owner,factory.Kind,factory.Position,health,1,0,0,default(NavPoint),factory.SiteId,factory.SlotId,factory.ParentId,lifecycle:life)}).Concat(new[]{new PlayableBuildingSnapshot(4,PlayableOwner.Player,PlayableBuildingKind.Refinery,default(NavPoint),p.RefineryHealth,1,0,0,default(NavPoint),factory.SiteId,3,1),new PlayableBuildingSnapshot(5,PlayableOwner.Player,PlayableBuildingKind.Refinery,default(NavPoint),p.RefineryHealth,1,0,0,default(NavPoint),factory.SiteId,4,1)}).ToArray();
             var units=Enumerable.Range(10,Math.Max((int)AiProfile.Initial.Value("opening.forceUnits")+2,(int)AiProfile.Initial.Value("technology.minimumUnitsForScienceCenter"))).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(id,0),p.TankHealth,false,0,0,0)).ToArray();
             var opening=Enumerable.Range(1,10000).Select(seed=>PlayableAiOpeningComposition.Initialize(seed,baseView.OwnerId,aiProfile:AiProfile.Initial)).First(v=>v.Opening==PlayableAiOpening.Safe);
-            var snapshot=new PlayableSnapshot(p.ProfileId,p.Revision,71,opening.MatchSeed,60,60,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,176,null,units,bs,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:baseView.Sites.ToArray(),population:new PlayablePopulationSnapshot(units.Length*PlayableUnitRules.Population(p,PlayableEntityKind.Tank),0,p.ArmyCapacity),researchAvailability:baseView.ResearchAvailability.ToArray(),activeProfile:p,homeSiteId:baseView.HomeSiteId);
+            // This test isolates discretionary science savings versus repair.
+            // A naturally full roster has no competing legal production bid.
+            int slots=p.ArmyCapacity-units.Sum(u=>PlayableUnitRules.Population(p,u.Kind));
+            var scouts=Enumerable.Range(0,slots/PlayableUnitRules.Population(p,PlayableEntityKind.Explorer))
+                .Select(i=>new PlayableEntitySnapshot(1000+i,PlayableOwner.Player,PlayableEntityKind.Explorer,new NavPoint(i%8*2,i/8*2+8),p.ExplorerHealth,false,0,0,0));
+            units=units.Concat(scouts).ToArray();
+            var snapshot=new PlayableSnapshot(p.ProfileId,p.Revision,71,opening.MatchSeed,60,60,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,176,null,units,bs,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:baseView.Sites.ToArray(),population:new PlayablePopulationSnapshot(units.Sum(u=>PlayableUnitRules.Population(p,u.Kind)),0,p.ArmyCapacity),researchAvailability:baseView.ResearchAvailability.ToArray(),activeProfile:p,homeSiteId:baseView.HomeSiteId);
             var o=PlayableAiObservation.From(snapshot);var x=Start();Observe(x.f,x.b,x.a,o);Assert.Greater(x.b.Reserved,0);
             var type=typeof(AiBudgetLedger).Assembly.GetType("Spacewars.Runtime.PlayableAiOwnerLoop");var loop=Activator.CreateInstance(type,Private,null,new object[]{p,opening,71L,null},null);type.GetField("budget",Private).SetValue(loop,x.b);type.GetField("arbiter",Private).SetValue(loop,x.a);
-            Assert.True(((AiPhaseCompositionPlanner)type.GetField("composition",Private).GetValue(loop)).ViableCover(o,p,AiProfile.Initial));Assert.False(((AiOpeningExecutor)type.GetField("openingExecutor",Private).GetValue(loop)).MissingEssentialEconomy(o,AiProfile.Initial));
+            Assert.True(((AiPhaseCompositionPlanner)type.GetField("composition",Private).GetValue(loop)).ViableCover(o,p,AiProfile.Initial));var executor=(AiOpeningExecutor)type.GetField("openingExecutor",Private).GetValue(loop);
+            executor.Observe(o,null,null,AiProfile.Initial);
+            Assert.False(executor.MissingEssentialEconomy(o,AiProfile.Initial));
             var repair=new AiInfrastructurePlanner(o.OwnerId).Plan(o,p,AiProfile.Initial).Single(c=>c.Legal&&c.Action.Kind==PlayableCommandKind.StartBuildingRepair);Assert.AreEqual(1,repair.Priority,"existing configured urgent health band");
-            type.GetMethod("Review",Private).Invoke(loop,new object[]{snapshot,0L});Assert.IsEmpty(x.b.Capture().Reserved.Where(AiTechnologyFunding.IsFunding));Assert.True(x.b.Capture().Unpaid.Any(e=>e.Action.Kind==PlayableCommandKind.StartBuildingRepair&&e.Amount==(int)Math.Ceiling(life.RepairAllocation)),"actual owner arbitration admits costed allocation after savings release");Assert.Zero(x.b.PaidTotal);
+            type.GetMethod("Review",Private).Invoke(loop,new object[]{snapshot,0L});Assert.IsEmpty(x.b.Capture().Reserved.Where(AiTechnologyFunding.IsFunding));Assert.True(x.b.Capture().Unpaid.Any(e=>e.Action.Kind==PlayableCommandKind.StartBuildingRepair&&e.Amount==(int)Math.Ceiling(life.RepairAllocation)),"actual owner arbitration admits costed allocation after savings release: "+string.Join(", ",x.a.Rejections.Select(kv=>kv.Key+"="+kv.Value)));Assert.Zero(x.b.PaidTotal);
         }
         [TestCase(false)][TestCase(true)] public void InvalidOrRejectedGoal_RealIncomeRecoversLegalTarget_NoCashReleaseRenewal(bool rejected)
         {

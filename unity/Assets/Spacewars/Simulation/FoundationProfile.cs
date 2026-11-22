@@ -127,7 +127,7 @@ namespace Spacewars.Simulation
             new FoundationProfileField("camera.minZoom", "Camera", "Minimum zoom", "Closest permitted camera zoom.", "m", 1, 30, 0.1, p => p.cameraMinZoom),
             new FoundationProfileField("camera.maxZoom", "Camera", "Maximum zoom", "Farthest permitted camera zoom.", "m", 6, 100, 0.1, p => p.cameraMaxZoom),
             new FoundationProfileField("camera.zoomSpeed", "Camera", "Zoom speed", "Wheel zoom multiplier.", "ratio", 0.001, 1, 0.001, p => p.cameraZoomSpeed),
-            new FoundationProfileField("movement.speed", "Diagnostic movement", "Move speed", "Flat-fixture movement speed; not release tank kinematics.", "m/s", 0.1, 50, 0.1, p => p.moveSpeed),
+            new FoundationProfileField("movement.speed", "Diagnostic movement", "Move speed", "Flat-fixture movement speed; not release Vepr kinematics.", "m/s", 0.1, 50, 0.1, p => p.moveSpeed),
             new FoundationProfileField("fixture.groundHalfExtent", "Diagnostic fixture", "Ground half extent", "Accepted move square half extent.", "m", 1, 1000, 1, p => p.groundHalfExtent),
         };
     }

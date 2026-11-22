@@ -38,6 +38,7 @@ namespace Spacewars.Runtime
         }
         private bool PrepareResultMovement(PreparedResultBatch c,double dt,NavigationRetentionBudget.Scope scope)
         {
+            using var phaseTiming=Spacewars.Simulation.PerformanceProfile.Measure(Spacewars.Simulation.ProfileStage.NavResultMotion);
             bool discardOnly=c.PhysicalCommutation&&c.Operations.Length>0;
             if(discardOnly)foreach(var operation in c.Operations)if(operation.Kind!=ResultOperationKind.Discard){discardOnly=false;break;}
             if(c.ReadyCount==0&&c.FailureCount==0&&c.ReissueCount==0&&c.Operations.Length!=0&&!c.HasHeldPrefix&&!discardOnly||Crowd.HasPreferredMotion)return true;
@@ -65,26 +66,24 @@ namespace Spacewars.Runtime
             }
             for(int i=0;i<c.Operations.Length;i++)if(c.Operations[i].Kind==ResultOperationKind.Reissue)ClearReissueFailureNoThrow(c.Frame.After[c.Frame.Find(c.Names.Answers[i].Request.Entity)]);
             var pending=c.NextPending??c.Pending;
-            if(c.SuspendPending)foreach(var actor in c.Frame.After)if(pending.ContainsKey(actor.Id)||c.Allocating.ContainsKey(actor.Id))actor.Moving=false;
-            if(dt>0&&c.MarchConfigured)foreach(var observation in c.MarchSources){
+            if (c.SuspendPending) ApplyPendingDirections(c.Frame.After, pending, c.Allocating);
+            if(dt>0&&c.MarchConfigured)
+            using (c.Frame.Working.ObserveHeldForQueries(c.MarchSources.Length > 0 && physicalHostBudget.AllocationAdmission == null))
+            foreach(var observation in c.MarchSources){
                 int group=-1;for(int i=0;i<c.GroupCount;i++)if(ReferenceEquals(c.GroupSources[i].Owner,observation.Owner)){group=i;break;}
                 var previous=group<0?observation.Version:c.Groups[group];
                 var next=GroupMarch.PrepareOwned(c.Frame,previous,c.ProjectedInstalled,c.ProjectedDetached,c.SourceMembers,c.MarchStretch,c.MarchRevision,dt,scope.OwnedReservation(),UsesRecastGroundRoutes);
                 if(next==null)continue;if(group<0){group=c.GroupCount++;c.GroupSources[group]=observation;}else c.PreMarchGroups[group]=c.Groups[group];c.Groups[group]=next;c.MarchWrites[group]=true;
             }
             c.Traffic=NavigationTrafficAuthority.Prepare(c.SourceTraffic,c.Frame,c.ProjectedInstalled,c.ProjectedDetached,c.SourceMembers,terrain,scope.OwnedReservation());
-            // An arrival can require result-batch cleanup even without a new
-            // route result. In that case this movement frame has the same
-            // pinned routes as ordinary movement. Its per-actor proof still
-            // checks the exact backing, ledger, provider and physical suffix.
-            if(dt>0 && c.MarchConfigured && c.Operations.Length==0 && physicalHostBudget.AllocationAdmission==null){
-                bool unchanged=true;
-                foreach(var held in c.HeldRows)if(held.Changed||held.Eligible){unchanged=false;break;}
-                for(int i=0;unchanged && i<c.Installed.Length;i++)
-                    unchanged=ReferenceEquals(c.Installed[i],c.ProjectedInstalled[i]) && c.Detached[i]==c.ProjectedDetached[i];
-                c.Frame.AllowRepairCertificateReuse=unchanged;
-            }
-            if(dt>0)using(NavStorageScratch.Reserve(scope.OwnedReservation(),RebindStagingScratchBound(c.Actors.Length,c.Operations.Length,navigationGeometry.Obstacles.Count))){MarkTerminalContactComponents(c.Frame,c.MarchSources,c.MarchSources.Length,c.ProjectedInstalled,c.ProjectedDetached,c.NextPending??c.Pending,c.Allocating);c.Frame.Compute(dt);
+            // The frame has pinned each original motor array independently.
+            // A Ready result can replace one actor's motor in the shadow
+            // without invalidating the original backing of unrelated actors.
+            // CanReuseRepairCertificate checks the exact array/route per row,
+            // and the repair still rechecks projected bodies and live HOLD.
+            if(dt>0&&c.MarchConfigured&&physicalHostBudget.AllocationAdmission==null)
+                c.Frame.AllowRepairCertificateReuse=true;
+            if(dt>0)using(NavStorageScratch.Reserve(scope.OwnedReservation(),RebindStagingScratchBound(c.Actors.Length,c.Operations.Length,navigationGeometry.Obstacles.Count))){MarkTerminalContactComponents(c.Frame,c.MarchSources,c.MarchSources.Length,c.ProjectedInstalled,c.ProjectedDetached,c.NextPending??c.Pending,c.Allocating);c.Frame.Compute(dt,stationaryGroundReceiver,additionalStationaryGroundReceivers,additionalStationaryGroundCount);
                 if(UsesRecastGroundRoutes)foreach(var observation in c.MarchSources){int group=-1;for(int j=0;j<c.GroupCount;j++)if(ReferenceEquals(c.GroupSources[j].Owner,observation.Owner)){group=j;break;}var current=group<0?observation.Version:c.Groups[group];var completed=GroupMarch.CompleteRecastOwned(c.Frame,current,scope.OwnedReservation());if(completed!=null){if(group<0){group=c.GroupCount++;c.GroupSources[group]=observation;}else c.Groups[group]?.ReleaseStorage();c.Groups[group]=completed;c.MarchWrites[group]=true;}}
                 CaptureMovementDelay(2,c.Frame.Motion,c.Frame.Proposals,c.Frame.Preferred);}
             // Destination roles only; the source Detached snapshot remains
@@ -97,7 +96,7 @@ namespace Spacewars.Runtime
                 var member=((NavigationAuthorityMember)observation.Version.Members[i]).Data;int at=c.Frame.Find(member.Entity);
                 if(at<0||c.Frame.After[at].Incarnation!=member.Incarnation)return AbandonResultMovement(c,originalGroups);
             }
-            foreach(var actor in c.Frame.After)if(!actor.Moving&&!pending.ContainsKey(actor.Id)&&!c.Allocating.ContainsKey(actor.Id)){
+            foreach(var actor in c.Frame.After)if(MovementGoalCanBeReleased(actor)&&!pending.ContainsKey(actor.Id)&&!c.Allocating.ContainsKey(actor.Id)){
                 var ledger=c.NextLedger??c.Ledger;
                 for(int i=0;i<ledger.Capacity;i++)if(ledger.TryReadSlot(i,out long key,out var row)&&row.Entity==actor.Id){
                     if(c.NextLedger==null)c.NextLedger=ResultBatchCopy(c,c.Ledger,scope);c.NextLedger.Remove(key);

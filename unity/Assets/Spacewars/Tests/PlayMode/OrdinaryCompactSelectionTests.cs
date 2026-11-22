@@ -71,7 +71,15 @@ namespace Spacewars.Input.Tests
                     Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(seat,"selectionStats").style.display.value);
                     var cells=Get<VisualElement>(seat,"selectionStats").Children().Where(e=>e.style.display.value!=DisplayStyle.None).ToArray();Assert.GreaterOrEqual(cells.Length,8);
                     foreach(var cell in cells){var key=cell.Q<Label>("selection-stat-label");var value=cell.Q<Label>("selection-stat-value");Inside(panel.worldBound,key.worldBound,"stat key");Inside(panel.worldBound,value.worldBound,"stat value");Assert.False(key.worldBound.Overlaps(value.worldBound),"stat text cannot overlap");}
-                    var keys=cells.Select(c=>c.Q<Label>("selection-stat-label").text).ToArray();foreach(var key in new[]{"Здоровье","Урон","Дальность","Скорость","Обзор","Производство","Место в армии"})Assert.Contains(key,keys);
+                    var keys=cells.Select(c=>c.Q<Label>("selection-stat-label").text).ToArray();
+                    foreach(var key in new[]{"Здоровье","Дальность","Скорость","Обзор","Производство","Место в армии"})Assert.Contains(key,keys);
+                    var unit=Get<PlayableSnapshot>(seat,"view").Entities.Single();
+                    if(unit.Kind==PlayableEntityKind.Shkval)
+                    {
+                        Assert.Contains("Прямое попадание",keys);
+                        Assert.Contains("Урон по площади",keys);
+                    }
+                    else Assert.Contains("Урон",keys);
                 }
             }
         }

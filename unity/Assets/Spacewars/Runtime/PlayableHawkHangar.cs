@@ -6,6 +6,11 @@ namespace Spacewars.Runtime
 {
     internal sealed partial class PlayableDomain
     {
+        private PlayableEntityKind? StagedUnitKind(Building building) =>
+            building.Kind == PlayableBuildingKind.Hangar && building.LaunchPhase >= 1 &&
+            building.LaunchPhase <= 3 && building.Orders.Count > 0
+            ? building.Orders[0].Kind : FactoryStagedKind(building);
+
         private bool AdvanceHangar(Building b,double dt)
         {
             var f=profile;
@@ -28,13 +33,39 @@ namespace Spacewars.Runtime
             if(b.LaunchPhase==3)
             {
                 if(!ReserveAirExit(b))return false;
-                int id=SpawnUnit(b.Position,b.Owner,PlayableEntityKind.Hawk);var u=units[id];u.Air.Actor.Heading=b.Heading;u.Turret=b.Heading;u.Air.Height=AirSurface(b.Position)+HawkHangarGeometry.LaunchHeight(profile);u.Air.PreviousHeight=u.Air.Height;u.Air.Departing=true;
+                var destination=AirRallyDestination(b);
+                if(!destination.HasValue)return false;
+                var kind=b.Orders[0].Kind;
+                int id=SpawnUnit(b.Position,b.Owner,kind);var u=units[id];u.Air.Actor.Heading=b.Heading;u.Turret=b.Heading;u.Air.Height=AirSurface(b.Position)+(kind==PlayableEntityKind.Skat?HawkHangarGeometry.PlatformHeight(profile):HawkHangarGeometry.LaunchHeight(profile));u.Air.PreviousHeight=u.Air.Height;u.Air.Departing=true;
                 b.LaunchedId=id;b.LaunchPhase=4;
-                CompleteProduced(id,b.HasRally?(NavPoint?)b.Rally:DefaultAirRally(b),b.Owner,PlayableEntityKind.Hawk);
-                Sound(PlayableSoundKind.ProductionComplete,b.Position,PlayableEntityKind.Hawk,b.Owner,true);b.Orders.RemoveAt(0);return true;
+                CompleteProduced(id,destination,b.Owner,kind);
+                Sound(PlayableSoundKind.ProductionComplete,b.Position,kind,b.Owner,true);b.Orders.RemoveAt(0);return true;
             }
             if(b.LaunchPhase==6){b.LaunchPhase=0;b.LaunchedId=0;return false;}
             b.LaunchPhase++;return false;
+        }
+        private NavPoint? AirRallyDestination(Building b)
+        {
+            // Repeated production shares a rally marker. Each Hawk still needs
+            // its own arrival footprint, including room for normal braking.
+            var stationary=new List<NavPoint>();
+            foreach(var unit in units.Values)
+            {
+                if(unit.Air!=null&&!unit.Air.Actor.Moving)stationary.Add(unit.Air.Actor.Position);
+            }
+            var rally=b.HasRally?b.Rally:DefaultAirRally(b);
+            var arrivals=new[]{nextId};var footprints=AirArrivalFootprints(Array.Empty<int>());
+            // The offset between launch destinations needs room for a full
+            // lateral correction as well as both aircraft's arrival error.
+            double clearance=profile.HawkRadius;
+            double spacing=2*profile.HawkRadius+profile.HawkSeparation;
+            // A braking aircraft can stop anywhere inside its arrival radius.
+            // Keep the approach away from idle Hawks by that same margin.
+            double approachSpacing=spacing+profile.Navigation.ArrivalTolerance;
+            var destinations=AirDestinations(rally,arrivals,footprints,clearance,
+                point=>stationary.All(other=>SegmentDistance(other,b.Position,point)>=approachSpacing))
+                ??AirDestinations(rally,arrivals,footprints);
+            return destinations==null?(NavPoint?)null:destinations[0];
         }
         private NavPoint DefaultAirRally(Building b)
         {

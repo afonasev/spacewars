@@ -14,6 +14,7 @@ namespace Spacewars.Tests.EditMode
         IDictionary Units=>(IDictionary)typeof(PlayableDomain).GetField("units",Hidden).GetValue(d);
         object Call(string name,params object[] args)=>typeof(PlayableDomain).GetMethod(name,Hidden).Invoke(d,args);
         object Unit(int id)=>Units[id];
+        void AdvanceHawkCombat(int id,double seconds)=>Call("AdvanceHawkCombat",Unit(id),seconds,0);
         void Set(int id,string field,object value)=>Unit(id).GetType().GetField(field).SetValue(Unit(id),value);
         T Get<T>(int id,string field)=>(T)Unit(id).GetType().GetField(field).GetValue(Unit(id));
         PlayableSnapshot View=>d.Snapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
@@ -40,13 +41,45 @@ namespace Spacewars.Tests.EditMode
         {
             int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);
             Until(()=>Entity(b).Health<p.HawkHealth);Assert.AreEqual(p.HawkHealth-p.HawkDamage,Entity(b).Health);
+            Assert.True(View.Sounds.Single(e=>e.Kind==PlayableSoundKind.Impact&&e.Contact?.TargetId==b).Contact.DamagedUnit);
             Until(()=>Entity(b).Health<p.HawkHealth-p.HawkDamage);Assert.AreEqual(p.HawkHealth-2*p.HawkDamage,Entity(b).Health);Assert.Greater(Get<double>(a,"Reload"),0);
             Until(()=>!View.Entities.Any(e=>e.Id==b));var death=View.Sounds.Single(e=>e.Kind==PlayableSoundKind.Destroyed&&e.UnitId==b);Assert.Greater(death.Altitude,0);Assert.False(d.Navigation.Crowd.Units.Any(n=>n.Id==b));Assert.AreEqual(PlayableOwner.Enemy,death.Owner);
+            Assert.True(View.Sounds.Last(e=>e.Tick==death.Tick&&e.Kind==PlayableSoundKind.Impact&&e.Contact?.TargetId==b).Contact.DamagedUnit);
         }
-        [Test] public void MoveImmediatelyCancelsSecondRocketAndStartsReload()
+        [Test] public void MoveImmediatelyCancelsSecondRocketWithoutRestartingReload()
         {
             int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);Until(()=>Get<int>(a,"BurstRemaining")==1);
-            Send(PlayableCommandKind.Move,a,new NavPoint(-10,20));Assert.Zero(Get<int>(a,"BurstRemaining"));Assert.Greater(Get<double>(a,"Reload"),0);Tick(15);Assert.LessOrEqual(p.HawkHealth-Entity(b).Health,p.HawkDamage);
+            Tick(6);double remaining=Get<double>(a,"Reload");Assert.AreEqual(.8d,remaining,1e-9);
+            Send(PlayableCommandKind.Move,a,new NavPoint(-10,20));Assert.Zero(Get<int>(a,"BurstRemaining"));Assert.AreEqual(remaining,Get<double>(a,"Reload"),1e-9);
+            Tick(15);Assert.LessOrEqual(p.HawkHealth-Entity(b).Health,p.HawkDamage);
+        }
+        [Test] public void RepeatedAiAttackPreservesPreparationAndBothRockets()
+        {
+            int hawk=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15);
+            int enemy=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);
+            Set(enemy,"Reload",1000d);
+            Tick();
+
+            var elapsed=0d;
+            var horizon=p.HawkPreparationSeconds+p.HawkSalvoDelay+2*p.HawkRange/p.HawkMissileSpeed+1;
+            while(elapsed<horizon&&Entity(enemy).Health>p.HawkHealth-2*p.HawkDamage)
+            {
+                var command=new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.Attack,new[]{hawk},
+                    targetId:enemy,origin:PlayableOrderOrigin.Ai,source:PlayableAiOpeningComposition.SourceIdentity,
+                    jobId:sequence,actionId:sequence);
+                Assert.AreEqual(PlayableCommandStatus.Applied,d.Apply(command,out _));
+                var player=d.PlayerSnapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+                var aircraft=player.Entities.Single(e=>e.Id==hawk);
+                Assert.AreEqual(sequence,aircraft.CurrentOrder?.CommandSequence);
+                Assert.AreEqual(sequence,aircraft.OrderStamp?.Sequence);
+                // Every repeat falls inside both the preparation time and the rocket interval.
+                Tick();
+                elapsed+=1d/30;
+            }
+
+            Assert.AreEqual(1,Get<int>(hawk,"BurstSequence"));
+            Assert.AreEqual(p.HawkHealth-2*p.HawkDamage,Entity(enemy).Health);
+            Assert.Greater(Get<double>(hawk,"Reload"),0);
         }
         [Test] public void LostFixedTargetCancelsPairRatherThanSwitchingSecondRocket()
         {
@@ -60,14 +93,61 @@ namespace Spacewars.Tests.EditMode
         {
             int scout=Spawn(PlayableOwner.Player,PlayableEntityKind.Explorer,-10,15),air=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-10,15);Set(scout,"AuthoredUpgrade",upgraded);Set(air,"Reload",1000d);Tick();Assert.AreEqual(Math.PI/2,Entity(scout).WeaponPitch,1e-9);Assert.AreEqual(0,Entity(scout).HullHeading,1e-9);Assert.True(View.Projectiles.Any(x=>x.Kind==PlayableEntityKind.Explorer&&x.Pitch>1.5));Until(()=>Entity(air).Health<p.HawkHealth,120);
         }
-        [Test] public void PendingPairAndHomingRocketRoundTripExactlyAndContinue()
+        [TestCase(PlayableEntityKind.Tank)]
+        [TestCase(PlayableEntityKind.Hawk)]
+        public void ExplorerRocketResearchArmsFixedPairsWithTargetSpecificTiming(PlayableEntityKind targetKind)
+        {
+            Call("AddCredits",PlayableOwner.Player,10000d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,5,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,2,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
+            int center=View.Buildings.Single(b=>b.Kind==PlayableBuildingKind.ScientificCenter).Id;
+            var upgrade=PlayableResearchKind.ExplorerRocketLauncher;
+            Assert.AreEqual(PlayableCommandStatus.Rejected,Call("QueueResearch",center,PlayableOwner.Player,upgrade,null));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("QueueResearch",center,PlayableOwner.Player,PlayableResearchKind.ScientificCenterUpgrade,null));
+            Call("AdvanceResearch",p.ScientificCenterUpgradeSeconds);
+            Assert.AreEqual(PlayableCommandStatus.Rejected,Call("QueueResearch",center,PlayableOwner.Player,upgrade,null));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("QueueResearch",center,PlayableOwner.Player,PlayableResearchKind.ExplorerAssaultGuns,null));
+            Call("AdvanceResearch",p.ExplorerAssaultSeconds);
+
+            int scout=Spawn(PlayableOwner.Player,PlayableEntityKind.Explorer,-10,15);
+            int foe=Spawn(PlayableOwner.Enemy,targetKind,-6,15);
+            Set(foe,"Reload",1000d);
+            Assert.False(Entity(scout).RocketLauncher);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("QueueResearch",center,PlayableOwner.Player,upgrade,null));
+            Call("AdvanceResearch",p.ExplorerRocketSeconds);
+            Assert.True(Entity(scout).RocketLauncher);
+            Assert.True(Entity(Spawn(PlayableOwner.Player,PlayableEntityKind.Explorer,-12,18)).RocketLauncher);
+            Until(()=>Get<int>(scout,"BurstRemaining")==1);
+            bool air=targetKind==PlayableEntityKind.Hawk;
+            Assert.AreEqual(foe,Get<int>(scout,"BurstTarget"));
+            Assert.AreEqual(air?p.ExplorerRocketAirInterval:p.ExplorerRocketGroundInterval,Get<double>(scout,"BurstDelay"),1e-9);
+            Assert.AreEqual(air?p.ExplorerRocketAirReload:p.ExplorerRocketGroundReload,Get<double>(scout,"Reload"),1e-9);
+            var shot=((IList)typeof(PlayableDomain).GetField("projectiles",Hidden).GetValue(d)).Cast<object>()
+                .Single(s=>(int)Read(s,"Owner")==scout);
+            Assert.AreEqual(p.ExplorerRocketDamage,(double)Read(shot,"Damage"));
+            Assert.AreEqual(air?p.ExplorerRocketTurnDegrees*Math.PI/180:0,((HawkRocketFlight)Read(shot,"Hawk")).TurnSpeed,1e-9);
+            var bytes=d.CaptureWorldBytes(7,"explorer-rocket-pair");
+            var restored=PlayableDomain.RestoreWorldBytes(bytes,p,7,"explorer-rocket-pair");
+            try
+            {
+                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"explorer-rocket-pair"));
+                for(int i=0;i<15;i++){d.Step(1d/30);restored.Step(1d/30);}
+                CollectionAssert.AreEqual(d.CaptureWorldBytes(7,"explorer-rocket-pair"),restored.CaptureWorldBytes(7,"explorer-rocket-pair"));
+                CollectionAssert.AreEqual(new[]{0,1},View.Sounds.Where(s=>s.UnitId==scout&&s.Kind==PlayableSoundKind.Shot).Select(s=>s.ShotSide).ToArray());
+            }
+            finally{restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
+        }
+
+        [Test] public void PendingPairAndRocketRoundTripExactlyAndContinue()
         {
             int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);Until(()=>Get<int>(a,"BurstRemaining")==1);Assert.True(View.Projectiles.Any(x=>x.Kind==PlayableEntityKind.Hawk));var original=d;var bytes=d.CaptureWorldBytes(7,"hawk-combat");var restored=PlayableDomain.RestoreWorldBytes(bytes,p,7,"hawk-combat");
             try{CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"hawk-combat"));for(int i=0;i<60;i++){original.Step(1d/30);restored.Step(1d/30);}CollectionAssert.AreEqual(original.CaptureWorldBytes(7,"hawk-combat"),restored.CaptureWorldBytes(7,"hawk-combat"));}
             finally{restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
         }
         [TestCase(false,false)] [TestCase(true,false)] [TestCase(false,true)] [TestCase(true,true)]
-        public void OrdinaryRocketSteersOnlyWhenTargetMovesAway(bool receding,bool upgraded)
+        public void OrdinaryRocketRetainsLaunchHeading(bool receding,bool upgraded)
         {
             if(upgraded)CompleteSalvoResearch();
             int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);
@@ -80,8 +160,7 @@ namespace Spacewars.Tests.EditMode
             actor.Position=new NavPoint(-3,16);
             Set(b,"Velocity",receding?new NavPoint(1,0):default(NavPoint));
             Assert.False((bool)Call("AdvanceAirProjectile",shot,.01d));
-            if(receding&&upgraded)Assert.AreNotEqual(heading,rocket.Direction);
-            else Assert.AreEqual(heading,rocket.Direction,"Steering requires completed research and a receding target");
+            Assert.AreEqual(heading,rocket.Direction,"Both variants launch straight-flying rockets");
         }
         [Test] public void ResearchDoesNotUpgradeAnInFlightMissileAndLaunchTermsRestoreExactly()
         {
@@ -89,7 +168,7 @@ namespace Spacewars.Tests.EditMode
             Call("LaunchHawk",Unit(a),b,0);CompleteSalvoResearch();Call("LaunchHawk",Unit(a),b,1);
             var shots=(IList)typeof(PlayableDomain).GetField("projectiles",Hidden).GetValue(d);
             HawkRocketFlight Rocket(object shot)=>(HawkRocketFlight)shot.GetType().GetField("Hawk").GetValue(shot);
-            Assert.Zero(Rocket(shots[0]).TurnSpeed);Assert.AreEqual(p.HawkMissileTurn,Rocket(shots[1]).TurnSpeed);
+            Assert.Zero(Rocket(shots[0]).TurnSpeed);Assert.Zero(Rocket(shots[1]).TurnSpeed);
             var bytes=d.CaptureWorldBytes(7,"research-flight");var restored=PlayableDomain.RestoreWorldBytes(bytes,p,7,"research-flight");
             try{CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"research-flight"));for(int n=0;n<10;n++){d.Step(1d/30);restored.Step(1d/30);}CollectionAssert.AreEqual(d.CaptureWorldBytes(7,"research-flight"),restored.CaptureWorldBytes(7,"research-flight"));}
             finally{restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
@@ -161,12 +240,12 @@ namespace Spacewars.Tests.EditMode
                 Assert.LessOrEqual(Math.Abs(rate-lastRate),p.HawkYawAcceleration*dt+1e-9,"Angular acceleration remains bounded");
                 Assert.LessOrEqual(Math.Abs(rate),p.HawkYawSpeed+1e-9);lastRate=rate;
                 if(Math.Abs(rate)>.01){int sign=Math.Sign(rate);if(sign!=lastSign)reversals++;lastSign=sign;}
-                var velocity=Get<NavPoint>(a,"Velocity");bool ready=Math.Abs(velocity.X)<=1e-5&&Math.Abs(velocity.Z)<=1e-5&&!actor.Moving&&Math.Abs(rate)<=p.HawkPreparationYawSpeed;
-                if(!ready)readySince=-1;else if(readySince<0)readySince=time-dt;
+                var velocity=Get<NavPoint>(a,"Velocity");bool stationary=Math.Abs(velocity.X)<=1e-5&&Math.Abs(velocity.Z)<=1e-5&&!actor.Moving;
+                if(!stationary)readySince=-1;else if(readySince<0)readySince=time-dt;
                 if(Get<int>(a,"BurstSequence")>0)
                 {
                     first=time;
-                    Assert.True(ready);Assert.GreaterOrEqual(Get<double>(a,"StoppedSeconds"),preparation);
+                    Assert.True(stationary);Assert.LessOrEqual(Math.Abs(rate),p.HawkPreparationYawSpeed);Assert.GreaterOrEqual(Get<double>(a,"StoppedSeconds"),preparation);
                     double aim=Math.Atan2(Entity(b).Position.Z-actor.Position.Z,Entity(b).Position.X-actor.Position.X);
                     Assert.LessOrEqual(Math.Abs(Math.Atan2(Math.Sin(aim-actor.Heading),Math.Cos(aim-actor.Heading))),p.HawkAimTolerance);
                     Assert.GreaterOrEqual(first-readySince,preparation-1e-9,"Full continuous preparation before launch");
@@ -185,15 +264,17 @@ namespace Spacewars.Tests.EditMode
             int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);Tick();Set(a,"StoppedSeconds",0d);
             var air=Get<object>(a,"Air");var actor=(NavUnit)Read(air,"Actor");Send(PlayableCommandKind.Attack,a,target:b);
             double preparation=upgraded?p.HawkUpgradedPreparationSeconds:p.HawkPreparationSeconds;
-            Set(a,"StoppedSeconds",preparation+1);Write(air,"YawVelocity",p.HawkPreparationYawSpeed+.01);Call("AdvanceHawkCombat",Unit(a),1d/30);
-            Assert.Zero(Get<int>(a,"BurstSequence"));Assert.Zero(Get<double>(a,"StoppedSeconds"),"Turning still resets preparation");
-            Write(air,"YawVelocity",0d);actor.Heading=p.HawkAimTolerance+.01;Set(a,"StoppedSeconds",preparation+1);Call("AdvanceHawkCombat",Unit(a),1d/30);
+            Set(a,"StoppedSeconds",preparation+1);Write(air,"YawVelocity",p.HawkPreparationYawSpeed+.01);AdvanceHawkCombat(a,1d/30);
+            Assert.Zero(Get<int>(a,"BurstSequence"));Assert.Greater(Get<double>(a,"StoppedSeconds"),preparation,"Preparation accumulates during stationary yaw.");
+            Write(air,"YawVelocity",0d);actor.Heading=p.HawkAimTolerance+.01;Set(a,"StoppedSeconds",preparation+1);AdvanceHawkCombat(a,1d/30);
             Assert.Zero(Get<int>(a,"BurstSequence"),"Prepared but inaccurate aircraft still cannot fire");
-            actor.Heading=0;Set(a,"StoppedSeconds",0d);
+            actor.Heading=0;AdvanceHawkCombat(a,1d/30);
+            Assert.AreEqual(1,Get<int>(a,"BurstSequence"),"Alignment releases a prepared shot without another wait.");
+            Set(a,"BurstSequence",0);Set(a,"BurstRemaining",0);Set(a,"Reload",0d);Set(a,"StoppedSeconds",0d);
             int ticks=(int)Math.Ceiling(preparation*30);
-            for(int i=0;i<ticks-1;i++)Call("AdvanceHawkCombat",Unit(a),1d/30);
+            for(int i=0;i<ticks-1;i++)AdvanceHawkCombat(a,1d/30);
             Assert.Zero(Get<int>(a,"BurstSequence"),"Alignment does not bypass preparation");
-            Call("AdvanceHawkCombat",Unit(a),1d/30);Call("AdvanceHawkCombat",Unit(a),1d/30);
+            AdvanceHawkCombat(a,1d/30);AdvanceHawkCombat(a,1d/30);
             Assert.AreEqual(1,Get<int>(a,"BurstSequence"));
         }
         [Test] public void CurrentFormatContinuesExactlyWhileYawIsBraking()
@@ -226,36 +307,38 @@ namespace Spacewars.Tests.EditMode
             if(upgraded)CompleteSalvoResearch();
             int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);
             Until(()=>Get<int>(a,"BurstRemaining")==1);
-            double delay=upgraded?.18:.5,reload=upgraded?2:3,prepare=upgraded?1.5:3;
+            double delay=upgraded?.2:.8,reload=1,prepare=upgraded?.5:1;
             Assert.AreEqual(delay,Get<double>(a,"BurstDelay"),1e-9);Assert.AreEqual(reload,Get<double>(a,"HawkBurstReload"),1e-9);
-            Call("AdvanceHawkCombat",Unit(a),delay-.01);Assert.AreEqual(1,Get<int>(a,"BurstRemaining"));
-            Call("AdvanceHawkCombat",Unit(a),.011d);Assert.Zero(Get<int>(a,"BurstRemaining"));Assert.AreEqual(reload,Get<double>(a,"Reload"),1e-9);
+            AdvanceHawkCombat(a,delay-.01);Assert.AreEqual(1,Get<int>(a,"BurstRemaining"));
+            AdvanceHawkCombat(a,.011d);Assert.Zero(Get<int>(a,"BurstRemaining"));Assert.AreEqual(reload,Get<double>(a,"Reload"),1e-9);
             int sequence=Get<int>(a,"BurstSequence");
             // A movement/stop cycle never alters the independent weapon reload.
             Send(PlayableCommandKind.Move,a,new NavPoint(-10,20));Send(PlayableCommandKind.Stop,a);
             Assert.AreEqual(reload,Get<double>(a,"Reload"),1e-9);
             Set(a,"StoppedSeconds",0d);
-            Call("AdvanceHawkCombat",Unit(a),prepare-.001d);Assert.AreEqual(sequence,Get<int>(a,"BurstSequence"),"Both independent readiness timers must expire");
+            AdvanceHawkCombat(a,prepare-.001d);Assert.AreEqual(sequence,Get<int>(a,"BurstSequence"),"Both independent readiness timers must expire");
             double remaining=Get<double>(a,"Reload");
-            if(remaining>0){Call("AdvanceHawkCombat",Unit(a),remaining-.001d);Assert.AreEqual(sequence,Get<int>(a,"BurstSequence"));Call("AdvanceHawkCombat",Unit(a),.002d);}
+            if(remaining>0){AdvanceHawkCombat(a,remaining-.001d);Assert.AreEqual(sequence,Get<int>(a,"BurstSequence"));AdvanceHawkCombat(a,.002d);}
             // Baseline preparation and cooldown expire together; direct float thresholds may need one tick.
-            else Call("AdvanceHawkCombat",Unit(a),.001d);
+            else AdvanceHawkCombat(a,.001d);
             Assert.AreEqual(sequence+1,Get<int>(a,"BurstSequence"));
         }
         [Test] public void ResearchDuringPairKeepsPendingDelayAndReloadThroughWorldRestore()
         {
             int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);Until(()=>Get<int>(a,"BurstRemaining")==1);
-            CompleteSalvoResearch();Assert.AreEqual(.5d,Get<double>(a,"BurstDelay"));Assert.AreEqual(3d,Get<double>(a,"HawkBurstReload"));
+            CompleteSalvoResearch();Assert.AreEqual(.8d,Get<double>(a,"BurstDelay"));Assert.AreEqual(1d,Get<double>(a,"HawkBurstReload"));
             var bytes=d.CaptureWorldBytes(7,"hawk-salvo-research");var restored=PlayableDomain.RestoreWorldBytes(bytes,p,7,"hawk-salvo-research");
-            try{CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"hawk-salvo-research"));for(int n=0;n<18;n++){d.Step(1d/30);restored.Step(1d/30);}CollectionAssert.AreEqual(d.CaptureWorldBytes(7,"hawk-salvo-research"),restored.CaptureWorldBytes(7,"hawk-salvo-research"));Assert.Greater(Get<double>(a,"Reload"),2d);}
+            try{CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"hawk-salvo-research"));for(int n=0;n<18;n++){d.Step(1d/30);restored.Step(1d/30);}CollectionAssert.AreEqual(d.CaptureWorldBytes(7,"hawk-salvo-research"),restored.CaptureWorldBytes(7,"hawk-salvo-research"));Assert.AreEqual(.4d,Get<double>(a,"Reload"),1e-9);Assert.AreEqual(1,Get<int>(a,"BurstRemaining"));}
             finally{restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
             Send(PlayableCommandKind.Move,a,new NavPoint(-10,20));Send(PlayableCommandKind.Stop,a);
-            Set(a,"StoppedSeconds",100d);Set(a,"Reload",0d);Call("AdvanceHawkCombat",Unit(a),.01d);
-            Assert.AreEqual(.18d,Get<double>(a,"BurstDelay"));Assert.AreEqual(2d,Get<double>(a,"HawkBurstReload"));
+            Set(a,"StoppedSeconds",100d);Set(a,"Reload",0d);AdvanceHawkCombat(a,.01d);
+            Assert.AreEqual(.2d,Get<double>(a,"BurstDelay"));Assert.AreEqual(1d,Get<double>(a,"HawkBurstReload"));
         }
         [Test] public void SalvoResearchProfileHasMetadataAndRejectsInvalidValues()
         {
-            Assert.AreEqual(3,p.HawkPreparationSeconds);Assert.AreEqual(.5,p.HawkSalvoDelay);Assert.AreEqual(3,p.HawkReloadSeconds);
+            Assert.AreEqual(1,p.HawkPreparationSeconds);Assert.AreEqual(.8,p.HawkSalvoDelay);Assert.AreEqual(1,p.HawkReloadSeconds);
+            Assert.AreEqual(.5,p.HawkUpgradedPreparationSeconds);Assert.AreEqual(.2,p.HawkUpgradedSalvoDelay);
+            Assert.AreEqual(1.5,PlayableUnitRules.DamagePerSecond(p,PlayableEntityKind.Hawk,true)/PlayableUnitRules.DamagePerSecond(p,PlayableEntityKind.Hawk),1e-9);
             Assert.AreEqual(300,p.HawkSalvoResearchCost);Assert.AreEqual(30,p.HawkSalvoResearchSeconds);
             var fields=PlayableProfileMetadata.Fields.Where(f=>f.Path.StartsWith("hawk.salvoResearch")||f.Path.StartsWith("hawk.upgraded")).ToArray();Assert.AreEqual(5,fields.Length);
             foreach(var f in fields){Assert.IsNotEmpty(f.Label);Assert.IsNotEmpty(f.Description);Assert.IsNotEmpty(f.Unit);Assert.Greater(f.Step,0);
@@ -280,11 +363,12 @@ namespace Spacewars.Tests.EditMode
             args=new object[]{new BallisticPoint(x-10,.5,z2),new BallisticPoint(x+5,.5,z2),.07d,0,null,false,0,default(BallisticPoint),0d,0,null};Assert.True((bool)typeof(PlayableDomain).GetMethod("AirContact",Hidden).Invoke(d,args));Assert.AreEqual(near,(int)args[6],"First unit in front of the building receives physical contact");
             Call("Damage",near,10000);args[6]=0;Assert.True((bool)typeof(PlayableDomain).GetMethod("AirContact",Hidden).Invoke(d,args));Assert.AreEqual(hq.Id,(int)args[6],"Building stops the same 3D ray");
         }
-        [Test] public void VerticalMotionPreservesPreparationAndSubstantialYawResetsIt()
+        [Test] public void VerticalMotionAndStationaryYawPreservePreparationButTranslationResetsIt()
         {
             int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);Set(a,"Target",b);Set(a,"StoppedSeconds",.7d);var air=Get<object>(a,"Air");var fields=air.GetType();fields.GetField("Height").SetValue(air,5d);
-            Call("RefreshVision");Call("AdvanceHawkCombat",Unit(a),1d/30);Assert.Greater(Get<double>(a,"StoppedSeconds"),.7);
-            fields.GetField("YawVelocity").SetValue(air,p.HawkPreparationYawSpeed*2);Call("AdvanceHawkCombat",Unit(a),1d/30);Assert.Zero(Get<double>(a,"StoppedSeconds"));Assert.Zero(Get<int>(a,"BurstRemaining"));
+            Call("RefreshVision");AdvanceHawkCombat(a,1d/30);Assert.Greater(Get<double>(a,"StoppedSeconds"),.7);
+            fields.GetField("YawVelocity").SetValue(air,p.HawkPreparationYawSpeed*2);AdvanceHawkCombat(a,1d/30);Assert.Greater(Get<double>(a,"StoppedSeconds"),.7+1d/30);Assert.Zero(Get<int>(a,"BurstRemaining"));
+            Set(a,"Velocity",new NavPoint(1,0));AdvanceHawkCombat(a,1d/30);Assert.Zero(Get<double>(a,"StoppedSeconds"));
         }
         [TestCase(6d)][TestCase(8d)][TestCase(10d)] public void WorkingRangeExplorerDuelRecordsOutcomeAndTime(double distance)
         {

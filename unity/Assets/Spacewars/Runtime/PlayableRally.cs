@@ -27,6 +27,25 @@ namespace Spacewars.Runtime
         private Building RallyProducer(int id,PlayableOwner owner)
             =>buildings.TryGetValue(id,out var b)&&b.Owner==owner&&b.Ready&&b.Sale==null&&
               (b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar||TerritoryRules.Center(b.Kind))?b:null;
+        // SetRally with this slot is an owner-authored cancellation. It shares
+        // the normal permission and producer checks and cancels any pending proof.
+        internal const int ClearAiRallySlot = -1;
+        private PlayableCommandStatus ClearAiRally(int id, PlayableOwner owner, out string message)
+        {
+            var b = RallyProducer(id, owner);
+            if (b == null || b.Health <= 0)
+            {
+                message = "Select a ready live owned producer.";
+                return PlayableCommandStatus.InvalidEntity;
+            }
+            if (rallyWork.TryGetValue(id, out var pending))
+                FinishRally(id, pending, PlayableCommandStatus.Cancelled, "AI rally no longer needed.");
+            b.HasRally = false;
+            b.Rally = default;
+            sites[b.SiteId].Rallies.Remove(b.SlotId);
+            message = "AI rally cleared.";
+            return PlayableCommandStatus.Applied;
+        }
         private void StorePadRally(Building b,NavPoint target)
         {b.Rally=target;b.HasRally=true;sites[b.SiteId].Rallies[b.SlotId]=target;}
         private PlayableCommandStatus Rally(int id,NavPoint target,PlayableOwner issuer,long sequence,out string message)

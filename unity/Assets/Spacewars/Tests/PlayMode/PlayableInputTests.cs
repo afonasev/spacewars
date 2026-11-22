@@ -86,6 +86,21 @@ namespace Spacewars.Input.Tests
             input.IsKeyboardInUi=()=>false;input.WorldInputEnabled=false;MouseState(new Vector2(50,70),0);Assert.AreEqual(count,calls);
         }
 
+        [TestCase(Key.Delete)] [TestCase(Key.Backspace)]
+        public void DeleteSelectionUsesWorldCommandAndTextFocusGuards(Key key)
+        {
+            int calls=0;input.DeleteSelection=()=>calls++;
+            void Press(){KeyboardState(key);KeyboardState();}
+            Press();Assert.AreEqual(1,calls);
+            input.IsKeyboardInUi=()=>true;Press();Assert.AreEqual(1,calls);
+            input.IsKeyboardInUi=()=>false;input.IsTextEntryActive=()=>true;Press();Assert.AreEqual(1,calls);
+            input.IsTextEntryActive=()=>false;input.WorldInputEnabled=false;Press();Assert.AreEqual(1,calls);
+            input.WorldInputEnabled=true;input.CommandInputEnabled=false;Press();Assert.AreEqual(1,calls);
+            input.CommandInputEnabled=true;input.SetFocus(false);Press();Assert.AreEqual(1,calls);
+            input.SetFocus(true);input.SignalModal=()=>true;Press();Assert.AreEqual(1,calls);
+            input.SignalModal=()=>false;Press();Assert.AreEqual(2,calls);
+        }
+
         [Test] public void HoldAndStopAreDistinctAndRespectUiPauseAndFocus()
         {
             int hold=0,stop=0;input.Hold=()=>hold++;input.Stop=()=>stop++;

@@ -4,6 +4,33 @@ using System.Linq;
 
 namespace Spacewars.Simulation
 {
+    internal static class PlayableTerritorialPositions
+    {
+        internal static IEnumerable<(int Id, NavPoint Point)> Known(PlayableProfile profile, Func<NavPoint,bool> discovered,
+            IEnumerable<TerritorySiteSnapshot> sites, IReadOnlyList<PlayablePublicScoutObjective> objectives,
+            NavPoint? home, Func<PlayableOwner,bool> hostile)
+        {
+            foreach(var site in sites)
+            {
+                if(site.Site.Kind!=PlayableBuildingKind.RelayTower||!site.Owner.HasValue||hostile(site.Owner.Value)||site.Contested)continue;
+                var approach=objectives.FirstOrDefault(o=>o.SiteId==site.Site.Id&&o.Reachable&&o.Role==PlayablePublicScoutObjectiveRole.Relay);
+                if(approach!=null)yield return (approach.SiteId,approach.Approach);
+            }
+
+            if(!(profile?.AuthoredMap is ThreeCrossingsMap crossings)||!home.HasValue||discovered==null)yield break;
+            // These three IDs are reserved within TerritorialPosition. They are
+            // waypoints, not build/capture sites. Stage on the friendly bank so
+            // a stationary guard does not occupy the bridge deck itself.
+            double bank=Math.Sign(home.Value.X);
+            for(int i=-1;i<=1;i++)
+            {
+                double edge=i==0?crossings.CentralBridgeHalfSpan:crossings.RiverHalfWidth;
+                var point=new NavPoint(bank*(edge+profile.FollowDistance),i*crossings.CrossingZ);
+                if(discovered(point))yield return (int.MaxValue-1+i,point);
+            }
+        }
+    }
+
     // Presentation-safe owner policy input, never a view of PlayableDomain.
     public sealed class PlayableAiObservation
     {
@@ -21,39 +48,60 @@ namespace Spacewars.Simulation
         private readonly PlayableCenterDamageSnapshot[] ownCenterDamage;
         private readonly PlayableRouteProof[] routeProofs;
         private readonly PlayableArtillerySupportSnapshot[] artillerySupport;
-        private PlayableAiObservation(PlayableSnapshot snapshot)
+        private PlayableAiObservation(PlayableSnapshot snapshot, Ai.AiDifficulty difficulty)
         {
+            Difficulty=difficulty;
+            Domination=snapshot.Domination;
+            MapRelayControl=Domination.HasValue?snapshot.MapRelayControl:Array.Empty<KnownRelay>();
+            PublicRelaySites=Domination.HasValue?snapshot.PublicSites:Array.Empty<TerritorySite>();
             OrbitalScans=snapshot.OrbitalScans;Orbital=snapshot.Orbital;Mines=Array.AsReadOnly(snapshot.Mines.ToArray());
             Intel=new Spacewars.Simulation.Ai.AiIntelDelta(snapshot.Tick,snapshot.IntelEnvelopes,snapshot.Vision);Vision=snapshot.Vision;SchemaVersion=snapshot.Participants.Count>0?ParticipantSchemaVersion:CurrentSchemaVersion;HomeSiteId=snapshot.HomeSiteId;OwnerId=snapshot.OwnerId;Team=snapshot.Team;Participants=snapshot.Participants;Owner=snapshot.Owner;ProfileId=snapshot.ProfileId; ProfileRevision=snapshot.ProfileRevision; Generation=snapshot.Generation; Seed=snapshot.Seed;
             var owner=Owner;
             SnapshotSequence=snapshot.Sequence; Tick=snapshot.Tick; Credits=snapshot.Credits; SettledIncome=snapshot.SettledIncome; IncomePerSecond=snapshot.IncomePerSecond;
             Population=snapshot.Population;ownerResearch=snapshot.OwnerResearch.ToArray(); entities=snapshot.Entities.Select(x=>new PlayableEntitySnapshot(x.Id,x.Owner,x.Kind,x.Position,x.Health,x.Moving,x.TargetId,x.HullHeading,x.TurretHeading,
                 x.Owner==owner&&x.CurrentOrder?.Owner==owner&&x.CurrentOrder.UnitId==x.Id&&x.CurrentOrder.Generation==snapshot.Generation&&x.CurrentOrder.IssuedTick<=snapshot.Tick?x.CurrentOrder:null,
-                completion:x.Owner==owner&&x.Completion?.Order.Owner==owner&&x.Completion.Order.Generation==snapshot.Generation?x.Completion:null,location:x.Owner==owner?x.Location:null,upgraded:x.Upgraded,held:x.Owner==owner&&x.Held,navigationOutcome:x.Owner==owner?x.NavigationOutcome:NavigationOutcome.Idle,orderStamp:x.Owner==owner?x.OrderStamp:null,queue:x.Owner==owner?x.Queue:null,maxHealth:x.MaxHealth,exactHealth:x.ExactHealth,weaponSystemsLevel:x.WeaponSystemsLevel,defensiveSystemsLevel:x.DefensiveSystemsLevel,altitude:x.Altitude,departing:x.Departing)).ToArray(); buildings=snapshot.Buildings.ToArray();
+                completion:x.Owner==owner&&x.Completion?.Order.Owner==owner&&x.Completion.Order.Generation==snapshot.Generation?x.Completion:null,location:x.Owner==owner?x.Location:null,upgraded:x.Upgraded,held:x.Owner==owner&&x.Held,navigationOutcome:x.Owner==owner?x.NavigationOutcome:NavigationOutcome.Idle,orderStamp:x.Owner==owner?x.OrderStamp:null,queue:x.Owner==owner?x.Queue:null,maxHealth:x.MaxHealth,exactHealth:x.ExactHealth,weaponSystemsLevel:x.WeaponSystemsLevel,defensiveSystemsLevel:x.DefensiveSystemsLevel,altitude:x.Altitude,departing:x.Departing,materializationProgress:x.MaterializationProgress,stasisRemaining:x.StasisRemaining,rocketLauncher:x.RocketLauncher,flames:x.Flames)).ToArray(); buildings=snapshot.Buildings.ToArray();
             // Existing owner projection already removes hidden shots and unknown source IDs.
             // Only actual visible hostile shots toward a live own unit enter AI evidence.
             projectiles=snapshot.Projectiles.Where(s=>s.Visible&&s.OwnerId>0&&s.TargetId>0&&
                 entities.Any(e=>e.Id==s.OwnerId&&IsHostile(e.Owner)&&e.Health>0&&Vision?.IsVisible(e.Position)==true)&&
                 entities.Any(e=>e.Id==s.TargetId&&e.Owner==owner&&e.Health>0)).ToArray();
+            ObservedHostileImpacts=Array.AsReadOnly(snapshot.Projectiles.Where(shot=>IsHostile(shot.Faction)&&shot.Kind==PlayableEntityKind.Shkval&&
+                shot.Marker!=null&&Vision?.IsVisible(shot.Marker.Position)==true).Select(shot=>shot.Marker).ToArray());
+            VisibleWrecks=Array.AsReadOnly(snapshot.Wrecks.Where(w=>w.Blocks(snapshot.Tick)&&Vision?.IsVisible(w.Position)==true).ToArray());
             ownCenterDamage=snapshot.OwnCenterDamage.Where(x=>x.Owner==owner&&x.Generation==snapshot.Generation&&x.Tick<=snapshot.Tick&&x.Damage>0&&snapshot.Buildings.Any(b=>b.Id==x.CenterId&&b.Owner==owner&&b.Health>0&&b.Phase!=ConstructionPhase.Pending&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost))&&entities.Any(e=>e.Id==x.AttackerId&&snapshot.IsHostile(e.Owner)&&e.Health>0)).Select(x=>x.Copy()).ToArray();
+            var territorialPositions=snapshot.RouteProofs.Any(r=>r.Kind==PlayableRouteTargetKind.TerritorialPosition)?
+                PlayableTerritorialPositions.Known(snapshot.ActiveProfile,Vision==null?null:(Func<NavPoint,bool>)Vision.IsDiscovered,
+                    snapshot.Sites,snapshot.PublicScoutObjectives,buildings.FirstOrDefault(b=>b.Owner==owner&&b.SiteId==HomeSiteId&&b.Kind==PlayableBuildingKind.Headquarters)?.Position,snapshot.IsHostile).ToArray():
+                Array.Empty<(int Id, NavPoint Point)>();
             routeProofs=snapshot.RouteProofs.Where(p=>p.Owner==owner&&p.Generation==snapshot.Generation&&p.Tick==snapshot.Tick&&p.GeometryRevision>0&&p.Radius>0&&p.Path.Count>0&&
                 entities.Any(e=>e.Id==p.UnitId&&e.Owner==owner&&e.Position.X==p.Origin.X&&e.Position.Z==p.Origin.Z)&&
                 (p.Kind==PlayableRouteTargetKind.VisibleEnemy&&snapshot.Vision!=null&&snapshot.Vision.IsVisible(p.Target)&&entities.Any(e=>e.Id==p.TargetId&&snapshot.IsHostile(e.Owner)&&e.Position.X==p.Target.X&&e.Position.Z==p.Target.Z)||
-                 p.Kind==PlayableRouteTargetKind.VisibleEnemy&&snapshot.Vision!=null&&snapshot.Vision.IsVisible(p.Target)&&buildings.Any(b=>b.Id==p.TargetId&&snapshot.IsHostile(b.Owner)&&b.Position.X==p.Target.X&&b.Position.Z==p.Target.Z)||
+                 p.Kind==PlayableRouteTargetKind.VisibleEnemy&&snapshot.Vision!=null&&snapshot.Vision.IsVisible(p.Target)&&buildings.Any(b=>b.Id==p.TargetId&&snapshot.IsHostile(b.Owner)&&b.Health>0&&b.Position.X==p.Target.X&&b.Position.Z==p.Target.Z)||
+                 p.Kind==PlayableRouteTargetKind.EnemyApproach&&snapshot.Vision!=null&&snapshot.ActiveProfile!=null&&buildings.Any(b=>b.Id==p.TargetId&&b.Health>0&&snapshot.IsHostile(b.Owner)&&snapshot.Vision.IsVisible(b.Position)&&entities.Any(e=>e.Id==p.UnitId&&AiTerritoryDistance(p.Target,b.Position)<=PlayableUnitRules.Range(snapshot.ActiveProfile,e.Kind,e.Upgraded)))||
                  p.Kind==PlayableRouteTargetKind.FriendlyAnchor&&entities.Any(e=>e.Id==p.TargetId&&e.Owner==owner&&e.Position.X==p.Target.X&&e.Position.Z==p.Target.Z)||
                  p.Kind==PlayableRouteTargetKind.FriendlyAnchor&&snapshot.ActiveProfile!=null&&snapshot.ActiveProfile.ProfileId==snapshot.ProfileId&&snapshot.ActiveProfile.Revision==snapshot.ProfileRevision&&entities.Any(e=>e.Id==p.TargetId&&e.Id!=p.UnitId&&e.Owner==owner&&PlayableUnitRules.FollowGoal(snapshot.ActiveProfile,e.Position,e.HullHeading).Equals(p.Target))||
                  p.Kind==PlayableRouteTargetKind.FriendlyAnchor&&entities.Any(e=>e.Id==p.TargetId&&e.Id==p.UnitId&&e.Owner==owner&&e.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&e.CurrentOrder.Destination.Equals(p.Target))||
                  p.Kind==PlayableRouteTargetKind.FriendlyAnchor&&buildings.Any(b=>b.Id==p.TargetId&&b.Owner==owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.Position.Equals(p.Target))||
-                 p.Kind==PlayableRouteTargetKind.PublicObjective&&snapshot.PublicScoutObjectives.Any(o=>o.SiteId==p.TargetId&&o.Reachable&&o.Approach.X==p.Target.X&&o.Approach.Z==p.Target.Z))).Select(p=>p.Copy()).ToArray();
-            artillerySupport=snapshot.ArtillerySupport.Where(a=>a.Generation==snapshot.Generation&&a.Tick==snapshot.Tick&&entities.Any(e=>e.Id==a.UnitId&&e.Owner==owner&&e.Kind==PlayableEntityKind.Shkval&&e.Health>0)).ToArray();
+                 p.Kind==PlayableRouteTargetKind.PublicObjective&&snapshot.PublicScoutObjectives.Any(o=>o.SiteId==p.TargetId&&o.Reachable&&o.Approach.X==p.Target.X&&o.Approach.Z==p.Target.Z)||
+                 p.Kind==PlayableRouteTargetKind.TerritorialPosition&&territorialPositions.Any(t=>t.Id==p.TargetId&&t.Point.Equals(p.Target)))).Select(p=>p.Copy()).ToArray();
+            artillerySupport=snapshot.ArtillerySupport.Where(a=>a.Generation==snapshot.Generation&&a.Tick==snapshot.Tick&&entities.Any(e=>e.Id==a.UnitId&&e.Owner==owner&&(e.Kind is PlayableEntityKind.Shkval or PlayableEntityKind.Igla)&&e.Health>0)).ToArray();
             sites=snapshot.Sites.ToArray(); impacts=snapshot.Impacts.ToArray();researchAvailability=snapshot.ResearchAvailability.ToArray();publicScoutObjectives=snapshot.PublicScoutObjectives.ToArray();
         }
+        private static double AiTerritoryDistance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
+        internal IReadOnlyList<PlayableWreckSnapshot> VisibleWrecks{get;}
+        internal IReadOnlyList<PlayableImpactMarker> ObservedHostileImpacts{get;}
         public IReadOnlyList<PlayableProjectileSnapshot> ObservedHostileShots=>Array.AsReadOnly(projectiles);
-        public static PlayableAiObservation From(PlayableSnapshot snapshot)
+        public Ai.AiDifficulty Difficulty{get;}
+        public PlayableDominationSnapshot? Domination{get;}
+        public IReadOnlyList<KnownRelay> MapRelayControl{get;}
+        internal IReadOnlyList<TerritorySite> PublicRelaySites{get;}
+        public static PlayableAiObservation From(PlayableSnapshot snapshot)=>From(snapshot,Ai.AiDifficulty.Fighter);
+        public static PlayableAiObservation From(PlayableSnapshot snapshot, Ai.AiDifficulty difficulty)
         {
             using var measured=PerformanceProfile.Measure(ProfileStage.Observation);
             if(snapshot==null)throw new ArgumentNullException(nameof(snapshot));
-            return new PlayableAiObservation(snapshot);
+            return new PlayableAiObservation(snapshot,difficulty);
         }
         public Spacewars.Simulation.Ai.AiIntelDelta Intel{get;}
         public TeamVisionSnapshot Vision{get;}

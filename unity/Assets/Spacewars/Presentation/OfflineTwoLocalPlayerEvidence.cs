@@ -50,10 +50,10 @@ namespace Spacewars.Presentation
             // Close the map, then expose real source gesture rings with synthetic
             // assigned-device samples. These are rendering checks, not hardware acceptance.
             InputSystem.QueueStateEvent(assignedPad,new GamepadState().WithButton(GamepadButton.Select));yield return null;yield return null;InputSystem.QueueStateEvent(assignedPad,new GamepadState());for(int i=0;i<4;i++)yield return null;
-            InputSystem.QueueStateEvent(assignedPad,new GamepadState().WithButton(GamepadButton.RightShoulder));yield return new WaitForSecondsRealtime(padProfile.holdMs/1000f+.15f);
+            InputSystem.QueueStateEvent(assignedPad,new GamepadState().WithButton(GamepadButton.RightShoulder));yield return new WaitForSecondsRealtime((float)padProfile.RadialHoldMs/1000f+.15f);
             if(gestures.Mode!="groupWheel")throw new InvalidOperationException("Group ring gesture failed.");yield return CaptureSynthetic("gamepad-group-ring");
             InputSystem.QueueStateEvent(assignedPad,new GamepadState());for(int i=0;i<4;i++)yield return null;
-            InputSystem.QueueStateEvent(assignedPad,new GamepadState().WithButton(GamepadButton.LeftShoulder));yield return new WaitForSecondsRealtime(padProfile.holdMs/1000f+.15f);
+            InputSystem.QueueStateEvent(assignedPad,new GamepadState().WithButton(GamepadButton.LeftShoulder));yield return new WaitForSecondsRealtime((float)padProfile.RadialHoldMs/1000f+.15f);
             if(gestures.Mode!="baseWheel")throw new InvalidOperationException("Base ring gesture failed.");yield return CaptureSynthetic("gamepad-base-ring");
             InputSystem.QueueStateEvent(assignedPad,new GamepadState());for(int i=0;i<4;i++)yield return null;
 

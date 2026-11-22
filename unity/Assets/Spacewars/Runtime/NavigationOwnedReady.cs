@@ -78,6 +78,7 @@ namespace Spacewars.Runtime
             int actors,attempts,leases;long publication;bool published=false;
             using(EnterTransport()){
                 if(!AnswerNamesSourceCurrent(names))return false;
+                if(!Crowd.TryGet(request.Entity,out var originActor)||!ReadyPhysicalOriginCurrent(answer,originActor))return null;
                 if(!physicalArrivalEnabled||hostAllocationThread!=0||admissionBatchDepth!=0||commandGroup!=null||!(pending is NavigationCommandSlots<int,NavigationRequest>)||!(allocating is NavigationCommandSlots<int,NavigationRequest>)||!(arrivalLedger is NavigationCommandSlots<long,NavigationArrivalReservation>)||!(technicalFailures is NavigationCommandSlots<int,NavSolveStatus>)||!(retainedGoals is NavigationCommandSlots<int,NavPoint>)||!(movementIdentities is NavigationCommandSlots<int,string>))return null;
                 if(request.Session!=Generation||request.ProfileId!=profile.ProfileId||request.ProfileRevision!=profile.Revision||!(ReferenceEquals(request.BaseGeometry,navigationGeometry)||IsCurrentPhysicalAuthorityGeometry(request))||!CurrentMember(request)||!pending.TryGetValue(request.Entity,out var expected)||!ReferenceEquals(expected,request)||!transportOwner.CanConsumePrepared(request))return null;
                 actors=Crowd.Units.Count;attempts=arrivalAttempts.Count;leases=arrivalProjectionLeases.Count;publication=admissionPublicationIdentity;
@@ -155,8 +156,8 @@ namespace Spacewars.Runtime
                         GroupOrderState metadata;GroupMemberState changed;int index=-1;
                         using(NavStorageScratch.Reserve(scope.OwnedReservation(),NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+NavStorageLayout.ObjectBytesBound(typeof(GroupMemberState)))){
                             using(EnterTransport()){if(!ReadySourceCurrent(candidate,names))return false;metadata=groups[answer.Corridor.Group].CopyHeader();var members=groups[answer.Corridor.Group].Members;for(int i=0;i<members.Length;i++)if(members[i].Entity==request.Entity){index=i;break;}if(index<0)return false;changed=members[index].Copy();}
-                            if(metadata.MarchVersion==1){changed.Progress=0;changed.ProgressRequest=0;metadata.MarchAnchor=0;metadata.MarchInitialized=false;}
-                            else if(metadata.MarchVersion==2&&changed.ProgressRequest!=request.Request){changed.ProgressOffset=changed.Progress;changed.ProgressRequest=0;}
+                            if(metadata.MarchVersion==1){changed.Progress=0;changed.ProgressRequest=0;changed.Recast=default;metadata.MarchAnchor=0;metadata.MarchInitialized=false;}
+                            else if(metadata.MarchVersion==2&&changed.ProgressRequest!=request.Request){ResetRouteProgress(changed);}
                             changed.Phase=changed.FormationReleased?GroupMemberPhase.Combat:GroupMemberPhase.March;
                             member=NavigationAuthorityMember.CopyWithValuesOwned((NavigationAuthorityMember)observation.Version.Members[index],new NavigationAuthorityMember.Values(changed),scope.OwnedReservation());
                             version=NavigationAuthorityGroup.CopyWithMemberAndMarchOwned(observation.Version,index,member,new NavigationAuthorityGroup.Values(metadata),scope.OwnedReservation());
@@ -193,7 +194,11 @@ namespace Spacewars.Runtime
                     // movement exception resolves the committed scope and emits
                     // its Ready notification after the outer gate is released.
                     scope.ResolveCommitted();
-                    try{RouteActivated?.Invoke(request);ObserveOwnedReadyBeforeRetirement?.Invoke(candidate);}
+                    try{
+                        RouteActivated?.Invoke(request);
+                        ReadyRouteAccepted?.Invoke(answer);
+                        ObserveOwnedReadyBeforeRetirement?.Invoke(candidate);
+                    }
                     finally{candidate.GroupWrite?.ReleaseRetired();SignalHost();}
                 }}return true;
             }catch(InvalidOperationException){if(published)throw;return false;}finally{candidate?.Dispose();}

@@ -19,12 +19,43 @@ namespace Spacewars.Tests.EditMode
         private PlayableSnapshot View(PlayableOwner owner=PlayableOwner.Player)=>(PlayableSnapshot)Call("PlayerSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,owner);
         private PlayableSnapshot RouteView(params PlayableRouteRequest[] requests)=>(PlayableSnapshot)Call("PlayerSnapshotWithRoutes",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,PlayableOwner.Player,requests);
         private int Spawn(double x,double z){Call("SpawnPlayer",new NavPoint(x,z),new NavPoint(x,z));return View().Entities.Max(e=>e.Id);}
+        private void WaitForLingeringVision()
+        {
+            const double dt=1d/30d;
+            for(int i=0;i<Math.Ceiling(PlayableProfile.Default.LingeringVisionSeconds/dt);i++)Call("Step",dt);
+        }
         private void Field(int building,string name,object value)
         {
             var all=(IDictionary)Type.GetField("buildings",Flags).GetValue(domain);var b=all[building];b.GetType().GetField(name).SetValue(b,value);
         }
         private PlayableCommandStatus Attack(int unit,int target)
         {var args=new object[]{new PlayableCommand(1,1,"player-1",PlayableCommandKind.Attack,new[]{unit},targetId:target),null};return (PlayableCommandStatus)Type.GetMethod("Apply",Flags).Invoke(domain,args);}
+        [Test] public void ReviewRecipientsMatchTheFullObservationForLivingAndUnboundActors()
+        {
+            var current=(PlayableDomain)domain;
+            var player=View().Entities.First(e=>e.Owner==PlayableOwner.Player);
+            var records=(IDictionary)Type.GetField("units",Flags).GetValue(domain);
+            var record=records[player.Id];
+            var health=record.GetType().GetField("Health");
+            try{
+                Check(PlayableOwner.Player,true);
+                Check(PlayableOwner.Enemy,false);
+                health.SetValue(record,.25d);
+                Check(PlayableOwner.Player,true);
+                health.SetValue(record,0d);
+                Check(PlayableOwner.Player,false);
+                health.SetValue(record,.25d);
+                Nav.Crowd.Remove(player.Id);
+                Check(PlayableOwner.Player,false);
+                void Check(PlayableOwner owner,bool containsPlayer)
+                {
+                    var ids=current.LivingReviewRecipients(owner);
+                    var original=PlayableAiObservation.From(View(owner));
+                    CollectionAssert.AreEquivalent(original.Entities.Where(e=>e.Owner==owner&&e.Health>0).Select(e=>e.Id),ids);
+                    Assert.AreEqual(containsPlayer,ids.Contains(player.Id));
+                }
+            }finally{current.DestroyOwnedNavigation();}
+        }
         [TestCase("own",true)][TestCase("visible-enemy",true)][TestCase("remembered-enemy",false)][TestCase("hidden-enemy",false)]
         public void BuildingProjectileProducerIdentityRespectsCurrentVisibility(string mode,bool expected)
         {
@@ -35,7 +66,7 @@ namespace Spacewars.Tests.EditMode
             {
                 int scout=(int)Call("SpawnUnit",new NavPoint(source.Position.X-8,source.Position.Z),PlayableOwner.Player,PlayableEntityKind.Explorer);
                 Call("RefreshVision");Assert.True(View().Vision.IsVisible(source.Position));Assert.True(View().Buildings.Any(b=>b.Id==source.Id));
-                if(mode=="remembered-enemy"){Call("Damage",scout,100000);Call("RefreshVision");Assert.False(View().Vision.IsVisible(source.Position));Assert.True(View().Vision.KnownBuildings.Any(b=>b.Id==source.Id),"Remembered identity alone must not reveal the firing building.");}
+                if(mode=="remembered-enemy"){Call("Damage",scout,100000);WaitForLingeringVision();Assert.False(View().Vision.IsVisible(source.Position));Assert.True(View().Vision.KnownBuildings.Any(b=>b.Id==source.Id),"Remembered identity alone must not reveal the firing building.");}
             }
             var list=(IList)Type.GetField("projectiles",Flags).GetValue(domain);var type=Type.GetNestedType("Projectile",BindingFlags.NonPublic);var projectile=Activator.CreateInstance(type);
             void Set(string field,object value)=>type.GetField(field).SetValue(projectile,value);
@@ -358,7 +389,9 @@ namespace Spacewars.Tests.EditMode
         [Test] public void DomainMemorySurvivesHiddenDeathUntilRevisited()
         {
             int scout=Spawn(10,-4);Assert.True(View().Vision.KnownBuildings.Any(b=>b.Id==2));
-            Call("Damage",scout,100000);var hidden=View();Call("Damage",2,100000);
+            Call("Damage",scout,100000);WaitForLingeringVision();var hidden=View();
+            Assert.False(hidden.Vision.IsVisible(new NavPoint(PlayableProfile.Default.EnemyHeadquartersX,PlayableProfile.Default.HeadquartersZ)));
+            Call("Damage",2,100000);
             Assert.True(View().Vision.KnownBuildings.Any(b=>b.Id==2));Assert.IsEmpty(View().Buildings.Where(b=>b.Id==2));
             // Revisit from beside the wreck; its collision footprint remains authoritative.
             Spawn(12,-4);Assert.False(View().Vision.KnownBuildings.Any(b=>b.Id==2));Assert.True(hidden.Vision.KnownBuildings.Any(b=>b.Id==2));
@@ -367,7 +400,7 @@ namespace Spacewars.Tests.EditMode
         {
             int near=Spawn(-10,0);Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Attack(near,3));
             int scout=Spawn(10,-4);Assert.AreEqual(PlayableCommandStatus.Applied,Attack(scout,3));
-            Call("Damage",scout,100000);Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Attack(near,3));
+            Call("Damage",scout,100000);WaitForLingeringVision();Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Attack(near,3));
             Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Attack(near,0));
         }
         [Test] public void LostTargetCancelsPendingChaseWithoutAcquiringHiddenReplacement()
@@ -376,12 +409,17 @@ namespace Spacewars.Tests.EditMode
             Nav.Crowd.Remove(3);Nav.Crowd.Add(3,new NavPoint(28,-20));Call("Step",1d/30d);
             Assert.Zero(View().Entities.Single(e=>e.Id==unit).TargetId);Assert.False(Nav.IsPending(unit));
         }
-        [Test] public void ScriptedAssaultUsesOneGroundOrderPerUnitAndIgnoresHiddenHqPosition()
+        [TestCase(false)][TestCase(true)] public void ScriptedAssaultUsesOneGroundOrderPerUnitAndIgnoresHiddenHqPosition(bool recast)
         {
+            var data=PlayableProfile.Default.CopyData();data.groundRouteBackend=recast?1:0;
+            domain=NativeCombatFixture.WithTwoEnemyDefenders(PlayableProfile.Create(data));
             Field(1,"Position",new NavPoint(-28,-20));
             Type.GetField("elapsed",Flags).SetValue(domain,PlayableProfile.Default.EnemyAdvanceDelaySeconds+1);
             for(int i=0;i<40;i++)Call("Step",1d/30d);
-            Assert.AreEqual(3,Nav.Requests.Count,"A waiting route must not be replaced every tick.");
+            // Legacy can issue all three identical goals. Recast reserves the
+            // endpoint for the first actor and must not replace its waiting route.
+            Assert.AreEqual(recast?1:3,Nav.Requests.Count,"A waiting route must not be replaced every tick.");
+            if(recast)Assert.AreEqual("movement-arrival-reserved",Nav.LastCommandAdmissionRefusal);
             while(Nav.Requests.TryDequeue(out var request))
             {
                 Assert.AreEqual(PlayableProfile.Default.PlayerHeadquartersX+PlayableProfile.Default.DefenderOffsetX,request.Goal.X);
@@ -391,7 +429,9 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void OutpostLifecycleChangesSourcesAndNewSessionClearsHistory()
         {
-            int scout=Spawn(-16,20);for(int i=0;i<155;i++)Call("Step",1d/30d);Call("Damage",scout,100000);
+            // Use a distinct point inside the capture circle so the scout’s residual
+            // vision cannot be mistaken for the pending outpost’s vision source.
+            int scout=Spawn(-16,19);for(int i=0;i<155;i++)Call("Step",1d/30d);Call("Damage",scout,100000);
             var args=new object[]{3,0,PlayableBuildingKind.Outpost,0,PlayableOwner.Player,null};
             Assert.AreEqual(PlayableCommandStatus.Applied,Type.GetMethod("BuildAt",Flags).Invoke(domain,args));
             var pending=View();Assert.False(pending.Vision.Sources.Any(s=>s.Position.Z==20));
@@ -399,7 +439,7 @@ namespace Spacewars.Tests.EditMode
             var probe=new NavPoint(0,20);Assert.False(foundation.Vision.IsVisible(probe));
             for(int i=0;i<601;i++)Call("Step",1d/30d);
             var ready=View();Assert.True(ready.Vision.IsVisible(probe));int center=ready.Buildings.Single(b=>b.Kind==PlayableBuildingKind.Outpost).Id;
-            Call("Damage",center,100000);Assert.False(View().Vision.IsVisible(probe));
+            Call("Damage",center,100000);WaitForLingeringVision();Assert.False(View().Vision.IsVisible(probe));
             var cells=View().Vision.DiscoveredCells.Count;Setup();Assert.Less(View().Vision.DiscoveredCells.Count,cells);
         }
         [Test] public void PublicBuildingRecordCannotRetainPrivateFieldsWhenDisabled()

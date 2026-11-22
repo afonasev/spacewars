@@ -15,7 +15,14 @@ namespace Spacewars.Simulation
             internal readonly T[] Values;
             internal readonly long Owner;
             internal Page(int length,int width,long owner):base(96L+(long)length*width){Values=new T[length];Owner=owner;physicalWidth=width;}
-            protected override void ReleaseEdges(){if(NavStoragePayload<T>.HasOwnership)foreach(var value in Values)NavStoragePayload<T>.Release(value);}
+            protected override void ReleaseEdges()
+            {
+                if(!NavStoragePayload<T>.HasOwnership)return;
+                // Unused reference slots have no edge. Keep value-type hooks:
+                // their embedded ownership cannot be inferred from default(T).
+                if(typeof(T).IsValueType){foreach(var value in Values)NavStoragePayload<T>.Release(value);}
+                else foreach(var value in Values)if(value!=null)NavStoragePayload<T>.Release(value);
+            }
         }
         internal sealed partial class Block : NavOwnedStorage
         {
@@ -69,7 +76,7 @@ namespace Spacewars.Simulation
                 int within=index&31;var page=(Page)block.Children[within];
                 if(page==null||page.Owner!=owner){
                     allocation.Reserve(96L+(long)length*width);var copy=new Page(length,width,owner);allocation.Register(copy);
-                    if(page!=null){for(int i=0;i<length;i++){var value=page.Values[i];NavStoragePayload<T>.Validate(value,copy);NavStoragePayload<T>.Retain(value);copy.Values[i]=value;}}else AllocatedPages++;SetChild(block,within,copy);page=copy;
+                    if(page!=null){bool references=!typeof(T).IsValueType;for(int i=0;i<length;i++){var value=page.Values[i];if(references&&value==null)continue;NavStoragePayload<T>.Validate(value,copy);NavStoragePayload<T>.Retain(value);copy.Values[i]=value;}}else AllocatedPages++;SetChild(block,within,copy);page=copy;
                 }
                 if(append){Count++;if(Count>Capacity)Capacity=Capacity==0?4:Capacity*2;}
                 return page;
@@ -77,7 +84,9 @@ namespace Spacewars.Simulation
         }
         // Growth forecasts include worst-case touched path plus page; allocation
         // callbacks remain the authority and may refuse before each allocation.
-        internal long WriteGrowthBytes(int length,int width)=>NavStorageLayout.Charge(352)*(depth+2)+NavStorageLayout.Charge(96L+(long)length*width);
+        internal static long FirstPageBytes(int length,int width)
+            =>NavStorageLayout.Charge(352)+NavStorageLayout.Charge(96L+(long)length*width);
+        internal long WriteGrowthBytes(int length,int width)=>checked(NavStorageLayout.Charge(352)*(depth+1)+FirstPageBytes(length,width));
         private bool released;
         public void Dispose(){if(released)return;released=true;Release();}
         internal override void ReleaseOwner()=>Dispose();

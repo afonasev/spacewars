@@ -1,0 +1,19 @@
+{
+  "id": "nuclear-warning-soft-v1",
+  "revision": 1,
+  "color": {"r": 1, "g": 0.385, "b": 0.34, "a": 1},
+  "outline": {"r": 0.045, "g": 0.025, "b": 0.025, "a": 0.9},
+  "centerOpacity": 0.045,
+  "edgeOpacity": 0.12,
+  "lipOpacity": 0.22,
+  "widthScale": 0.68,
+  "outlinePixels": 1.5,
+  "glowPixels": 4,
+  "glowOpacity": 0.16,
+  "innerWidth": 1.2,
+  "innerOpacity": 0.8,
+  "innerStart": 0.72,
+  "innerEnd": 0.06,
+  "dotPixels": 3,
+  "tickPixels": 8
+}

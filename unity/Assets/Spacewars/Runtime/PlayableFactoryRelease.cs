@@ -6,6 +6,7 @@ namespace Spacewars.Runtime
     {
         private NavPoint? GroundProductionEscape(NavUnit actor)
         {
+            if(units.TryGetValue(actor.Id,out var unit)&&Materializing(unit))return null;
             foreach(var b in buildings.Values)
             {
                 if(b.Kind!=PlayableBuildingKind.Factory||!b.Ready||b.Sale!=null||b.Orders.Count==0||b.LaunchPhase==FactoryReleaseRules.Closing)continue;
@@ -21,7 +22,7 @@ namespace Spacewars.Runtime
                     double along=x*Math.Cos(b.Heading)+z*Math.Sin(b.Heading);
                     if(actor.Moving||along< -actor.Radius||x*x+z*z>profile.DefaultRallyDistance*profile.DefaultRallyDistance)continue;
                 }
-                var parking=FactoryClearanceTarget(b,actor,exit);
+                var parking=FactoryClearanceTarget(b,actor,exit,radius);
                 if(parking.HasValue)
                 {
                     var delta=new NavPoint(parking.Value.X-actor.Position.X,parking.Value.Z-actor.Position.Z);
@@ -34,15 +35,17 @@ namespace Spacewars.Runtime
             }
             return null;
         }
-        private NavPoint? FactoryClearanceTarget(Building b,NavUnit actor,NavPoint exit)
+        private NavPoint? FactoryClearanceTarget(Building b,NavUnit actor,NavPoint exit,double corridorRadius)
         {
             // A square lattice is only a deterministic free-space preference,
             // not an assigned formation or a replacement for the unit's order.
             // Recompute from current occupancy: no transient parking intent to save.
             double largest=Math.Max(profile.TankCollisionRadius,Math.Max(profile.ExplorerCollisionRadius,profile.ShkvalCollisionRadius));
-            // Both settled actors may stop within arrival tolerance of their
-            // cells; include that envelope so the visible gap still survives.
-            double spacing=2*Math.Max(largest,actor.Radius)+profile.FactoryAssemblyGap+2*profile.Navigation.ArrivalTolerance;
+            // Leave room for both settled actors' arrival tolerances and
+            // for the full release corridor when the outgoing hull is wider.
+            double tolerance=profile.Navigation.ArrivalTolerance;
+            double spacing=Math.Max(2*Math.Max(largest,actor.Radius)+profile.FactoryAssemblyGap+2*tolerance,
+                corridorRadius+tolerance);
             double forwardX=Math.Cos(b.Heading),forwardZ=Math.Sin(b.Heading);
             int extent=(int)Math.Ceiling(Math.Sqrt(navigation.Crowd.Units.Count+1));
             NavPoint? best=null;double bestCost=double.PositiveInfinity;

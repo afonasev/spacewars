@@ -315,6 +315,14 @@ namespace Spacewars.Runtime
                 return Allocate(checked((int)stream.Length),reservation,stream.ToArray);
             }
         }
+        internal static bool MatchesWrite(byte[] expected,INavStorageReservation reservation,Action<BinaryWriter> write)
+        {
+            using(NavStorageScratch.Reserve(reservation,512))
+            using(var stream=new NavigationCaptureStream(reservation,expected)){
+                using(var writer=new BinaryWriter(stream,System.Text.Encoding.UTF8,true))write(writer);
+                return stream.Matches;
+            }
+        }
         internal static NavigationCaptureBytes CreateOwned(int length,NavigationRetentionBudget budget,Func<INavStorageReservation,byte[]> create)
         {
             if(budget==null||!budget.TryOpenScope(NavigationPreparationKind.Capture,0,0,out var scope))throw new InvalidOperationException("Capture output admission refused.");
@@ -365,7 +373,25 @@ namespace Spacewars.Runtime
         internal readonly INavStorageReservation Reservation;
         private IDisposable capacity,infrastructure;
         private readonly bool fixedBacking;
+        private readonly byte[] expected;
+        private int compared;
+        private bool mismatch;
+        internal bool Matches=>expected!=null&&!mismatch&&compared==expected.Length;
         internal NavigationCaptureStream(INavStorageReservation reservation){Reservation=reservation;}
+        internal NavigationCaptureStream(INavStorageReservation reservation,byte[] expected)
+        {
+            Reservation=reservation;
+            this.expected=expected??throw new ArgumentNullException(nameof(expected));
+        }
+        public override long Position
+        {
+            get=>expected==null?base.Position:compared;
+            set
+            {
+                if(expected!=null)throw new NotSupportedException("Capture comparison is forward-only.");
+                base.Position=value;
+            }
+        }
         // The caller's final NavigationCaptureBytes owner pays for the array.
         // The same 512-byte infrastructure allowance as Write covers the stream
         // and BinaryWriter; no capacity lease or ToArray copy is needed here.
@@ -383,8 +409,22 @@ namespace Spacewars.Runtime
             try{Capacity=next;}catch{admitted.Dispose();throw;}
             capacity?.Dispose();capacity=admitted;
         }
-        public override void Write(byte[] buffer,int offset,int count){Grow(count);base.Write(buffer,offset,count);}
-        public override void WriteByte(byte value){Grow(1);base.WriteByte(value);}
+        public override void Write(byte[] buffer,int offset,int count)
+        {
+            if(expected==null){Grow(count);base.Write(buffer,offset,count);return;}
+            var bytes=new ReadOnlySpan<byte>(buffer,offset,count);
+            int end=checked(compared+count);
+            if(end>WorldWire.MaxBytes)throw new ArgumentException("Capture wire cap exceeded.");
+            if(!mismatch&&(end>expected.Length||!bytes.SequenceEqual(expected.AsSpan(compared,count))))mismatch=true;
+            compared=end;
+        }
+        public override void WriteByte(byte value)
+        {
+            if(expected==null){Grow(1);base.WriteByte(value);return;}
+            if(compared>=WorldWire.MaxBytes)throw new ArgumentException("Capture wire cap exceeded.");
+            if(!mismatch&&(compared>=expected.Length||expected[compared]!=value))mismatch=true;
+            compared++;
+        }
         protected override void Dispose(bool disposing){base.Dispose(disposing);capacity?.Dispose();capacity=null;infrastructure?.Dispose();infrastructure=null;}
     }
 

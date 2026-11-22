@@ -35,6 +35,44 @@ namespace Spacewars.Tests.EditMode
             Assert.False(SameOrder(new PlayableAiAction(9,"player-1",profile.ProfileId,profile.Revision,72,1,PlayableCommandKind.AttackMove,new[]{1},point,siteId:77,seed:19092026,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity),Unit(true)),"The proposal generation must match the current owner binding.");
         }
 
+        [TestCase(PlayableCommandKind.Move,PlayableTacticalOrderKind.Move)]
+        [TestCase(PlayableCommandKind.AttackMove,PlayableTacticalOrderKind.AttackMove)]
+        public void LiveSpatialOrderUsesTheOriginalGoalAndSite(PlayableCommandKind kind,PlayableTacticalOrderKind tacticalKind)
+        {
+            var goal=new NavPoint(8,0);
+            var slot=new NavPoint(9,1);
+            var profile=PlayableProfile.Default;
+            var active=new PlayableQueuedOrderSnapshot(1,4,5,6,kind,new NavLocation(goal,NavLocation.FlatSurface),0,
+                aiActionId:42,commandSiteId:77);
+            PlayableAiAction Action(int site=77,NavPoint? target=null)=>new PlayableAiAction(9,"player-1",profile.ProfileId,
+                profile.Revision,71,1,kind,new[]{1},target??goal,siteId:site,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            PlayableEntitySnapshot Unit(bool viable)=>new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,
+                default,100,false,0,0,0,currentOrder:new PlayableTacticalOrderSnapshot(1,PlayableOwner.Player,71,5,10,tacticalKind,slot,0),
+                queue:new PlayableUnitQueueSnapshot(active,null,Array.Empty<PlayableQueuedOrderSnapshot>(),null,activeAiOrderViable:viable));
+
+            Assert.True(SameOrder(Action(),Unit(true),policy:AiDefensePlanner.Policy));
+            Assert.False(SameOrder(Action(site:78),Unit(true)));
+            Assert.False(SameOrder(Action(target:slot),Unit(true)));
+            Assert.False(SameOrder(Action(),Unit(false)),"A terminal or interrupted active route may be retried.");
+        }
+
+        [Test]
+        public void LiveAttackUsesTheEnemyIdentityAndAllowsReplacementAfterFailure()
+        {
+            var profile=PlayableProfile.Default;
+            var point=new NavPoint(8,0);
+            var active=new PlayableQueuedOrderSnapshot(1,4,5,6,PlayableCommandKind.Attack,null,77,aiActionId:42);
+            PlayableAiAction Action(int target)=>new PlayableAiAction(9,"player-1",profile.ProfileId,profile.Revision,71,1,
+                PlayableCommandKind.Attack,new[]{1},new NavPoint(10,0),targetId:target,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            PlayableEntitySnapshot Unit(bool viable)=>new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,
+                default,100,false,77,0,0,currentOrder:new PlayableTacticalOrderSnapshot(1,PlayableOwner.Player,71,5,10,PlayableTacticalOrderKind.Attack,point,77),
+                queue:new PlayableUnitQueueSnapshot(active,null,Array.Empty<PlayableQueuedOrderSnapshot>(),null,activeAiOrderViable:viable));
+
+            Assert.True(SameOrder(Action(77),Unit(true),policy:AiCombatMicroPolicy.Policy));
+            Assert.False(SameOrder(Action(78),Unit(true)));
+            Assert.False(SameOrder(Action(77),Unit(false)));
+        }
+
         private static PlayableAiOwnerCheckpoint Enemy(PlayableRuntime runtime)
         {
             var legacy=(PlayableAiOwnerCheckpoint)typeof(PlayableRuntime).GetProperty("EnemyAiCheckpoint",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(runtime);

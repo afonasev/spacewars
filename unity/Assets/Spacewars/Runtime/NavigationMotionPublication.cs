@@ -9,6 +9,7 @@ namespace Spacewars.Runtime
     // cursor/receipt/retirement storage. There is no caller allow/commit flag.
     internal interface INavigationMotionAuthority
     {
+        void ReconcilePendingSource(NavigationSession.MotionPublication publication);
         NavigationMotionAdoption Prepare(NavigationSession.MotionPublication publication);
     }
     internal abstract class NavigationMotionAdoption : IDisposable
@@ -20,6 +21,14 @@ namespace Spacewars.Runtime
         internal abstract void ApplyCommittedNoThrow();
         public abstract void Dispose();
     }
+    // This is a definitive denial of a single proposed physical receiver.
+    // Stale aggregate sources and denied work admission retain their own paths.
+    internal sealed class GroundMotionRefusal : InvalidOperationException
+    {
+        internal int Entity { get; }
+        internal GroundMotionRefusal(int entity,string message):base(message){Entity=entity;}
+    }
+
     public sealed partial class NavigationSession
     {
         internal sealed class MotionPublication : NavOwnedStorage
@@ -28,6 +37,7 @@ namespace Spacewars.Runtime
             private NavOwnedStorage carrier;
             private NavigationSession session;
             internal bool SourcesDestination;
+            internal NavMotionProofMemo ProofAfter,RetiredProof;
             internal NavigationMotionSource SelectedSource;internal NavigationMotionSources SourceBefore,SourceAfter,RetiredSources;
             internal MotionSourcePin AcceptSource()=>session.AcceptMotionSource(this);
             internal void SelectSource(MotionSourcePin pin)
@@ -38,27 +48,44 @@ namespace Spacewars.Runtime
             }
             internal NavMotionTranscript Transcript{get;private set;}
             internal readonly bool IncludesResults;
+            internal bool StationaryRetry=>session.stationaryGroundReceiver!=0;
             internal bool Committed{get;private set;}
             internal bool Aborted{get;private set;}
             private MotionPublication(bool results):base(Bytes)
             {IncludesResults=results;}
             internal static MotionPublication Create(NavigationSession session,NavOwnedStorage carrier,NavPreparedCrowdStep frame,long generation,long operation,bool results,INavStorageReservation r)
             {
-                var transcript=NavMotionTranscript.Create(frame,generation,operation,r);
+                using var heldQueries = frame.Working.ObserveHeldForQueries(session.physicalHostBudget.AllocationAdmission == null);
+                // Unbound receivers all publish the same immutable empty trace.
+                // Keep individual construction when a fixture observes allocation.
+                var transcript=NavMotionTranscript.Create(frame,generation,operation,r,session.motionProofMemo,
+                    shareEmptyTraces:session.physicalHostBudget.AllocationAdmission==null);
                 try{using(var a=new NavStorageAllocation(r.TryReserve)){
                     a.Reserve(Bytes);var result=a.Register(new MotionPublication(results));result.Retain();
-                    try{result.session=session;result.carrier=NavPhysicalMacro.Acquire(result,carrier);result.Transcript=NavPhysicalMacro.Acquire(result,transcript);return result;}catch{result.Release();throw;}
+                    try{result.session=session;result.carrier=NavPhysicalMacro.Acquire(result,carrier);result.Transcript=NavPhysicalMacro.Acquire(result,transcript);result.ProofAfter=NavMotionProofMemo.TryCreate(frame,transcript,r);return result;}catch{result.Release();throw;}
                 }}finally{transcript.Release();}
             }
             internal void MarkCommittedNoThrow(){Committed=true;}
             internal void MarkAbortedNoThrow(){Aborted=true;}
-            protected override void ReleaseEdges(){carrier?.Release();Transcript?.Release();SelectedSource?.Release();SourceBefore?.Release();if(SourcesDestination)SourceAfter?.Release();SourceAfter?.ReleaseOwner();RetiredSources?.Release();}
+            protected override void ReleaseEdges(){carrier?.Release();Transcript?.Release();ProofAfter?.Release();RetiredProof?.Release();SelectedSource?.Release();SourceBefore?.Release();if(SourcesDestination)SourceAfter?.Release();SourceAfter?.ReleaseOwner();RetiredSources?.Release();}
         }
+        private NavMotionProofMemo motionProofMemo;
+        internal long MotionProofHits{get;private set;}
+        internal void ClearMotionProofMemo(){var previous=motionProofMemo;motionProofMemo=null;previous?.Release();}
         private INavigationMotionAuthority motionAuthority;
         private int motionAuthorityThread,motionPhase;
         private MotionPublication unresolvedMotionPublication;
         private NavigationMotionAdoption unresolvedMotionAdoption;
         private Exception motionPublicationFailure;
+        internal bool MotionSourceContended{get;private set;}
+
+        private bool TryOpenMotionScope(long publication,out NavigationRetentionBudget.Scope scope)
+        {
+            bool admitted=physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out scope,null,out bool resolving);
+            MotionSourceContended|=resolving;
+            return admitted;
+        }
+
         internal void BindMotionAuthority(INavigationMotionAuthority authority)
         {
             AssertMotionQuiescent();if(motionAuthority!=null)throw new InvalidOperationException("Motion authority is already bound.");
@@ -70,11 +97,15 @@ namespace Spacewars.Runtime
         {if(motionPhase!=0)throw new InvalidOperationException("Navigation motion publication is not quiescent.");}
         private MotionPublication PrepareMotionPublication(NavOwnedStorage carrier,NavPreparedCrowdStep frame,long operation,bool results,NavigationRetentionBudget.Scope scope,out NavigationMotionAdoption adoption)
         {
+            using var phaseTiming=Spacewars.Simulation.PerformanceProfile.Measure(Spacewars.Simulation.ProfileStage.NavMotionPrepare);
             adoption=null;if(motionAuthority==null)return null;
             AssertMotionQuiescent();if(Thread.CurrentThread.ManagedThreadId!=motionAuthorityThread)throw new InvalidOperationException("Motion policy requires its owning Domain authority thread.");
             var publication=MotionPublication.Create(this,carrier,frame,Generation,operation,results,scope.OwnedReservation());
-            motionPhase=1;preparingMotion=publication;
             try{
+                // Retire incompatible work while Native is quiescent. The
+                // prepared frame still has to validate its current read set.
+                motionAuthority.ReconcilePendingSource(publication);
+                motionPhase=1;preparingMotion=publication;
                 adoption=motionAuthority.Prepare(publication)??throw new InvalidOperationException("Complete motion preadmission is unavailable.");
                 if(publication.SelectedSource==null)throw new InvalidOperationException("Motion adoption has no accepted Native input.");
                 publication.SourceBefore=NavPhysicalMacro.Acquire(publication,motionSources);
@@ -83,14 +114,17 @@ namespace Spacewars.Runtime
                 publication.SourceAfter.Retain();publication.SourcesDestination=true;
                 return publication;
             }
-            catch{preparingMotion=null;motionPhase=0;publication.MarkAbortedNoThrow();try{adoption?.Dispose();adoption=null;}finally{publication.Release();}throw;}
+            catch{
+                preparingMotion=null;motionPhase=0;publication.MarkAbortedNoThrow();try{adoption?.Dispose();adoption=null;}finally{publication.Release();}throw;}
             finally{preparingMotion=null;motionPhase=0;}
         }
         private void EnterMotionPublication(MotionPublication publication,NavigationMotionAdoption adoption)
         {
+            using var phaseTiming=Spacewars.Simulation.PerformanceProfile.Measure(Spacewars.Simulation.ProfileStage.NavMotionValidate);
             if(publication==null)return;AssertMotionQuiescent();
             if(Thread.CurrentThread.ManagedThreadId!=motionAuthorityThread||publication.Committed||publication.Aborted)throw new InvalidOperationException("Motion publication source/thread is stale.");
-            motionPhase=1;try{if(!ReferenceEquals(publication.SourceBefore,motionSources)||publication.SelectedSource.LivePins<1)throw new InvalidOperationException("Accepted Native source changed before publication.");adoption.ValidateCurrent();}catch{motionPhase=0;throw;}
+            motionPhase=1;try{if(!ReferenceEquals(publication.SourceBefore,motionSources)||publication.SelectedSource.LivePins<1)throw new InvalidOperationException("Accepted Native source changed before publication.");adoption.ValidateCurrent();}catch{
+                motionPhase=0;throw;}
         }
         private void BeginMotionWrite(MotionPublication publication)
         {if(publication!=null)motionPhase=2;}
@@ -98,6 +132,8 @@ namespace Spacewars.Runtime
         {
             if(publication==null)return;
             publication.RetiredSources=motionSources;motionSources=publication.SourceAfter;publication.SourcesDestination=false;
+            publication.RetiredProof=motionProofMemo;motionProofMemo=publication.ProofAfter;publication.ProofAfter=null;
+            MotionProofHits+=publication.Transcript.ReusedTails;
             publication.MarkCommittedNoThrow();
             try{adoption.ApplyCommittedNoThrow();motionPhase=0;}
             catch(Exception error){unresolvedMotionPublication=publication;unresolvedMotionAdoption=adoption;motionPublicationFailure=error;}
@@ -106,6 +142,7 @@ namespace Spacewars.Runtime
         {if(motionPublicationFailure!=null)throw new InvalidOperationException("Committed motion has an unresolved Runtime adoption.",motionPublicationFailure);}
         private void EndMotionPreparation(MotionPublication publication,NavigationMotionAdoption adoption)
         {
+            using var phaseTiming=Spacewars.Simulation.PerformanceProfile.Measure(Spacewars.Simulation.ProfileStage.NavMotionRelease);
             // External releases happen after the entire Native+Runtime install.
             // A post-write contradiction remains a blocked owning obligation.
             if(publication==null)return;

@@ -47,10 +47,38 @@ namespace Spacewars.Simulation
             for(int i=0;i<3;i++)
             {
                 if(height==1||radius==0)fraction=Math.Min(fraction,Mesh(i).Segment(Local(a,i),Local(b,i),radius/scale,0,0,1));
-                else foreach(var part in Mesh(i).Parts)foreach(var triangle in part.Triangles)
-                    fraction=Math.Min(fraction,WorldTriangle(triangle,i).Sweep(new V(a.X,a.Y,a.Z),new V(b.X,b.Y,b.Z),radius));
+                else
+                {
+                    var localA=Local(a,i);
+                    var localB=Local(b,i);
+                    var worldA=new V(a.X,a.Y,a.Z);
+                    var worldB=new V(b.X,b.Y,b.Z);
+                    // Inverse construction scaling expands a sphere into an
+                    // ellipsoid. Its longest radius bounds every local axis.
+                    // The padding covers contact tolerance and transform rounding.
+                    double padding=(1+Math.Sqrt(localA.Length2)+Math.Sqrt(localB.Length2))*1e-7;
+                    double bound=radius/(scale*height)+padding;
+                    foreach(var part in Mesh(i).Parts)
+                        SweepConstruction(part.Tree,part,i,localA,localB,bound,worldA,worldB,radius,ref fraction);
+                }
             }
             contact=double.IsPositiveInfinity(fraction)?b:new BallisticPoint(a.X+(b.X-a.X)*fraction,a.Y+(b.Y-a.Y)*fraction,a.Z+(b.Z-a.Z)*fraction);return !double.IsPositiveInfinity(fraction);
+        }
+        private void SweepConstruction(CombatNode node,CombatPart part,int root,V localA,V localB,double bound,
+            V worldA,V worldB,double radius,ref double fraction)
+        {
+            if(!node.Segment(localA,localB,bound))return;
+            if(node.Left!=null)
+            {
+                SweepConstruction(node.Left,part,root,localA,localB,bound,worldA,worldB,radius,ref fraction);
+                SweepConstruction(node.Right,part,root,localA,localB,bound,worldA,worldB,radius,ref fraction);
+                return;
+            }
+            for(int i=node.Start;i<node.Start+node.Count;i++)
+            {
+                var triangle=WorldTriangle(part.Triangles[part.Order[i]],root);
+                fraction=Math.Min(fraction,triangle.Sweep(worldA,worldB,radius));
+            }
         }
         CombatTriangle WorldTriangle(CombatTriangle t,int part)
         {

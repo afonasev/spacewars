@@ -48,6 +48,87 @@ namespace Spacewars.Tests.EditMode
                 Assert.AreEqual(1,restored.AppliedResults);Assert.AreEqual(position,restored.Crowd.Units.Single().Position,"Navigation preparation never advances physical motion/time.");
             }finally{restored?.ReleaseCommittedHostRoot();s.ReleaseCommittedHostRoot();}
         }
+        [Test] public void RotatedPendingRequestsRestoreInQueueOrderAndUseTheirOriginalSpineLeader()
+        {
+            var profile=PlayableProfile.RecastGroupCorridorDefault;
+            var map=profile.AuthoredMap;
+            var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);
+            var leaderStart=new NavPoint(-31,-46);
+            var leaderGoal=new NavPoint(-46,-46);
+            var source=new NavigationSession(81,geometry,profile.Navigation,null,map){UsesRecastGroundRoutes=true};
+            var restored=new NavigationSession(81,geometry,profile.Navigation,null,map){UsesRecastGroundRoutes=true};
+            try{
+                source.ConfigureMarch(4,profile.Revision);
+                restored.ConfigureMarch(4,profile.Revision);
+                source.Crowd.Add(1,leaderStart,.72,2,4.5,canYield:true);
+                source.Crowd.Add(2,new NavPoint(-31,-43),.72,4,4.5,canYield:true);
+                Assert.True(source.MoveGroup(new[]{1,2},new[]{leaderGoal,new NavPoint(-46,-43)}));
+                var requests=source.Requests.CopyItems();
+                Assert.AreEqual(2,requests.Length);
+                Assert.True(source.Requests.TryRotateOwnedHead(requests[0]));
+                using var state=source.CaptureOwnedState();
+                var bytes=WorldWire.Pack(w=>WorldWire.Write(w,state));
+                using var saved=WorldWire.Unpack(bytes,WorldWire.ReadNavigationSessionState);
+                restored.RestoreState(saved);
+                using(var immediate=restored.CaptureOwnedState())
+                    CollectionAssert.AreEqual(bytes,WorldWire.Pack(w=>WorldWire.Write(w,immediate)));
+                CollectionAssert.AreEqual(new[]{2,1},restored.Requests.CopyItems().Select(r=>r.Entity).ToArray());
+                using(var host=new UnityHostRouteService()){
+                    var binding=new PlayableRouteBinding(geometry,profile,restored.Admission,restored.RoutePort);
+                    for(int i=0;i<200&&restored.AppliedResults<2;i++){host.Service(binding,8);restored.ApplyResults();}
+                }
+                Assert.AreEqual(2,restored.AppliedResults);
+                var spine=restored.InstalledExecutionFor(1).Corridor.RecastPlan.Spine;
+                Assert.AreSame(spine,restored.InstalledExecutionFor(2).Corridor.RecastPlan.Spine);
+                Assert.AreEqual(leaderStart,spine.Legs.First().From.Position);
+                Assert.AreEqual(leaderGoal,spine.Legs.Last().To.Position);
+            }finally{
+                restored.DestroyNavigationAuthority();
+                source.DestroyNavigationAuthority();
+            }
+        }
+
+        [Test] public void MovingDetachedRecastMotorRestoresWhileReplacementGroupWaits()
+        {
+            var profile=PlayableProfile.RecastGroupCorridorDefault;
+            var source=RecastSharedSpineTests.Ready(out var geometry);
+            NavigationSession restored=null;
+            try{
+                source.Step(1d/30);
+                var actor=source.Crowd.Units.Single(u=>u.Id==1);
+                long request=actor.InstalledRequest,group=actor.InstalledGroupId;
+                Assert.True(actor.Moving);
+                Assert.AreEqual(request,source.GroupFor(1).Members.Single(m=>m.Entity==1).Recast.Request);
+
+                Assert.True(source.MoveGroup(new[]{1},new[]{new NavPoint(-40,-48)}));
+                Assert.True(source.IsPending(1));
+                Assert.True(actor.Moving);
+                Assert.AreEqual(request,actor.InstalledRequest);
+                Assert.AreEqual(group,actor.InstalledGroupId);
+                Assert.AreNotEqual(group,source.GroupFor(1).GroupId);
+                Assert.Zero(source.GroupFor(1).Members.Single().Recast.Request);
+
+                using var state=source.CaptureOwnedState();
+                Assert.True(state.InstalledExecutions.Single(e=>e.Entity==1).Detached);
+                var bytes=WorldWire.Pack(w=>WorldWire.Write(w,state));
+                using var saved=WorldWire.Unpack(bytes,WorldWire.ReadNavigationSessionState);
+                restored=new NavigationSession(81,geometry,profile.Navigation,null,profile.AuthoredMap){UsesRecastGroundRoutes=true};
+                restored.ConfigureMarch(4,profile.Revision);
+                restored.RestoreState(saved);
+
+                using(var immediate=restored.CaptureOwnedState())
+                    CollectionAssert.AreEqual(bytes,WorldWire.Pack(w=>WorldWire.Write(w,immediate)));
+                source.Step(1d/30);
+                restored.Step(1d/30);
+                using var hot=source.CaptureOwnedState();
+                using var cold=restored.CaptureOwnedState();
+                CollectionAssert.AreEqual(WorldWire.Pack(w=>WorldWire.Write(w,hot)),WorldWire.Pack(w=>WorldWire.Write(w,cold)));
+            }finally{
+                restored?.DestroyNavigationAuthority();
+                source.DestroyNavigationAuthority();
+            }
+        }
+
         [Test] public void StaleProfileKnowledgeClearanceAndGeometryBindingsAreRejected()
         {
             var s=RecastSharedSpineTests.Ready(out _);try{

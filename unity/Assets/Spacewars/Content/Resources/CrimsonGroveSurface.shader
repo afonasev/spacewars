@@ -6,7 +6,7 @@ Shader "Spacewars/CrimsonGroveSurface" {
  _RockTex("Rock",2D)="gray" {} _RockTexB("Rock B",2D)="gray" {} _RockTexC("Rock C",2D)="gray" {}
  _EarthVariantGain("Earth calibration",Vector)=(1,1,1,.135) _RockVariantGain("Rock calibration",Vector)=(1,1,1,.136)
  _Detail("Tile patch blend contrast",Vector)=(5,23,.06,.7)
- _SurfaceMask("Foot distance and worn routes",2D)="red" {}
+ _SurfaceMask("Foot distance, worn routes, bedrock and exposed road",2D)="red" {}
  _ConcreteTex("Concrete",2D)="gray" {} _ConcreteTexB("Concrete B",2D)="gray" {} _ConcreteTexC("Concrete C",2D)="gray" {}
  _ConcreteVariantGain("Concrete calibration",Vector)=(1,1,1,.385)
  _GroundFinish("Macro scale contrast road value foot reach",Vector)=(18,.22,.37,3)
@@ -55,7 +55,7 @@ Shader "Spacewars/CrimsonGroveSurface" {
  patch+=float2(noise(patch*.73+17),noise(patch*.81+47))-.5;
  float3 scores=float3(noise(patch+17),noise(patch+53),noise(patch+91));float peak=max(scores.x,max(scores.y,scores.z));float3 w=smoothstep(peak-_Detail.z,peak,scores);w/=max(dot(w,1),.0001);
  float2 plane=abs(n.y)>.5?v.p.xz:abs(n.x)>abs(n.z)?v.p.zy:v.p.xy;float2 uv=plane/_Detail.x;
- float2 mapUV=v.p.xz/(2*_FogBounds.xy)+.5;float2 mask=SAMPLE_TEXTURE2D(_SurfaceMask,sampler_SurfaceMask,mapUV).rg;
+ float2 mapUV=v.p.xz/(2*_FogBounds.xy)+.5;float4 mask=SAMPLE_TEXTURE2D(_SurfaceMask,sampler_SurfaceMask,mapUV);
  float3 detail=_Role<.5?FAMILY(Earth,sampler_EarthTex,uv,w):FAMILY(Rock,sampler_RockTex,uv,w);
  float3 albedo=_BaseColor.rgb;float macro=noise(v.p.xz/_GroundFinish.x+13);
  if(_Role<.5){
@@ -65,9 +65,7 @@ Shader "Spacewars/CrimsonGroveSurface" {
   // operate at independent scales; the upper/lower distinction stays legible.
   float2 broad=v.p.xz/_GroundFinish.x;
   broad+=float2(noise(broad*.8+31),noise(broad*.7+59))*.7;
-  float deposit=noise(broad+71)*.75+noise(broad*2.1+17)*.25;
-  float grainEdge=(noise(v.p.xz*.8+97)-.5)*.075;
-  float bed=smoothstep(1-_Geology.x-.018,1-_Geology.x+.018,deposit+grainEdge);
+  float bed=mask.b;
   float3 dry=albedo*lerp(1,1.18,upper)*(1+_GroundFinish.y*(macro-.5)*2);
   float soilGrain=dot(detail,float3(.2126,.7152,.0722));
   dry*=lerp(1,clamp(soilGrain,.55,1.6),_Detail.w);
@@ -81,13 +79,10 @@ Shader "Spacewars/CrimsonGroveSurface" {
   float sheet=smoothstep(.46,.64,noise(broad*.7+113));
   dry=lerp(dry,lerp(albedo*1.22,_MineralTint.rgb*1.12,upper),sheet*_Geology.y);
   // Old road fragments emerge through irregular blankets of ground material.
-  float burial=noise(v.p.xz/_Deposits.y+19)*.7+noise(v.p.xz/(_Deposits.y*.32)+43)*.3;
-  float exposed=smoothstep(_Deposits.x-.08,_Deposits.x+.12,burial);
-  float road=mask.g*exposed;
   float3 oldRoad=_RoadTint.rgb*lerp(.7,1.25,noise(v.p.xz/.8+29));
   oldRoad*=lerp(.85,1.1,clamp(soilGrain,.4,1.6));
   oldRoad*=1-fractures(v.p.xz/3)*.26;
-  albedo=lerp(dry,oldRoad,road*.85);
+  albedo=lerp(dry,oldRoad,mask.a);
   float dust=(1-smoothstep(0,_GroundFinish.w,mask.r*8))*lerp(.25,1,noise(v.p.xz/3+31));
   albedo=lerp(albedo,_MineralTint.rgb*.72,dust*.42);
   // Jittered nearest stones with independent radius and tint avoid a visible grid.

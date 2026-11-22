@@ -40,6 +40,171 @@ namespace Spacewars.Tests.EditMode
             b.Targets=new[]{Target(90,score:1)};board=AiTeamCoordinator.Resolve(new[]{a,b},AiProfile.Initial);Assert.AreEqual(90,board["b"].TargetId);Assert.False(board["b"].Helping);
             a.Targets=new[]{Target(91)};board=AiTeamCoordinator.Resolve(new[]{a,b},AiProfile.Initial);Assert.Zero(board["b"].TargetId);StringAssert.Contains("unreachable",board["b"].Reason);
         }
+        [TestCase(true)]
+        [TestCase(false)]
+        public void VictoryBoardUsesOneRollAndCoordinatesACommonCenterOrIndependentDirections(bool commonCenter)
+        {
+            var a=Publication("a",tick:100);
+            var b=Publication("b",tick:100);
+            var outsider=Publication("outsider",team:7,tick:100);
+            AiVictoryEpisode Episode(int target,double eta,double force)=>new AiVictoryEpisode{
+                Team=7,Target=target,Kind=PlayableRouteTargetKind.VisibleEnemy,Since=20,Roll=123,Attempt=95,Ready=100,
+                Bids=new[]{new AiVictoryBid{Team=7,Target=target,Kind=PlayableRouteTargetKind.VisibleEnemy,Tick=100,
+                    Force=force,AntiAir=26,Eta=eta,Contacts=new[]{(91,50d,true)}}}};
+            double force=commonCenter?80:125;
+            a.MinimumVictoryForce=b.MinimumVictoryForce=100;
+            a.Victory=Episode(90,7,force);
+            b.Victory=Episode(commonCenter?90:92,2,force);
+            if(!commonCenter)
+                foreach(var p in new[]{a,b})p.Victory.Bids[0].AntiAir=50;
+
+            var board=AiTeamCoordinator.Resolve(new[]{b,outsider,a},AiProfile.Initial);
+            Assert.AreEqual(90,board["a"].Victory.Target);
+            Assert.AreEqual(commonCenter?90:92,board["b"].Victory.Target);
+            Assert.AreEqual(310,board["a"].Victory.Arrival);
+            Assert.AreEqual(310,board["b"].Victory.Arrival);
+            Assert.AreEqual(123,board["a"].VictoryDraws[7].Roll);
+            Assert.AreEqual(123,board["b"].VictoryDraws[7].Roll);
+            Assert.IsNull(board["outsider"].Victory);
+            Assert.AreEqual(commonCenter?1:0,board["a"].Victory.Partners.Length);
+
+            if(commonCenter)
+            {
+                b.Victory.Bids[0].AntiAir=0;
+                Assert.IsNull(AiTeamCoordinator.Resolve(new[]{a,b},AiProfile.Initial)["a"].Victory);
+            }
+        }
+
+        [TestCase(false, PlayableRouteTargetKind.VisibleEnemy)]
+        [TestCase(true, PlayableRouteTargetKind.PublicObjective)]
+        public void DepartedArmyReassessesTheSameTeamAfterDefenseOrCenterLoss(bool eligible,
+            PlayableRouteTargetKind resumedKind)
+        {
+            var episode = new AiVictoryEpisode
+            {
+                Team = 2, Target = 90, Kind = PlayableRouteTargetKind.VisibleEnemy,
+                Since = 20, Roll = 123, Attempt = 95, Ready = 200, Departure = 200
+            };
+            var profile = PlayableProfile.Default;
+            var ai = AiProfile.Initial;
+            var next = new AiVictoryBid
+            {
+                Team = 2, Target = 92, Kind = resumedKind, Tick = 350,
+                Force = 1000, Contacts = Array.Empty<(int, double, bool)>()
+            };
+            var pauseBids = eligible ? Array.Empty<AiVictoryBid>() : new[] { next };
+            Assert.IsNull(episode.Review(Combat(tick: 300), profile, ai, AiPersonality.Aggressive,
+                pauseBids, null, false, eligible));
+            Assert.IsEmpty(episode.Bids);
+            Assert.IsFalse(episode.WaitingToDepart(null, 300));
+
+            using var stream = new System.IO.MemoryStream();
+            using var writer = new System.IO.BinaryWriter(stream);
+            episode.Write(writer);
+            writer.Flush();
+            stream.Position = 0;
+            using var reader = new System.IO.BinaryReader(stream);
+            var restored = new AiVictoryEpisode();
+            restored.Read(reader, 300);
+            Assert.IsTrue(restored.Pursuing);
+            Assert.AreEqual(123, restored.Roll);
+            Assert.AreEqual(200, restored.Ready);
+
+            next.Fortifications = 1000;
+            Assert.IsNull(restored.Review(Combat(tick: 350), profile, ai, AiPersonality.Aggressive,
+                new[] { next }, null, false, true));
+            next.Fortifications = 0;
+            Assert.AreSame(next, restored.Review(Combat(tick: 351), profile, ai, AiPersonality.Aggressive,
+                new[] { next }, null, false, true));
+            Assert.AreEqual(92, restored.Target);
+            Assert.AreEqual(resumedKind, restored.Kind);
+            Assert.AreEqual(351, restored.Departure);
+            Assert.AreEqual(123, restored.Roll);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void VictorySearchRequiresObservedCenterAndKeepsApproachWhileTargetBecomesVisible(bool remembered)
+        {
+            var p = PlayableProfile.Default;
+            var ai = AiProfile.Initial;
+            const int siteId = 2, centerId = 90;
+            var center = new NavPoint(26, 0);
+            var approach = new NavPoint(20, 0);
+            var site = new TerritorySite(siteId, PlayableBuildingKind.Headquarters, center, Array.Empty<TerritorySlot>());
+            var objective = new PlayablePublicScoutObjective(siteId, approach, PlayablePublicScoutObjectiveRole.PossibleEnemyStart, true);
+            var area = new AiIntelEnvelope(siteId, new[] { new VisionSource(center, 4) });
+            var roster = new[] { new OfflineParticipant("ai-0", 1, 1, OfflineControl.Ai),
+                new OfflineParticipant("other", 2, 2, OfflineControl.Ai) };
+
+            PlayableAiObservation Observe(long tick, bool revealed = false, bool empty = false, bool moving = false)
+            {
+                var units = Enumerable.Range(1, 6).Select(id =>
+                    new PlayableEntitySnapshot(id, PlayableOwner.Player, PlayableEntityKind.Tank, new NavPoint(0, id),
+                        p.TankHealth, moving, 0, 0, 0, moving?
+                            new PlayableTacticalOrderSnapshot(id, PlayableOwner.Player, 71, 100, 100,
+                                PlayableTacticalOrderKind.AttackMove, approach, 0):null)).ToArray();
+                var vision = new PlayableVision(1, 100, 100, 1, 1);
+                vision.Refresh(new[] { new VisionSource(default, 15),
+                    new VisionSource(revealed ? center : default, revealed ? 5 : 1) }, Array.Empty<KnownBuilding>());
+                var routes = revealed ? Array.Empty<PlayableRouteProof>() : units.Select(u =>
+                    new PlayableRouteProof(u.Id, u.Owner, 71, tick, 1, u.Position, p.TankCollisionRadius,
+                        PlayableRouteTargetKind.PublicObjective, siteId, approach, approach, new[] { approach })).ToArray();
+                var buildings = revealed&&!empty ? new[] { new PlayableBuildingSnapshot(centerId, PlayableOwner.Enemy,
+                    PlayableBuildingKind.Headquarters, center, p.HeadquartersHealth, 1, 0, 0, default, siteId:siteId) }
+                    : Array.Empty<PlayableBuildingSnapshot>();
+                var sites = revealed ? new[] { new TerritorySiteSnapshot(site, null,
+                    empty?(PlayableOwner?)null:PlayableOwner.Enemy, 1, false, empty?0:centerId, !empty) }
+                    : Array.Empty<TerritorySiteSnapshot>();
+                return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId, p.Revision, 71, 7,
+                    tick, tick, RuntimeStatus.Running, false, PlayableMatchOutcome.Playing, 1000, null,
+                    units, buildings, Array.Empty<PlayableProjectileSnapshot>(), new PlayableRuntimeMetrics(0,0,0,0,0),
+                    null, sites:sites, vision:vision.Snapshot(), publicScoutObjectives:new[] { objective }, routeProofs:routes,
+                    ownerId:"ai-0", team:1, participants:roster, activeProfile:p, intelEnvelopes:new[] { area }));
+            }
+            var o = Observe(120);
+            var memory = new AiKnowledgeState(o.OwnerId, o.Generation, o.Tick, remembered?
+                new[] { new AiKnownContact(centerId, PlayableOwner.Enemy, true, (int)PlayableBuildingKind.Headquarters,
+                    center, p.HeadquartersHealth, 90, 0.9, false) }:Array.Empty<AiKnownContact>(), Array.Empty<AiVisitedArea>());
+            var planner = new AiArmyPlanner(o.OwnerId, o.Generation) { Knowledge = memory };
+            var flank = new AiArmyPlanner(o.OwnerId, o.Generation, AiArmyPlanner.FlankPolicy);
+            var registry = new AiArmyRegistry(o.OwnerId, o.Generation, ai, AiDifficulty.Fighter);
+            var bids = planner.VictoryBids(o, p, ai, registry, -1, flank);
+            var episode = new AiVictoryEpisode();
+            Assert.IsNull(episode.Review(o, p, ai, AiPersonality.Aggressive, bids, null, false, true));
+            if(!remembered)
+            {
+                Assert.IsEmpty(bids);
+                Assert.AreEqual(-1, episode.Team);
+                return;
+            }
+            Assert.AreEqual(2, episode.Team);
+            var latest = Observe(1000);
+            var ready = planner.VictoryBids(latest, p, ai, registry, 2, flank);
+            var bid = episode.Review(latest, p, ai, AiPersonality.Aggressive, ready, null, false, true);
+            Assert.NotNull(bid);
+            Assert.True(bid.RememberedCenter);
+            Assert.AreEqual(120, episode.Since);
+            var action = planner.ProposeVictory(latest, ai, registry, bid);
+            Assert.NotNull(action);
+            Assert.AreEqual(PlayableCommandKind.AttackMove, action.Kind);
+            Assert.AreEqual(0, action.TargetId);
+            Assert.AreEqual(siteId, action.SiteId);
+            planner.CommitVictory(latest, action, registry, bid, episode);
+            planner.ObserveReceipt(new PlayableAiTraceRecord(latest.Identity, action.ActionId, 1000, 1, 1000,
+                PlayableAiDeliveryStatus.Applied, PlayableCommandStatus.Applied, "Installed", latest.OwnerId,
+                action.SourceIdentity, new AiReceiptIdentity(71, latest.OwnerId, 1, 1), AiArmyPlanner.Policy,
+                PlayableCommandKind.AttackMove));
+
+            var revealed = Observe(1010, revealed:true, moving:true);
+            Assert.IsNull(planner.ProposeVictoryRecall(revealed, ai, registry, Array.Empty<AiVictoryBid>()));
+            var adverse = new AiVictoryBid { Team=2, Target=centerId, Kind=PlayableRouteTargetKind.VisibleEnemy,
+                Force=1, Contacts=Array.Empty<(int Id, double Force, bool Air)>() };
+            Assert.AreEqual(PlayableCommandKind.Stop, planner.ProposeVictoryRecall(revealed, ai, registry, new[] { adverse }).Kind);
+            var empty = Observe(1011, revealed:true, empty:true, moving:true);
+            Assert.AreEqual(PlayableCommandKind.Stop, planner.ProposeVictoryRecall(empty, ai, registry, Array.Empty<AiVictoryBid>()).Kind);
+        }
+
         [TestCase("1,2")][TestCase("1,2,3")][TestCase("1,2,3,4")][TestCase("1,1,2,2")]
         [TestCase("1,1,2,2,3,3")][TestCase("1,2,2,3,3,3")][TestCase("1,2,3,4,5,6,7,8")]
         public void AuthoredModeMatrixUsesRealHostAndOwnerLocalCommands(string teams)
@@ -102,7 +267,10 @@ namespace Spacewars.Tests.EditMode
             var roster=new[]{new OfflineParticipant("ai-0",1,1,OfflineControl.Ai),new OfflineParticipant("ai-1",2,1,OfflineControl.Ai),new OfflineParticipant("human-2",3,2,OfflineControl.Human),new OfflineParticipant("human-3",4,3,OfflineControl.Human)};
             int seed=Enumerable.Range(1,10000).First(n=>Enumerable.Range(0,2).All(i=>PlayableAiOpeningComposition.Initialize(n,"ai-"+i,aiProfile:AiProfile.Initial).Opening==PlayableAiOpening.BlindRush));
             var basis=map.Configuration(p,seed,roster);var costs=new double[8,8];for(int i=0;i<8;i++)for(int j=0;j<8;j++)costs[i,j]=basis.RouteCost(i,j);
-            var units=Enumerable.Range(0,2).SelectMany(owner=>Enumerable.Range(0,5).Select(i=>new OfflineScenarioUnit(owner+1,PlayableEntityKind.Tank,new NavPoint(-4-i*2,owner==0?-2:2))))
+            // The selected rush can field a mixed first wave. Supply combat
+            // Explorers as well as the separate scout within this short fixture.
+            var units=Enumerable.Range(0,2).SelectMany(owner=>Enumerable.Range(0,5).Select(i=>
+                    new OfflineScenarioUnit(owner+1,i<3?PlayableEntityKind.Tank:PlayableEntityKind.Explorer,new NavPoint(-4-i*2,owner==0?-2:2))))
                 .Concat(new[]{new OfflineScenarioUnit(3,PlayableEntityKind.Tank,new NavPoint(7,0)),new OfflineScenarioUnit(4,PlayableEntityKind.Tank,new NavPoint(7,8))}).ToArray();
             var buildings=Enumerable.Range(0,2).SelectMany(i=>new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Refinery}.Select((kind,slot)=>new OfflineScenarioBuilding(i+1,kind,i+1,slot+1,basis.Sites[i].Slots[slot].Position,basis.Sites[i].Slots[slot].Heading))).ToArray();
             var c=new OfflineMatchConfiguration(p,basis.SourceIdentity,basis.MapIdentity,basis.RouteProvenance,seed,roster,basis.Starts.ToArray(),basis.Sites.ToArray(),basis.Obstacles.ToArray(),costs,scenario:units,terrain:map.Id,scenarioBuildings:buildings);

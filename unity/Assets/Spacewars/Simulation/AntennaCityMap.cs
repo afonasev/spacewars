@@ -5,7 +5,7 @@ namespace Spacewars.Simulation
 {
     [Serializable] public sealed class AntennaCityProfileData
     {
-        public string id="antenna-city-greybox-v1"; public int revision=4;
+        public string id="antenna-city-greybox-v1"; public int revision=9;
         public double scale=1, plazaHeight=4, blockHeight=6;
         public double mainStreetWidth=16,sideStreetWidth=12,baseYardRadius=18,outpostYardRadius=14,mineYardRadius=6,blockGap=6,districtPassageWidth=16;
         public double keyPointPadScale=.85,keyPointPadBorder=.8;
@@ -66,7 +66,7 @@ namespace Spacewars.Simulation
                 boundary.Add(new NavObstacle(new NavPolygon(new[]{PointAt(i*60,170),PointAt((i+1)*60,170),PointAt((i+1)*60,340),PointAt(i*60,340)}),-2,0));
             }
             blocks.Add(new NavObstacle(new NavPolygon(Enumerable.Range(0,3).Select(i=>PointAt(-90+120*i,14))),0,BlockHeight));
-            Supports=supports.AsReadOnly();Blocks=blocks.AsReadOnly();Boundary=boundary.AsReadOnly();Solids=blocks.Concat(boundary).ToArray();
+            Supports=supports.AsReadOnly();Blocks=blocks.AsReadOnly();Boundary=boundary.AsReadOnly();Solids=Array.AsReadOnly(blocks.Concat(boundary).ToArray());
             var links=new List<NavSurfaceTransition>();for(int i=0;i<supports.Count;i++)for(int j=i+1;j<supports.Count;j++)links.Add(new NavSurfaceTransition(supports[i].SurfaceId+"~"+supports[j].SurfaceId,supports[i].SurfaceId,supports[j].SurfaceId));
             var partition=new TerrainLocations(new NavGeometry(HalfExtent,Solids.ToArray(),Revision),Supports,links);
             var blockers=Solids.ToList();const double epsilon=.0001; // Numerical seam thickness; no gameplay clearance tuning.
@@ -100,7 +100,7 @@ namespace Spacewars.Simulation
             if(roster==null||roster.Length<2||roster.Length>6)throw new ArgumentException("Antenna City requires two to six participants");
             var starts=Enumerable.Range(0,6).Select(i=>{var home=Headquarters((PlayableOwner)i);return new OfflineStart("city-"+(i+1),i+1,home,PointAt(-120+60*i,106),Math.Atan2(-home.Z,-home.X));}).ToArray();
             // Ordinary lobby assigns peripheral seats by team grouping/seed, not fake route costs.
-            return new OfflineMatchConfiguration(p,Id,Id,"antenna-city-f3-wide-passages",seed,roster,starts,Sites(p),MovementBlockers.ToArray(),new double[6,6],terrain:Id);
+            return new OfflineMatchConfiguration(p,Id,Id,"antenna-city-f6-station-workshop",seed,roster,starts,Sites(p),MovementBlockers.ToArray(),new double[6,6],terrain:Id);
         }
     }
 }

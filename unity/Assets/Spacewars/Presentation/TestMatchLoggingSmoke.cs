@@ -18,12 +18,20 @@ namespace Spacewars.Presentation
         {
             if(!NativeSilentStartup.IsSilent)throw new InvalidOperationException("Automated logging smoke must start muted");
             if(TestMatchLogSession.CurrentDirectory==null){UnityEngine.Debug.LogError("TEST_MATCH_LOG_SMOKE_FAIL startup factory missing");Application.Quit(2);yield break;}
+            var store=NativeBalanceStore.ForApplication(PlayableBootstrap.LoadNormalProfile(),
+                Path.Combine(TestMatchLogSession.CurrentDirectory,"smoke-balance.json"));
+            if(!store.HasActive){UnityEngine.Debug.LogError("TEST_MATCH_LOG_SMOKE_FAIL "+store.Problem);Application.Quit(2);yield break;}
+            UnityEngine.Debug.Log("TEST_MATCH_LOG_SMOKE_PROFILE "+store.ActiveIdentity);
             for(int mode=0;mode<2;mode++){
-                using(var runtime=new PlayableRuntime(PlayableProfile.Default,mode+1,7,humanControlledPlayer:mode==0,spectator:mode==1))
+                var setup=new NativeLobbyConfiguration{HasExplicitSeed=true,ExplicitSeed=7};
+                setup.InitializeParticipants();
+                if(mode==1)foreach(var participant in setup.Participants)participant.Human=false;
+                var profile=PlayableBootstrap.ComposeLobbyProfile(store.Active,setup);
+                using(var runtime=PlayableRuntime.CreateLobbyMatch(profile,mode+1,setup,aiProfile:store.ActiveAiProfile))
                 using(var routes=new UnityHostRouteService()){
-                    if(mode==0){var id=runtime.Latest.Entities.First(e=>e.Owner==PlayableOwner.Player).Id;runtime.TrySubmit(new PlayableCommand(mode+1,1,"player-1",PlayableCommandKind.Hold,new[]{id}));}
+                    if(mode==0){var view=runtime.ParticipantView("player-1");var id=view.Entities.First(e=>e.Owner==view.Owner).Id;runtime.TrySubmit(new PlayableCommand(mode+1,1,"player-1",PlayableCommandKind.Hold,new[]{id}));}
                     double until=Time.realtimeSinceStartupAsDouble+20;
-                    while(runtime.Latest.Tick<45&&Time.realtimeSinceStartupAsDouble<until){routes.Service(runtime,64);yield return null;}
+                    while(runtime.Latest.Tick<45&&Time.realtimeSinceStartupAsDouble<until){routes.Service(runtime,profile.NavigationRequestsPerFrame);yield return null;}
                     if(runtime.Latest.Tick<45||runtime.Latest.Failure!=null){UnityEngine.Debug.LogError("TEST_MATCH_LOG_SMOKE_FAIL runtime "+runtime.Latest.Failure);Application.Quit(2);yield break;}
                     runtime.RequestStop();while(!runtime.IsStopped&&Time.realtimeSinceStartupAsDouble<until)yield return null;
                     if(!runtime.IsStopped){UnityEngine.Debug.LogError("TEST_MATCH_LOG_SMOKE_FAIL stop timeout");Application.Quit(2);yield break;}

@@ -42,12 +42,15 @@ namespace Spacewars.Presentation
             matchNotification.style.right=(float)data.notificationBottomPixels;
             matchNotification.style.bottom=frameBottom;
         }
-        private void FocusMatchNotification(bool previous)
+        private void FocusMatchNotification(bool fromGamepad)
         {
-            if(BotCameraLocked)return;
+            if(BotSeat)return;
             if(!SignalPerspectiveActive||view==null||cameraView==null||chatOpen||paused||MenuOwnsInput||ResultsVisible||inLobby||preparing||signalWheelOpen||PadAuxiliaryWheel||battleGestures.Mode=="buildingWheel"||!localInputFocused||input?.HasFocus!=true)return;
-            var point=matchNotifications.Focus(previous,Time.unscaledTimeAsDouble,profile);if(!point.HasValue)return;
-            var center=Ground(SeatScreenCenter);cameraView.transform.position+=new Vector3((float)(point.Value.X-center.X),0,(float)(point.Value.Z-center.Z));
+            var point = fromGamepad
+                ? matchNotifications.FocusNextGamepadEvent()
+                : matchNotifications.Focus(false,Time.unscaledTimeAsDouble,profile);
+            if (!point.HasValue) return;
+            var center=Ground(SeatScreenCenter);PanCameraManually(new Vector3((float)(point.Value.X-center.X),0,(float)(point.Value.Z-center.Z)));
             padCursorGround=Ground(SeatScreenCenter);battleCursor=SeatScreenCenter;
         }
     }

@@ -38,7 +38,7 @@ namespace Spacewars.Tests.EditMode
         [Test] public void QuietGuardUsesOwnedMineAndCurrentStateRoundtripsExactly()
         {
             var o=View();var r=Registry();var p=new AiArmyPlanner(o.OwnerId,o.Generation);p.Rebind(P);
-            var a=p.ProposePositioning(o,P,AiProfile.Initial,r);Assert.NotNull(a);Assert.AreEqual(PlayableCommandKind.Move,a.Kind);Assert.AreEqual(61,a.ParentId);
+            var a=p.ProposePositioning(o,P,AiProfile.Initial,r);Assert.NotNull(a);Assert.AreEqual(PlayableCommandKind.AttackMove,a.Kind);Assert.AreEqual(61,a.ParentId);
             p.Commit(o,a,r);Assert.AreEqual(PlayableRouteTargetKind.FriendlyAnchor,p.Capture().TargetKind);Assert.AreEqual(AiArmyRole.MobileDefense,r.Capture().Armies.Single().Role);
             byte[] Bytes(AiArmyPlanner planner){using(var m=new MemoryStream()){using(var w=new BinaryWriter(m,System.Text.Encoding.UTF8,true))planner.WriteState(w);return m.ToArray();}}
             var before=Bytes(p);var restoredRegistry=AiArmyRegistry.Restore(r.Capture(),AiProfile.Initial,AiDifficulty.Fighter,o.Tick);
@@ -82,6 +82,60 @@ namespace Spacewars.Tests.EditMode
             var opening=PlayableAiOpeningComposition.Initialize(7,o.OwnerId,forcedOpening:PlayableAiOpening.BlindRush);
             var attack=p.Propose(ready,opening,P,AiProfile.Initial,r);Assert.NotNull(attack);Assert.AreEqual(PlayableCommandKind.Attack,attack.Kind);p.Commit(ready,attack,r);
             Assert.AreEqual(AiArmyRole.Attack,r.Capture().Armies.Single(g=>g.Phase!=AiArmyPhase.Disbanded).Role);r.AssertInvariants();
+        }
+        [Test]
+        public void MidgameGuardArrivalsKeepDistinctMineAndRelayAssignments()
+        {
+            var original=View(tanks:6);var registry=Registry();
+            var planner=new AiArmyPlanner(original.OwnerId,original.Generation){DeployTerritorially=true};planner.Rebind(P);
+            var relay=new TerritorySite(7,PlayableBuildingKind.RelayTower,new NavPoint(26,8),P);
+            var objective=new PlayablePublicScoutObjective(relay.Id,new NavPoint(24,8),PlayablePublicScoutObjectiveRole.Relay,true);
+            PlayableAiObservation Observe(long tick,PlayableEntitySnapshot[] units,bool known)
+            {
+                var proofs=original.RouteProofs.Where(r=>r.Kind==PlayableRouteTargetKind.FriendlyAnchor)
+                    .Select(r=>new PlayableRouteProof(r.UnitId,r.Owner,r.Generation,tick,r.GeometryRevision,units.Single(u=>u.Id==r.UnitId).Position,
+                        r.Radius,r.Kind,r.TargetId,r.Target,r.Goal,r.Path.ToArray()))
+                    .Concat(units.Select(u=>new PlayableRouteProof(u.Id,u.Owner,original.Generation,tick,1,u.Position,P.TankCollisionRadius,
+                        PlayableRouteTargetKind.TerritorialPosition,relay.Id,objective.Approach,objective.Approach,new[]{objective.Approach}))).ToArray();
+                var sites=known?new[]{new TerritorySiteSnapshot(relay,original.Owner,original.Owner,1,false,0,true)}:Array.Empty<TerritorySiteSnapshot>();
+                return PlayableAiObservation.From(new PlayableSnapshot(P.ProfileId,P.Revision,original.Generation,original.Seed,tick,tick,
+                    RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,original.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),
+                    new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:sites,vision:original.Vision,publicScoutObjectives:new[]{objective},routeProofs:proofs,activeProfile:P));
+            }
+            Assert.False(Observe(10,original.Entities.ToArray(),false).RouteProofs.Any(r=>r.Kind==PlayableRouteTargetKind.TerritorialPosition));
+            var seen=Observe(10,original.Entities.ToArray(),true);
+            var first=planner.ProposePositioning(seen,P,AiProfile.Initial,registry);
+            Assert.NotNull(first);Assert.AreEqual(3,first.EntityIds.Count);
+            planner.Commit(seen,first,registry);
+            Assert.False(planner.AllowAutomaticReinforcement);
+            var initial=planner.Capture();var receipt=new PlayableAiTraceRecord(seen.Identity,first.ActionId,10,5,10,
+                PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"allocated guard arrival",seen.OwnerId,first.SourceIdentity,
+                new AiReceiptIdentity(seen.Generation,seen.OwnerId,1,1),AiArmyPlanner.Policy,PlayableCommandKind.Move);
+            planner.ObserveReceipt(receipt);
+            var arrived=original.Entities.Select((u,i)=>!first.EntityIds.Contains(u.Id)?u:
+                new PlayableEntitySnapshot(u.Id,u.Owner,u.Kind,new NavPoint(first.Target.X,first.Target.Z+2+i),u.Health,false,0,0,0,
+                    navigationOutcome:NavigationOutcome.Arrived,orderStamp:new PlayableOrderStamp(u.Id,u.Owner,seen.Generation,1,5,10,
+                        PlayableOrderOrigin.Ai,PlayableCommandKind.Move,first.SourceIdentity,first.ActionId,first.ActionId))).ToArray();
+            var next=Observe(20,arrived,true);
+            planner.Observe(next,registry,AiProfile.Initial,new[]{receipt},allowsPressure:false);
+            Assert.False(planner.Active,"Formation slots around the goal should finish the deployment.");
+            var second=planner.ProposePositioning(next,P,AiProfile.Initial,registry);
+            Assert.NotNull(second);Assert.AreNotEqual(first.Target,second.Target);
+            CollectionAssert.IsEmpty(first.EntityIds.Intersect(second.EntityIds));
+            planner.Commit(next,second,registry);
+            CollectionAssert.AreEquivalent(new[]{PlayableRouteTargetKind.FriendlyAnchor,PlayableRouteTargetKind.TerritorialPosition},
+                new[]{initial.TargetKind,planner.Capture().TargetKind});
+            Assert.AreEqual(2,registry.Capture().Armies.Count(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded));
+            using var bytes=new MemoryStream();
+            using(var writer=new BinaryWriter(bytes,System.Text.Encoding.UTF8,true))planner.WriteState(writer);
+            bytes.Position=0;
+            var restored=new AiArmyPlanner(next.OwnerId,next.Generation){DeployTerritorially=true};
+            restored.Rebind(P);
+            using(var reader=new BinaryReader(bytes,System.Text.Encoding.UTF8,true))
+                restored.ReadState(reader,next.Tick,AiArmyRegistry.Restore(registry.Capture(),AiProfile.Initial,AiDifficulty.Fighter,next.Tick));
+            CollectionAssert.AreEqual(new[]{planner.Capture().TargetKind},new[]{restored.Capture().TargetKind});
+            Assert.AreEqual(planner.Capture().Target,restored.Capture().Target);
+            registry.AssertInvariants();
         }
         [Test] public void SafeAirOpeningCanLaunchAfterItsHangarAndIncomeAreReady()
         {

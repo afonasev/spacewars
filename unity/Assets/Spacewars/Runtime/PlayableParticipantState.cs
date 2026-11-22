@@ -1,15 +1,38 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Spacewars.Simulation;
 namespace Spacewars.Runtime
 {
+    public readonly struct AiDefeat
+    {
+        public long Tick { get; }
+        public int Slot { get; }
+        public int LivingPopulation { get; }
+        public int Opponents { get; }
+        public bool LostHeadquarters { get; }
+
+        internal AiDefeat(long tick,int slot,int livingPopulation,int opponents,bool lostHeadquarters)
+        {
+            Tick=tick;
+            Slot=slot;
+            LivingPopulation=livingPopulation;
+            Opponents=opponents;
+            LostHeadquarters=lostHeadquarters;
+        }
+    }
+
     internal sealed partial class PlayableDomain
     {
         private readonly OfflineMatchConfiguration offline;
         private readonly Dictionary<PlayableOwner,double> ownerCredits=new Dictionary<PlayableOwner,double>();
         private readonly Dictionary<PlayableOwner,long> offlineSequences=new Dictionary<PlayableOwner,long>();
         private readonly HashSet<PlayableOwner> eliminated=new HashSet<PlayableOwner>();
+        private IReadOnlyList<AiDefeat> aiDefeats=Array.Empty<AiDefeat>();
+        private readonly Dictionary<PlayableOwner,PlayableBuildingKind> lastRemovedCenter=
+            new Dictionary<PlayableOwner,PlayableBuildingKind>();
+        internal IReadOnlyList<AiDefeat> AiDefeats=>Volatile.Read(ref aiDefeats);
         internal int? WinnerTeam{get;private set;}
         private IEnumerable<PlayableOwner> Owners=>offline==null?new[]{PlayableOwner.Player,PlayableOwner.Enemy}:Enumerable.Range(0,offline.Roster.Count).Select(i=>(PlayableOwner)i);
         private void ResynchronizeTankMobility(PlayableOwner owner)
@@ -55,7 +78,7 @@ namespace Spacewars.Runtime
                 s.Site.Kind==PlayableBuildingKind.RelayTower?PlayablePublicScoutObjectiveRole.Relay:s.Site.Kind!=PlayableBuildingKind.Outpost?PlayablePublicScoutObjectiveRole.ExpansionIncome:PlayablePublicScoutObjectiveRole.ExpansionOutpost,true))).ToArray();
         private NavObstacle[] StaticObstacles()=>RelayObstacles().Concat(OrdinaryStaticObstacles()).ToArray();
         private NavObstacle[] OrdinaryStaticObstacles()=>offline==null?PlayableMap.StaticObstacles(profile):offline.CampaignOpening&&!campaignGate?offline.Obstacles.Concat(new[]{CampaignReconOpening.Gate}).ToArray():offline.Obstacles.ToArray();
-        private NavObstacle[] SolidObstacles()=>offline==null||profile.AuthoredMap!=null?PlayableMap.SolidObstacles(profile):offline.Obstacles.ToArray();
+        private IReadOnlyList<NavObstacle> SolidObstacles()=>profile.AuthoredMap?.Solids??offline?.Obstacles??PlayableMap.StaticObstacles(profile);
         internal PlayableDomain(PlayableProfile profile,long generation,OfflineMatchConfiguration configuration):this(profile,generation,false,false,null,configuration){}
         internal IReadOnlyList<string> EliminatedOwners=>eliminated.OrderBy(x=>(int)x).Select(x=>offline==null?(x==PlayableOwner.Player?PlayerId:"enemy-1"):offline.Roster[(int)x].Id).ToArray();
         private void MaterializeOffline()
@@ -76,14 +99,48 @@ namespace Spacewars.Runtime
         {
             if(offline.ProvingGround!=null)return;
             if(offline.CampaignOpening){AdvanceCampaignOpening();return;}
-            foreach(var owner in Owners.Where(x=>!eliminated.Contains(x)).ToArray())if(!buildings.Values.Any(b=>b.Owner==owner&&TerritoryRules.Center(b.Kind)&&b.Phase!=ConstructionPhase.Pending)){
-                eliminated.Add(owner);RecordPlayerExit(owner,false);
-                foreach(var u in units.Values.Where(u=>u.Owner==owner)){tacticalQueues.Remove(u.Id);InvalidateSpatialCompletion(u.Id);InterruptBurst(u);u.Target=0;u.ExplicitTarget=false;u.HasAttackMove=false;u.CurrentOrder=null;navigation.Stop(u.Id,true);}
-                foreach(var b in buildings.Values.Where(b=>b.Owner==owner).ToArray()){b.Repair=null;b.Orders.Clear();b.RepeatTank=false;if(b.Phase==ConstructionPhase.Pending)RemoveBuilding(b,false);}
-                research.Remove(owner);ResynchronizeTankMobility(owner);foreach(var key in centerDamage.Keys.ToArray())if(centerDamage[key].Owner==owner||!units.ContainsKey(centerDamage[key].AttackerId))centerDamage.Remove(key);
-                foreach(var site in sites.Values)if(site.Claimant==owner){site.Claimant=null;site.Progress=0;if(site.Locked==owner)site.Locked=null;}
+            foreach(var owner in Owners.Where(x=>!eliminated.Contains(x)).ToArray())
+                if(!buildings.Values.Any(b=>b.Owner==owner&&TerritoryRules.Center(b.Kind)&&b.Phase!=ConstructionPhase.Pending))
+                    EliminateOwner(owner,false);
+            UpdateSurvivingTeams();
+        }
+
+        internal bool Surrender(string ownerId)
+        {
+            if(Outcome!=PlayableMatchOutcome.Playing||offline==null||offline.CampaignOpening||offline.ProvingGround!=null||
+                !TryOwner(ownerId,out var owner)||eliminated.Contains(owner)||offline.Roster[(int)owner].Control!=OfflineControl.Human)return true;
+
+            var ownedBuildings=buildings.Values.Where(building=>building.Owner==owner).ToArray();
+            if(ownedBuildings.Any(building=>building.Phase!=ConstructionPhase.Pending)&&
+                !TryRebuildGeometry(removals:ownedBuildings))return false;
+            foreach(var building in ownedBuildings)RemoveBuilding(building,false);
+            EliminateOwner(owner,true);
+            UpdateSurvivingTeams();
+            if(Outcome!=PlayableMatchOutcome.Playing)FreezeResult();
+            return true;
+        }
+
+        private void EliminateOwner(PlayableOwner owner,bool surrendered)
+        {
+            eliminated.Add(owner);RecordPlayerExit(owner,surrendered);
+            if(offline.Roster[(int)owner].Control==OfflineControl.Ai)
+            {
+                int living=units.Values.Where(u=>u.Owner==owner).Sum(u=>PlayableUnitRules.Population(profile,u.Kind));
+                int opponents=offline.Roster.Count(p=>p.Team!=TeamOf(owner));
+                bool lostHeadquarters=lastRemovedCenter.TryGetValue(owner,out var center)&&center==PlayableBuildingKind.Headquarters;
+                var defeat=new AiDefeat(Tick,(int)owner,living,opponents,lostHeadquarters);
+                Volatile.Write(ref aiDefeats,Array.AsReadOnly(aiDefeats.Append(defeat).ToArray()));
             }
+            foreach(var u in units.Values.Where(u=>u.Owner==owner)){tacticalQueues.Remove(u.Id);InvalidateSpatialCompletion(u.Id);InterruptBurst(u);u.Target=0;u.ExplicitTarget=false;u.HasAttackMove=false;u.CurrentOrder=null;navigation.Stop(u.Id,true);}
+            foreach(var b in buildings.Values.Where(b=>b.Owner==owner).ToArray()){b.Repair=null;b.Orders.Clear();b.RepeatTank=false;if(b.Phase==ConstructionPhase.Pending)RemoveBuilding(b,false);}
+            research.Remove(owner);ResynchronizeTankMobility(owner);foreach(var key in centerDamage.Keys.ToArray())if(centerDamage[key].Owner==owner||!units.ContainsKey(centerDamage[key].AttackerId))centerDamage.Remove(key);
+            foreach(var site in sites.Values)if(site.Claimant==owner){site.Claimant=null;site.Progress=0;if(site.Locked==owner)site.Locked=null;}
+        }
+
+        private void UpdateSurvivingTeams()
+        {
             var teams=Owners.Where(x=>!eliminated.Contains(x)).Select(TeamOf).Distinct().ToArray();
+            if(DominationEnabled){NeutralizeEliminatedTeams(teams);UpdateDominationLead();}
             if(teams.Length==1&&offline.Roster.Select(x=>x.Team).Distinct().Count()>1){WinnerTeam=teams[0];Outcome=PlayableMatchOutcome.TeamWon;}
         }
     }

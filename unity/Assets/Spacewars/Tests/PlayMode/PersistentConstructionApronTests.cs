@@ -24,6 +24,52 @@ public sealed class PersistentConstructionApronTests
     }
     [TearDown] public void Cleanup(){world.Dispose();UnityEngine.Object.DestroyImmediate(host);}
     private Transform Pad(string key)=>host.GetComponentsInChildren<Transform>().Single(t=>t.name=="Site pad "+key);
+    [UnityTest] public IEnumerator BasaltMinePadsFaceNearestEdgeAndStayAlignedThroughVisibilityChanges()
+    {
+        world.Dispose();
+        var folder=Path.GetFullPath("../.local/basalt-mine-pad-facing");Directory.CreateDirectory(folder);
+        var release=new NativeBalanceStore(PlayableProfile.Default,Path.Combine(folder,"balance.json"),false,startOnRelease:true).Active;
+        var map=new BasaltCrownMap();profile=PlayableProfile.Create(release.CopyData(),map);
+        Debug.Log("Basalt mine facing profile: "+profile.ProfileId+" / "+profile.Revision);
+        world=new PlayableWorld(host.transform,profile);world.SetPresentationLayer(8);world.Fog.ShowPublic();
+        yield return world.Preparation;
+        var mines=map.Sites(profile).Where(s=>s.Kind==PlayableBuildingKind.Mine).ToArray();Assert.AreEqual(4,mines.Length);
+        PlayableSnapshot View(int mode)=>new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,++tick,tick,
+            RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,null,Array.Empty<PlayableEntitySnapshot>(),
+            mode==3?mines.Select(s=>Building(100+s.Id,s.Kind,s.Position,s.Id,0)).ToArray():Array.Empty<PlayableBuildingSnapshot>(),
+            Array.Empty<PlayableProjectileSnapshot>(),null,null,
+            sites:mode==1||mode==3?mines.Select(s=>new TerritorySiteSnapshot(s,null,null,0,false,mode==3?100+s.Id:0,mode==3)).ToArray():null,
+            discoveredSites:mode==2?mines:null,publicSites:mode==0?mines:null);
+        var vacant=View(0);world.RenderSites(vacant,camera);
+        var image=new RenderTexture(1600,1200,24);image.Create();camera.targetTexture=image;
+        try
+        {
+            camera.orthographicSize=11;
+            for(int i=0;i<mines.Length;i++)
+            {
+                camera.rect=new Rect((i%2)*.5f,(i/2)*.5f,.5f,.5f);
+                var focus=world.Point(mines[i].Position);
+                camera.transform.position=focus+new Vector3(0,40,-.01f);camera.transform.LookAt(focus,Vector3.forward);
+                camera.Render();
+            }
+            var png=new Texture2D(image.width,image.height,TextureFormat.RGB24,false);var previous=RenderTexture.active;
+            try{RenderTexture.active=image;png.ReadPixels(new Rect(0,0,image.width,image.height),0,0);png.Apply();File.WriteAllBytes(Path.Combine(folder,"mine-pads.png"),png.EncodeToPNG());}
+            finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(png);}
+        }
+        finally{camera.rect=new Rect(0,0,1,1);camera.targetTexture=null;image.Release();UnityEngine.Object.DestroyImmediate(image);}
+        foreach(int mode in new[]{0,1,2,3})foreach(float yaw in new[]{0f,73f,155f})
+        {
+            camera.transform.rotation=Quaternion.Euler(45,yaw,0);var view=View(mode);world.RenderSites(view,camera);
+            if(mode==3)Actors(view);
+            foreach(var site in mines)
+            {
+                var expected=Math.Abs(site.Position.X)>Math.Abs(site.Position.Z)
+                    ?new Vector3(-(float)Math.Sign(site.Position.X),0,0):new Vector3(0,0,-(float)Math.Sign(site.Position.Z));
+                Assert.That(Vector3.Dot(Pad(site.Id+":0").forward,expected),Is.GreaterThan(.9999f),"site "+site.Id+", visibility "+mode);
+                if(mode==3)Assert.Less(Quaternion.Angle(Pad(site.Id+":0").rotation,world.Actors[100+site.Id].Hull.rotation),.001f);
+            }
+        }
+    }
     private PlayableSnapshot SceneView(bool occupied,bool upgraded=false)
     {
         var sites=new[]{
@@ -93,6 +139,61 @@ public sealed class PersistentConstructionApronTests
             var material=pad.GetComponentInChildren<MeshRenderer>().sharedMaterial;Assert.AreEqual("Spacewars/ConstructionApron",material.shader.name);Assert.IsTrue(material.shader.isSupported);Assert.AreSame(world.Fog.Texture,material.GetTexture("_FogMask"));
         }
     }
+    [Test] public void PlayerRendersOnlyPublicCentralApronsInUndiscoveredFog()
+    {
+        world.Dispose();
+        profile=PlayableProfile.Create(profile.CopyData(),new AiTestMap());
+        world=new PlayableWorld(host.transform,profile);
+        world.SetPresentationLayer(8);
+        var sites=SceneView(false).Sites.Select(state=>state.Site).ToArray();
+        var vision=new PlayableVision(0,profile.ArenaHalfExtent,profile.ArenaHalfExtent,profile.VisionCellSize,profile.FogEdgeFeather);
+        vision.Refresh(Array.Empty<VisionSource>(),Array.Empty<KnownBuilding>());
+        var view=new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,++tick,tick,
+            RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,null,Array.Empty<PlayableEntitySnapshot>(),
+            Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),null,null,
+            vision:vision.Snapshot(),publicSites:sites);
+        world.Fog.Reset();
+        world.Fog.Update(view.Vision,1);
+        world.RenderSites(view,camera);
+
+        var target=new RenderTexture(800,640,24);
+        var image=new Texture2D(800,640,TextureFormat.RGB24,false);
+        var previous=RenderTexture.active;
+        try
+        {
+            camera.targetTexture=target;
+            camera.Render();
+            RenderTexture.active=target;
+            image.ReadPixels(new Rect(0,0,800,640),0,0);
+            image.Apply();
+            string path=Path.GetFullPath("../.local/public-construction-pads-in-fog/field.png");
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllBytes(path,image.EncodeToPNG());
+        }
+        finally
+        {
+            RenderTexture.active=previous;
+            camera.targetTexture=null;
+            UnityEngine.Object.DestroyImmediate(image);
+            UnityEngine.Object.DestroyImmediate(target);
+        }
+
+        Assert.IsEmpty(view.DiscoveredSites);
+        Assert.IsEmpty(view.Sites);
+        Assert.AreEqual(sites.Length,PlayableMapView.Marks(view).Count);
+        Assert.AreEqual(sites.Length,host.GetComponentsInChildren<Transform>().Count(t=>t.name.StartsWith("Site pad ")));
+        foreach(var site in sites)
+        {
+            var pad=Pad(site.Id+":0");
+            Assert.AreEqual(world.Point(site.Position),pad.position);
+            var block=new MaterialPropertyBlock();
+            pad.Find("Technical apron").GetComponent<MeshRenderer>().GetPropertyBlock(block);
+            Assert.AreEqual((float)profile.FogExploredOpacity,block.GetFloat("_FogLimit"));
+            Assert.Zero(pad.Find("Capture").GetComponent<MeshFilter>().sharedMesh.vertexCount);
+            Assert.IsNull(pad.Find("Mine reserve"));
+        }
+    }
+
     [UnityTest] public IEnumerator ChildApronsWaitForObservedReadyCenterAndRememberOnlyObservedReadiness()
     {
         foreach(var kind in new[]{PlayableBuildingKind.Headquarters,PlayableBuildingKind.Outpost})

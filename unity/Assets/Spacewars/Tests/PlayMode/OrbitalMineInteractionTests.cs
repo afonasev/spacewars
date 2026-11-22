@@ -21,8 +21,9 @@ namespace Spacewars.Input.Tests
             var initial=Get<PlayableSnapshot>(seat,"view");var domain=typeof(PlayableRuntime).GetField("domain",F).GetValue(Runtime);var type=domain.GetType();
             type.GetMethod("CreditOrbital",F).Invoke(domain,new object[]{(PlayableOwner?)initial.Owner,Get<PlayableSnapshot>(other,"view").Owner,250d});
             Runtime.RequestPause(false);yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").Orbital.PendingLevel==1,"mine choice");Assert.True((bool)Call(seat,"OpenOrbital",false));
+            Put(seat,"orbitalFocus",1);Call(seat,"RefreshOrbitalMenu");
             yield return Capture("mine-choice-grid",captureWidth:1600,captureHeight:1000,captureChecks:()=>{
-                var stats=Get<VisualElement>(seat,"orbitalCards").Q("orbital-choice-2").Q("orbital-choice-stats");
+                var stats=Get<VisualElement>(seat,"root").Q("orbital-choice-details").Q("orbital-choice-stats");
                 foreach(var cell in stats.Children())foreach(var label in cell.Query<Label>().ToList())Assert.LessOrEqual(label.MeasureTextSize(label.text,0,VisualElement.MeasureMode.Undefined,0,VisualElement.MeasureMode.Undefined).x,cell.worldBound.width+1,"mine stat must fit its cell: "+label.text);
                 Inside(Get<VisualElement>(seat,"root").worldBound,stats.worldBound,"mine stats grid");
             });

@@ -19,7 +19,61 @@ namespace Spacewars.Presentation
                 var local=new EnvironmentDetails.Builder();local.Box(Vector3.zero,new Vector3(width,(z-a).magnitude,width),c);
                 var mesh=local.Mesh("Yard member");b.Append(mesh,Matrix4x4.TRS((a+z)*.5f,Quaternion.FromToRotation(Vector3.up,z-a),Vector3.one));UnityEngine.Object.Destroy(mesh);
             }
-            if(kind=="HeavyTractorWreck")
+            if(kind=="BankPump"||kind=="MineWorkModule")
+            {
+                var graphite=new Color(.31f,.37f,.40f);
+                void Pipe(Vector3 start,Vector3 end,float radius,Color tint)
+                {
+                    var span=end-start;
+                    var turn=Quaternion.FromToRotation(Vector3.up,span);
+                    int sides=tier==0?12:tier==1?8:6;
+                    Vector3 Rim(int index)
+                    {
+                        float a=index*Mathf.PI*2/sides;
+                        return turn*new Vector3(Mathf.Cos(a)*radius,0,Mathf.Sin(a)*radius);
+                    }
+                    for(int i=0;i<sides;i++)
+                    {
+                        var p=start+Rim(i);var q=start+Rim((i+1)%sides);
+                        var r=q+span;var s=p+span;
+                        b.Triangle(p,r,q,tint);b.Triangle(p,s,r,tint);
+                        b.Triangle(s,end,r,tint);b.Triangle(p,q,start,tint);
+                    }
+                }
+                // Both silhouettes stay within their authored ground pockets.
+                Box(0,.10f,0,2.46f,.20f,1.46f,Dark);
+                if(kind=="BankPump")
+                {
+                    Box(-.35f,.51f,0,1.46f,.62f,1.14f,graphite);
+                    Box(-.35f,.84f,0,1.50f,.12f,1.18f,Metal);
+                    Pipe(new Vector3(.30f,.52f,0),new Vector3(.94f,.52f,0),.20f,Metal);
+                    Pipe(new Vector3(.94f,.52f,0),new Vector3(.94f,.52f,.59f),.20f,Metal);
+                    Pipe(new Vector3(.94f,.52f,.52f),new Vector3(.94f,.52f,.64f),.27f,graphite);
+                    Box(-.35f,.75f,-.58f,1.19f,.07f,.035f,Amber);
+                    if(tier<2)
+                    {
+                        Box(-.35f,.47f,-.58f,1.10f,.30f,.04f,Dark);
+                        int count=tier==0?7:3;
+                        for(int i=0;i<count;i++)Box(-.82f+i*.94f/(count-1),.47f,-.61f,.04f,.26f,.025f,Metal);
+                    }
+                }
+                else
+                {
+                    Box(-.37f,.71f,0,1.57f,1.02f,1.16f,graphite);
+                    Box(-.37f,1.25f,0,1.62f,.12f,1.20f,Metal);
+                    Box(.75f,.42f,0,.86f,.44f,.95f,graphite);
+                    Box(.75f,.67f,0,.87f,.11f,.97f,Metal);
+                    Box(-.36f,1.10f,-.59f,1.31f,.07f,.035f,Amber);
+                    Pipe(new Vector3(.42f,.64f,-.39f),new Vector3(1.14f,.64f,-.39f),.10f,Metal);
+                    if(tier<2)
+                    {
+                        Box(-.38f,.66f,-.60f,1.05f,.61f,.04f,Dark);
+                        int count=tier==0?7:3;
+                        for(int i=0;i<count;i++)Box(-.38f,.42f+i*.48f/(count-1),-.63f,.98f,.035f,.025f,Metal);
+                    }
+                }
+            }
+            else if(kind=="HeavyTractorWreck")
             {
                 // Broad low track pods, rear glazed cab and forward blade read as a
                 // parked quarry dozer even when its tread links are subpixel.

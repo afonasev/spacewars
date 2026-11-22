@@ -74,14 +74,19 @@ public sealed class PlayableTerritoryPadTests
         var frame=(PlayableSpectatorFrame)Call("SpectatorSnapshot",1L,RuntimeStatus.Running,true,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
         var player=frame.Perspective(PlayableOwner.Player);var overview=frame.Overview;
         Assert.AreEqual(player.Tick,overview.Tick);
-        var unseen=overview.Sites.First(s=>s.Site.Kind!=PlayableBuildingKind.RelayTower&&!player.DiscoveredSites.Any(p=>p.Id==s.Site.Id));
+        var unseen=overview.Sites.First(s=>s.Ready&&s.Site.Slots.Count>0&&
+            player.PublicSites.Any(p=>p.Id==s.Site.Id)&&!player.DiscoveredSites.Any(p=>p.Id==s.Site.Id));
+        string center=unseen.Site.Id+":0",child=unseen.Site.Id+":"+unseen.Site.Slots[0].Id;
         world.Fog.ShowPublic();world.SetPresentationLayer(8);world.RenderSites(player);yield return null;
-        Assert.IsNull(Pad(unseen.Site.Id+":0"));CaptureSpectatorPad(unseen.Site.Position,"player-before.png",false);
+        AssertVisible(Pad(center),8);Assert.IsNull(Pad(child));
         world.RenderSites(overview);yield return null;
         foreach(var site in overview.Sites.Where(s=>s.Site.Kind!=PlayableBuildingKind.RelayTower))AssertVisible(Pad(site.Site.Id+":0"),8);
+        AssertVisible(Pad(child),8);
         CaptureSpectatorPad(unseen.Site.Position,"spectator-overview.png",true);
         world.RenderSites(player);yield return null;
-        Assert.IsNull(Pad(unseen.Site.Id+":0"),"Switching back must retain player geography restrictions at the same paused tick.");
+        AssertVisible(Pad(center),8);
+        Assert.IsNull(Pad(child),"Switching back must not retain hidden readiness from the overview.");
+        Assert.Zero(Pad(center).Find("Capture").GetComponent<MeshFilter>().sharedMesh.vertexCount);
     }
     private void CaptureSpectatorPad(NavPoint point,string name,bool expectPad)
     {

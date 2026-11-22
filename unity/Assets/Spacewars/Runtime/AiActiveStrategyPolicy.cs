@@ -90,6 +90,15 @@ namespace Spacewars.Runtime
             }
             return power;
         }
+        internal static double CompatibleResistance(PlayableAiObservation o,PlayableProfile p,AiProfile ai,PlayableEntitySnapshot[] members,NavPoint point)
+        {
+            var local=o.Entities.Where(e=>e.Health>0&&o.IsHostile(e.Owner)&&AiOpponentSelector.Distance(e.Position,point)<=p.TankVisionRange).ToArray();
+            var compatible=local.Where(e=>members.Any(u=>AiRosterCatalog.Initial.Targets(e.Kind,u.Kind==PlayableEntityKind.Hawk?"air":"ground"))).ToArray();
+            // Unanswered hostile weapons remain a threat even when the larger
+            // army has a higher aggregate ground damage estimate.
+            double unanswered=Force(compatible.Where(e=>!members.Any(u=>AiRosterCatalog.Initial.Targets(u.Kind,e.Kind==PlayableEntityKind.Hawk?"air":"ground"))).ToArray(),p,ai);
+            return Force(compatible,p,ai)+unanswered;
+        }
         internal static bool ViableApproach(PlayableAiObservation o,PlayableProfile p,AiProfile ai,PlayableEntitySnapshot[] units,int target,NavPoint point,PlayableRouteTargetKind kind,AiKnowledgeState knowledge=null,IReadOnlyDictionary<string,long> memo=null)
         {
             double fortification=FortificationPower(o,p,ai,units,target,point,knowledge,memo);

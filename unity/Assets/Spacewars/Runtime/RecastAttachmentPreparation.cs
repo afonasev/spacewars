@@ -19,7 +19,7 @@ namespace Spacewars.Runtime
         private Stage stage;
         private bool origin=true,disposed;
         private int cursor,stop,count,seedCount,seedCursor,routeCursor,copy,member,segment,traceCursor,legCount,pointCount,originCount,terminalIndex;
-        private int groupPoints,groupLegs,donorCount,bindingField;
+        private int groupPoints,groupLegs,donorCount,bindingField,originMembers;
         private bool donorShared;
         private NavPoint center;
         private double originRadius;
@@ -70,7 +70,7 @@ namespace Spacewars.Runtime
             return fromOrigin?(i==0?request.StartLocation.Value:spine.Node(joins[member])):(i==0?spine.Node(exits[member]):request.GoalLocation.Value);
         }
         private int BranchCount(bool fromOrigin){var payload=fromOrigin?origins[member]:terminals[member];return payload==null?2:((NavPoint[])payload.Value).Length;}
-        internal bool Step(NavigationRequest[] members,RecastMemberRoute[] baseline,RecastSpineProposal spine,ILayeredNavigationProvider provider,RecastAuthorityGeometry geometry,INavStorageReservation r,int maximumWork,Func<bool> cancelled)
+        internal bool Step(NavigationRequest[] members,RecastMemberRoute[] baseline,RecastSpineProposal spine,ILayeredNavigationProvider provider,RecastAuthorityGeometry geometry,INavStorageReservation r,int maximumWork,Func<bool> cancelled,bool[] independentRoutes=null)
         {
             NavStorageAdmission.RequireOwned(r,this);int left=maximumWork;var routes=WorkingRoutes;
 #if RECAST_ATTACHMENT_PHASE_AUDIT
@@ -96,14 +96,18 @@ global::RecastAttachmentPhaseAudit.HelperCharge(this,(int)stage,1,origin);
                     case Stage.Init:
                         routes[cursor]=baseline[cursor];joins[cursor]=routes[cursor]?.Join??-1;exits[cursor]=routes[cursor]?.Exit??-1;if(routes[cursor]!=null){groupPoints+=routes[cursor].Waypoints.Length;groupLegs+=routes[cursor].Legs.Length;}if(++cursor==members.Length){cursor=0;stage=Stage.Center;}break;
                     case Stage.Center:
-                        center=new NavPoint(center.X+members[cursor].StartLocation.Value.Position.X,center.Z+members[cursor].StartLocation.Value.Position.Z);
-                        if(++cursor==members.Length){center=new NavPoint(center.X/members.Length,center.Z/members.Length);cursor=0;stage=Stage.Radius;}break;
+                        if(independentRoutes?[cursor]!=true){
+                            center=new NavPoint(center.X+members[cursor].StartLocation.Value.Position.X,center.Z+members[cursor].StartLocation.Value.Position.Z);
+                            originMembers++;
+                        }
+                        if(++cursor==members.Length){center=new NavPoint(center.X/originMembers,center.Z/originMembers);cursor=0;stage=Stage.Radius;}break;
                     case Stage.Radius:
-                        originRadius=Math.Max(originRadius,Distance(center,members[cursor].StartLocation.Value.Position)+members[cursor].Profile.Radius);
+                        if(independentRoutes?[cursor]!=true)
+                            originRadius=Math.Max(originRadius,Distance(center,members[cursor].StartLocation.Value.Position)+members[cursor].Profile.Radius);
                         if(++cursor==members.Length){cursor=0;stage=Stage.Scan;}break;
                     case Stage.Scan:{
                         if(cursor==members.Length){stop=seedCount=0;stage=count==0?(origin?Stage.Scan:Stage.Build):Stage.PeerScan;routeCursor=member=0;if(count==0){if(origin){origin=false;cursor=0;}else member=0;}break;}
-                        if(routes[cursor]!=null){cursor++;stop=0;break;}
+                        if(routes[cursor]!=null||independentRoutes?[cursor]==true){cursor++;stop=0;break;}
                         var request=members[cursor];string surface=origin?request.StartLocation.Value.SurfaceId:request.GoalLocation.Value.SurfaceId;
                         if(stop==spine.Stops.Length){indices[count++]=cursor++;stop=0;break;}
                         int node=spine.Stops[stop++];if(!Eligible(spine,node,origin,surface))break;

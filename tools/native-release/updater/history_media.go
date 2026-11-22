@@ -48,8 +48,8 @@ func historyBlocks(text string, r githubRelease) []HistoryBlock {
 			} else {
 				result = append(result, HistoryBlock{Kind: "text", Text: m[1] + " · Изображение недоступно"})
 			}
-		} else if strings.HasPrefix(line, "### ") {
-			result = append(result, HistoryBlock{Kind: "heading", Text: strings.TrimPrefix(line, "### ")})
+		} else if strings.HasPrefix(line, "### ") || strings.HasPrefix(line, "#### ") {
+			result = append(result, HistoryBlock{Kind: "heading", Text: strings.TrimLeft(line, "# ")})
 		} else if strings.HasPrefix(line, "- ") {
 			result = append(result, HistoryBlock{Kind: "item", Text: strings.TrimPrefix(line, "- ")})
 		} else {

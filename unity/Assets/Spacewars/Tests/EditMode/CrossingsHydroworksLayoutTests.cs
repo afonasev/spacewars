@@ -48,10 +48,42 @@ namespace Spacewars.Tests.EditMode
             var restart=Config(count,7);CollectionAssert.AreEqual(c.Assignments,restart.Assignments);
             CollectionAssert.AreEqual(c.Sites.Select(s=>(s.Id,s.Kind,s.Position)),restart.Sites.Select(s=>(s.Id,s.Kind,s.Position)));
         }
+        [TestCase(1)][TestCase(2)][TestCase(3)][TestCase(4)]
+        public void CornerOutpostIsSymmetricAndOldRevisionsKeepTheirBinding(int siteId)
+        {
+            var p=Profile;var map=(ThreeCrossingsMap)p.AuthoredMap;
+            var homes=Enumerable.Range(1,4).Where(id=>id!=siteId).ToArray();
+            var site=map.MatchSites(p,homes).Single(s=>s.Id==siteId);
+            var slots=site.Slots;
+            Assert.AreEqual(3,slots.Count);
+            Assert.AreEqual(site.Position.X,slots[0].Position.X,1e-9);
+            Assert.AreEqual(site.Position.Z-p.SlotRingRadius,slots[0].Position.Z,1e-9);
+            Assert.AreEqual(slots[1].Position.Z,slots[2].Position.Z,1e-9);
+            Assert.AreEqual(2*site.Position.X,slots[1].Position.X+slots[2].Position.X,1e-9);
+            foreach(var slot in slots)
+            {
+                var delta=slot.Position;
+                double x=delta.X-site.Position.X,z=delta.Z-site.Position.Z;
+                Assert.AreEqual(p.SlotRingRadius,Math.Sqrt(x*x+z*z),1e-9);
+            }
+            var defaultSite=map.Sites(p).Single(s=>s.Id==siteId);
+            if(defaultSite.Kind==PlayableBuildingKind.Outpost)
+                CollectionAssert.AreEqual(slots.Select(s=>s.Position),defaultSite.Slots.Select(s=>s.Position));
+            foreach(int revision in new[]{6,7})
+            {
+                var oldMap=new ThreeCrossingsMap(new ThreeCrossingsProfileData{revision=revision});
+                var oldProfile=PlayableProfile.Create(p.CopyData(),oldMap);
+                var old=oldMap.MatchSites(oldProfile,homes).Single(s=>s.Id==siteId);
+                double phase=revision==7&&siteId==4?-Math.PI/2:old.Position.X<0?0:Math.PI;
+                var original=new TerritorySite(siteId,PlayableBuildingKind.Outpost,old.Position,oldProfile,phase);
+                CollectionAssert.AreEqual(original.Slots.Select(s=>(s.Id,s.Position,s.Heading)),old.Slots.Select(s=>(s.Id,s.Position,s.Heading)));
+            }
+        }
+
         [Test] public void EveryCornerReservesFullHqAndOutpostSlotsTurretsAndExits()
         {
             var p=Profile;var m=(ThreeCrossingsMap)p.AuthoredMap;
-            foreach(var sites in new[]{m.ReservedSites(p),m.MatchSites(p,new[]{1,4}),m.MatchSites(p,new[]{2,3,4})}){
+            foreach(var sites in new[]{m.ReservedSites(p),m.MatchSites(p,new[]{1,4}),m.MatchSites(p,new[]{2,3,4}),m.MatchSites(p,new[]{1,2})}){
                 var terrain=new NavGeometry(m.HalfExtent,m.MovementBlockers.ToArray(),1);var obstacles=m.MovementBlockers.ToList();
                 foreach(var site in sites){
                     foreach(var reserve in new[]{(site.Position,TerritoryRules.Radius(p,site.Kind))}.Concat(site.Slots.Select(s=>(s.Position,Math.Max(p.HangarFootprintRadius,Math.Max(p.ScienceFootprintRadius,Math.Max(p.FactoryFootprintRadius,p.RefineryFootprintRadius)))))).Concat(site.DefenseSlots(p).Select(s=>(s.Position,p.TurretFootprintRadius)))){
@@ -116,6 +148,26 @@ namespace Spacewars.Tests.EditMode
             setup.Participants.Add(new NativeLobbyParticipant{Team=3,Color=2});Assert.IsNotNull(setup.Validate(p,true,true));
             Assert.Throws<ArgumentException>(()=>((ThreeCrossingsMap)p.AuthoredMap).Configuration(p,7,new[]{new OfflineParticipant("a",1,1,OfflineControl.Human),new OfflineParticipant("b",2,2,OfflineControl.Ai),new OfflineParticipant("c",3,3,OfflineControl.Ai)}));
         }
+        [Test]
+        public void OrdinaryLobbyAllowsOnlyADuelWhileAuthoredStartsRemainAvailable()
+        {
+            var profile = Profile;
+            var lobby = new NativeLobbyConfiguration();
+            lobby.InitializeParticipants();
+            Assert.AreEqual(4, lobby.Capacity(profile));
+            Assert.AreEqual(2, lobby.LobbyCapacity(profile));
+            Assert.IsNull(lobby.ValidateLobby(profile, true, true));
+            Assert.IsNotNull(lobby.AddParticipant(false, 0, lobby.LobbyCapacity(profile)));
+
+            foreach (var teams in new[] { new[] { 1, 1, 2 }, new[] { 1, 1, 2, 2 }, new[] { 1, 2, 3, 4 } })
+            {
+                lobby.Participants = teams.Select((team, slot) =>
+                    new NativeLobbyParticipant { Team = team, Color = slot }).ToList();
+                Assert.AreEqual("Переправа доступна только для матча 1×1.", lobby.ValidateLobby(profile, true, true));
+                CollectionAssert.AreEqual(teams, lobby.Participants.Select(seat => seat.Team));
+            }
+        }
+
         [Test] public void CenterClearWidthAndApproachesDoNotPinch()
         {
             var p=Profile;var m=(ThreeCrossingsMap)p.AuthoredMap;Assert.AreEqual(2*m.SideBridgeWidth,m.CentralBridgeWidth);

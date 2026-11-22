@@ -65,6 +65,45 @@ namespace Spacewars.Tests.EditMode
             Assert.Fail("The tank must move to a clear firing position and damage the refinery.");
         }
 
+        [TestCase(PlayableEntityKind.Tank, PlayableOwner.Enemy, true, false)]
+        [TestCase(PlayableEntityKind.Explorer, PlayableOwner.Enemy, true, false)]
+        [TestCase(PlayableEntityKind.Tank, PlayableOwner.Player, true, true)]
+        [TestCase(PlayableEntityKind.Explorer, PlayableOwner.Player, true, true)]
+        [TestCase(PlayableEntityKind.Tank, PlayableOwner.Enemy, false, true)]
+        [TestCase(PlayableEntityKind.Explorer, PlayableOwner.Enemy, false, true)]
+        public void GroundFireRespectsTheFirstVisibleProjectileContact(PlayableEntityKind weapon,
+            PlayableOwner screenOwner,bool inFront,bool expectFire)
+        {
+            var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),new NullDockMap());
+            var flags=BindingFlags.Instance|BindingFlags.NonPublic;
+            var domain=Activator.CreateInstance(DomainType,flags,null,new object[]{profile,1L,false},null);
+            try
+            {
+                var spawn=DomainType.GetMethod("SpawnUnit",flags);
+                int Spawn(NavPoint at,PlayableOwner owner,PlayableEntityKind kind)=>
+                    (int)spawn.Invoke(domain,new object[]{at,owner,kind});
+                int shooter=Spawn(new NavPoint(-42,0),PlayableOwner.Player,weapon);
+                int target=Spawn(new NavPoint(-36,0),PlayableOwner.Enemy,PlayableEntityKind.Tank);
+                int screen=Spawn(new NavPoint(inFront?-39:-34,0),screenOwner,PlayableEntityKind.Tank);
+                Assert.AreEqual(PlayableCommandStatus.Applied,Apply(domain,new PlayableCommand(1,1,
+                    "player-1",PlayableCommandKind.Attack,new[]{shooter},targetId:target)));
+                Assert.True((bool)DomainType.GetMethod("VisibleTarget",flags).Invoke(domain,
+                    new object[]{PlayableOwner.Player,target}));
+                if(screenOwner==PlayableOwner.Enemy)
+                    Assert.True((bool)DomainType.GetMethod("VisibleTarget",flags).Invoke(domain,
+                        new object[]{PlayableOwner.Player,screen}));
+                bool fired=false;
+                for(int tick=0;tick<45;tick++)
+                {
+                    StepMethod.Invoke(domain,new object[]{1d/30d});
+                    var snapshot=Snapshot(domain);
+                    fired|=snapshot.Sounds.Any(sound=>sound.Kind==PlayableSoundKind.Shot&&sound.UnitId==shooter);
+                }
+                Assert.AreEqual(expectFire,fired);
+            }
+            finally { DomainType.GetMethod("DestroyOwnedNavigation",flags).Invoke(domain,null); }
+        }
+
         [Test] public void ReadyHeadquartersCreditsNormalizedIncomeEachSecond()
         {
             var domain=NewDomain(); Seconds(domain,1);

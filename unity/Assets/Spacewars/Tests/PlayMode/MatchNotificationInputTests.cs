@@ -36,17 +36,55 @@ namespace Spacewars.Input.Tests
         IEnumerator Ready(){for(int i=0;i<60&&runtime.Latest.Tick<1;i++)yield return null;Assert.Greater(runtime.Latest.Tick,0);Set("view",runtime.Latest);yield return null;Call("UpdateMatchNotifications");}
         void Keys(params Key[] keys){InputSystem.QueueStateEvent(keyboard,new KeyboardState(keys));InputSystem.Update();input.Poll();}
         void Pad(GamepadState state){InputSystem.QueueStateEvent(pad,state);InputSystem.Update();Call("PollOrdinaryPad");}
-        [UnityTest]public IEnumerator KeyboardAndPadNavigateSameHistoryWithoutChangingSelectionOrZoomAndRespectModals()
+        [UnityTest]public IEnumerator GamepadUpCyclesFiveEventsAndLeavesHorizontalButtonsFree()
         {
-            yield return Ready();var selected=Get<HashSet<int>>("selection");int own=runtime.Latest.Entities.First(e=>e.Owner==PlayableOwner.Player).Id;selected.Add(own);
-            var view=Get<PlayableSnapshot>("view");Set("view",view.WithMatchEvents(new[]{new PlayableMatchEvent(900,view.Tick,view.Owner,MatchEventKind.BuildingCompleted,new NavPoint(-12,0)),new PlayableMatchEvent(901,view.Tick,view.Owner,MatchEventKind.UnitReady,new NavPoint(12,0))}));Call("UpdateMatchNotifications");
-            float zoom=Camera.orthographicSize;Keys(Key.Space);var latest=Camera.transform.position;Keys();
-            Pad(new GamepadState());Pad(new GamepadState().WithButton(GamepadButton.DpadLeft));var previous=Camera.transform.position;Assert.Less(previous.x,latest.x-20);
-            Pad(new GamepadState());Pad(new GamepadState().WithButton(GamepadButton.DpadRight));Assert.Less(Vector3.Distance(latest,Camera.transform.position),.02f);
-            CollectionAssert.AreEqual(new[]{own},selected);Assert.AreEqual(zoom,Camera.orthographicSize);
-            Set("chatOpen",true);Keys(Key.Space);Assert.Less(Vector3.Distance(latest,Camera.transform.position),.02f);Keys();Set("chatOpen",false);
-            var gestures=Get<OfflinePadGestures>("battleGestures");gestures.SetMode("baseWheel");Pad(new GamepadState());Pad(new GamepadState().WithButton(GamepadButton.DpadLeft));Assert.Less(Vector3.Distance(latest,Camera.transform.position),.02f);Assert.AreEqual("baseWheel",gestures.Mode);
-            Set("paused",true);Call("FocusMatchNotification",true);Assert.Less(Vector3.Distance(latest,Camera.transform.position),.02f);
+            yield return Ready();
+            var selected=Get<HashSet<int>>("selection");
+            int own=runtime.Latest.Entities.First(e=>e.Owner==PlayableOwner.Player).Id;
+            selected.Add(own);
+            var view=Get<PlayableSnapshot>("view");
+            var events=Enumerable.Range(0,6)
+                .Select(i=>new PlayableMatchEvent(900+i,view.Tick,view.Owner,MatchEventKind.UnitReady,new NavPoint(-20+i*8,0)))
+                .ToArray();
+            Set("view",view.WithMatchEvents(events));
+            Call("UpdateMatchNotifications");
+
+            float zoom=Camera.orthographicSize;
+            Keys(Key.Space);
+            var latest=Camera.transform.position;
+            Keys();
+            void Tap(GamepadButton button)
+            {
+                Pad(new GamepadState());
+                Pad(new GamepadState().WithButton(button));
+                Pad(new GamepadState());
+            }
+
+            Camera.transform.position+=Vector3.right*5;
+            var before=Camera.transform.position;
+            Tap(GamepadButton.DpadLeft);
+            Tap(GamepadButton.DpadRight);
+            Assert.AreEqual(before,Camera.transform.position);
+            foreach (int offset in new[]{0,1,2,3,4,0})
+            {
+                Tap(GamepadButton.DpadUp);
+                Assert.That(Camera.transform.position.x,Is.EqualTo(latest.x-offset*8).Within(.02f));
+            }
+            CollectionAssert.AreEqual(new[]{own},selected);
+            Assert.AreEqual(zoom,Camera.orthographicSize);
+
+            Set("chatOpen",true);
+            Tap(GamepadButton.DpadUp);
+            Assert.Less(Vector3.Distance(latest,Camera.transform.position),.02f);
+            Set("chatOpen",false);
+            var gestures=Get<OfflinePadGestures>("battleGestures");
+            gestures.SetMode("baseWheel");
+            Tap(GamepadButton.DpadUp);
+            Assert.AreEqual("baseWheel",gestures.Mode);
+            Assert.Less(Vector3.Distance(latest,Camera.transform.position),.02f);
+            Set("paused",true);
+            Call("FocusMatchNotification",true);
+            Assert.Less(Vector3.Distance(latest,Camera.transform.position),.02f);
         }
         [UnityTest]public IEnumerator LatestSingleOutlinedLineRendersOverActualNativeFieldAndExpiresAtThreeSeconds()
         {

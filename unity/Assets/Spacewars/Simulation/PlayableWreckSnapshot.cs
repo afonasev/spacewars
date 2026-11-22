@@ -11,7 +11,8 @@ namespace Spacewars.Simulation
         public long DeathTick{get;} public long LandTick{get;} public long RevealTick{get;}
         public long InvulnerableUntilTick{get;}
         public long SinkTick{get;} public long ExpireTick{get;} public long DestroyedTick{get;}
-        public PlayableEntityKind ImpactKind{get;} public bool HasGround=>LandTick>=0;
+        public PlayableEntityKind ImpactKind{get;} public bool IsAirborneKind=>Kind==PlayableEntityKind.Hawk||Kind==PlayableEntityKind.Skat;
+        public bool HasGround=>LandTick>=0;
         public bool Damageable(long tick)=>Blocks(tick)&&tick>=InvulnerableUntilTick;
         public bool Blocks(long tick)=>HasGround&&tick>=LandTick&&tick<ExpireTick&&DestroyedTick<0;
         public PlayableWreckSnapshot(int id,PlayableOwner owner,PlayableEntityKind kind,NavPoint position,double heading,double radius,double deathHeight,double burial,int variant,long deathTick,long landTick,long revealTick,long sinkTick,long expireTick,long destroyedTick=-1,PlayableEntityKind impactKind=PlayableEntityKind.Tank,bool upgraded=false,long invulnerableUntilTick=-1,int physicalLayer=-1)

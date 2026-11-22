@@ -81,25 +81,94 @@ namespace Spacewars.Runtime
         internal static bool WreckDelta(NavGeometry before,NavGeometry current)
         {
             if(before==null||current==null||before.HalfExtent!=current.HalfExtent||current.Revision<=before.Revision)return false;
-            bool Present(NavGeometry g,NavObstacle o){foreach(var b in g.Obstacles)if(b.GeometryEquals(o))return true;return false;}
             int prefix=CommonPrefix(before,current);
-            for(int i=prefix;i<before.Obstacles.Count;i++){var o=before.Obstacles[i];if(o.CircleRadius<=0&&!Present(current,o))return false;}
-            for(int i=prefix;i<current.Obstacles.Count;i++){var o=current.Obstacles[i];if(o.CircleRadius<=0&&!Present(before,o))return false;}
+            for(int i=prefix;i<before.Obstacles.Count;i++){var o=before.Obstacles[i];if(o.CircleRadius<=0&&!Contains(current,o))return false;}
+            for(int i=prefix;i<current.Obstacles.Count;i++){var o=current.Obstacles[i];if(o.CircleRadius<=0&&!Contains(before,o))return false;}
             return true;
         }
-        internal static bool SafeWreck(NavigationAuthorityGroup group,NavGeometry before,NavGeometry current,NavRetainedArray<NavOwnedStorage> members)
+        // A route can already have survived both foundations and wrecks. Its
+        // original request geometry therefore need not differ from current by
+        // only the latest kind of publication. Reprove the complete accumulated
+        // delta: retain every original static obstacle, allow new foundations
+        // and transient circles, then check every added footprint below.
+        internal static bool CarryHistoryDelta(NavGeometry original,NavGeometry current)
         {
-            if(group==null||group.Data.MarchVersion!=2||members==null||members.Count<1||!WreckDelta(before,current))return false;
+            if(original==null||current==null||original.HalfExtent!=current.HalfExtent||current.Revision<=original.Revision)return false;
+            int prefix=CommonPrefix(original,current);
+            for(int i=prefix;i<original.Obstacles.Count;i++){
+                var obstacle=original.Obstacles[i];
+                if(obstacle.CircleRadius<=0&&!Contains(current,obstacle))return false;
+            }
+            for(int i=prefix;i<current.Obstacles.Count;i++){
+                var obstacle=current.Obstacles[i];
+                if(obstacle.CircleRadius>0||Contains(original,obstacle))continue;
+                if(obstacle.CircleRadius!=0||obstacle.Polygon!=null||obstacle.Bottom!=0||!double.IsNaN(obstacle.Top))return false;
+            }
+            return true;
+        }
+        // Borrowed for one geometry publication. The before/current topology test
+        // is shared by all actors; consecutive routes often share their original
+        // request geometry as well. Capture and restore verify the inputs fresh.
+        internal sealed class WreckGeometryDelta
+        {
+            private readonly NavGeometry before,current;
+            private readonly NavObstacle[] added;
+            private NavGeometry original;
+            private int count;
+            private bool validHistory;
+            internal readonly bool Valid;
+            internal WreckGeometryDelta(NavGeometry before,NavGeometry current)
+            {
+                this.before=before;this.current=current;
+                Valid=WreckDelta(before,current);
+                if(Valid)added=new NavObstacle[current.Obstacles.Count];
+            }
+            internal bool Matches(NavGeometry oldGeometry,NavGeometry newGeometry)
+                =>Valid&&ReferenceEquals(before,oldGeometry)&&ReferenceEquals(current,newGeometry);
+            internal bool Disjoint(NavGeometry source,InstalledGeometryMemberV2 row)
+            {
+                if(!ReferenceEquals(original,source)){
+                    original=source;
+                    count=0;
+                    validHistory=CarryHistoryDelta(source,current);
+                    if(validHistory)for(int n=CommonPrefix(source,current);n<current.Obstacles.Count;n++){
+                        var obstacle=current.Obstacles[n];
+                        if(!Contains(source,obstacle))added[count++]=obstacle;
+                    }
+                }
+                if(!validHistory)return false;
+                for(int i=0;i<count;i++)if(!row.RemainingDisjoint(added[i]))return false;
+                return true;
+            }
+        }
+        private static bool Contains(NavGeometry geometry,NavObstacle obstacle)
+        {
+            for(int i=0;i<geometry.Obstacles.Count;i++)if(geometry.Obstacles[i].GeometryEquals(obstacle))return true;
+            return false;
+        }
+        internal static bool SafeWreck(NavigationAuthorityGroup group,NavGeometry before,NavGeometry current,NavRetainedArray<NavOwnedStorage> members)
+            =>SafeWreck(group,before,current,members,null);
+        private static bool SafeWreck(NavigationAuthorityGroup group,NavGeometry before,NavGeometry current,
+            NavRetainedArray<NavOwnedStorage> members,WreckGeometryDelta delta)
+        {
+            if(group==null||group.Data.MarchVersion!=2||members==null||members.Count<1||
+                !(delta?.Matches(before,current)??WreckDelta(before,current)))return false;
             for(int i=0;i<members.Count;i++){
                 if(!(members[i] is InstalledGeometryMemberV2 row)||row.RemainingIndex<0||row.RemainingIndex>row.Global.Count||row.RemainingLocalIndex<0||row.RemainingLocalIndex>row.Local.Count)return false;
                 var d=row.Corridor.Corridor;var q=row.Request.Request;NavigationAuthorityMember member=null;
                 foreach(var value in group.Members)if(((NavigationAuthorityMember)value).Data.Entity==d.Entity)member=(NavigationAuthorityMember)value;
                 if(member==null)return false;var m=member.Data;
                 if(d.Group!=group.Data.GroupId||d.RootRevision!=group.Data.OrderRevision||d.CommandSequence!=group.Data.CommandSequence||d.IssuedTick!=group.Data.IssuedTick||d.Incarnation!=m.Incarnation||d.Mobility!=m.MobilityRevision||d.ActivationRevision!=m.OrderRevision||q.ProfileRevision!=group.Data.MarchProfileRevision||d.HoldBinding!=q.HeldIdentity||!m.HasGoal||!m.Goal.Equals(d.Endpoint.Position)||!m.HasLocation||!member.GoalLocation.Value.Equals(d.Endpoint))return false;
-                if(!WreckDelta(q.BaseGeometry,current))return false;
-                // The proof covers all additions since original installation, including
-                // additions already carried across earlier geometry publications.
-                for(int n=CommonPrefix(q.BaseGeometry,current);n<current.Obstacles.Count;n++){var o=current.Obstacles[n];bool old=false;foreach(var b in q.BaseGeometry.Obstacles)if(b.GeometryEquals(o)){old=true;break;}if(!old&&!row.RemainingDisjoint(o))return false;}
+                // Check all additions since the original installation, including
+                // obstacles carried across previous publications.
+                if(delta!=null){if(!delta.Disjoint(q.BaseGeometry,row))return false;}
+                else{
+                    if(!CarryHistoryDelta(q.BaseGeometry,current))return false;
+                    for(int n=CommonPrefix(q.BaseGeometry,current);n<current.Obstacles.Count;n++){
+                        var obstacle=current.Obstacles[n];
+                        if(!Contains(q.BaseGeometry,obstacle)&&!row.RemainingDisjoint(obstacle))return false;
+                    }
+                }
                 for(int j=0;j<i;j++)if(((InstalledGeometryMemberV2)members[j]).Request.Request.Entity==q.Entity)return false;
             }return true;
         }
@@ -109,7 +178,7 @@ namespace Spacewars.Runtime
             for(int i=0;i<members.Count;i++){
                 if(!(members[i] is InstalledGeometryMemberV2 row))return false;var d=row.Corridor.Corridor;var m=((NavigationAuthorityMember)group.Members[i]).Data;var q=row.Request.Request;
                 if(d.Group!=group.Data.GroupId||d.RootRevision!=group.Data.OrderRevision||d.CommandSequence!=group.Data.CommandSequence||d.IssuedTick!=group.Data.IssuedTick||d.Entity!=m.Entity||d.Incarnation!=m.Incarnation||d.Mobility!=m.MobilityRevision||d.ActivationRevision!=m.OrderRevision||q.ProfileRevision!=group.Data.MarchProfileRevision||q.MemberIdentity==null||q.MemberIdentity.MembershipRevision!=group.Data.MembershipRevision||d.HoldBinding!=q.HeldIdentity||!m.HasGoal||!m.Goal.Equals(d.Endpoint.Position)||!m.HasLocation||!((NavigationAuthorityMember)group.Members[i]).GoalLocation.Value.Equals(d.Endpoint))return false;
-                if(!ReferenceEquals(q.BaseGeometry,before)&&!AddOnly(q.BaseGeometry,current))return false;
+                if(!CarryHistoryDelta(q.BaseGeometry,current))return false;
                 // Prove every footprint added since both original proof and last authority.
                 for(int n=0;n<current.Obstacles.Count;n++){var o=current.Obstacles[n];bool old=false;foreach(var b in q.BaseGeometry.Obstacles)if(b.GeometryEquals(o)){old=true;break;}if(!old&&!row.Disjoint(o))return false;}
             }return true;
@@ -123,9 +192,9 @@ namespace Spacewars.Runtime
         // The proof is pure over pinned immutable inputs. Test and allocate in one
         // entry point so ordinary preparation does not compute it twice. Capture
         // and restoration still validate the complete certificate independently.
-        internal static InstalledGeometryCertificateV2 TryCreate(NavigationAuthorityGroup group,NavGeometry before,NavGeometry current,NavRetainedArray<NavOwnedStorage> members,INavStorageReservation r,bool owned=true,bool wreckChanges=false)
+        internal static InstalledGeometryCertificateV2 TryCreate(NavigationAuthorityGroup group,NavGeometry before,NavGeometry current,NavRetainedArray<NavOwnedStorage> members,INavStorageReservation r,bool owned=true,bool wreckChanges=false,WreckGeometryDelta delta=null)
         {
-            if(!(wreckChanges?SafeWreck(group,before,current,members):Safe(group,before,current,members)))return null;
+            if(!(wreckChanges?SafeWreck(group,before,current,members,delta):Safe(group,before,current,members)))return null;
             NavStorageAdmission.RequireOwned(r,group);NavStorageAdmission.RequireOwned(r,before.StorageRoot);NavStorageAdmission.RequireOwned(r,current.StorageRoot);NavStorageAdmission.RequireOwned(r,members);
             using(var a=new NavStorageAllocation(r.TryReserve)){a.Reserve(Layout);var v=a.Register(new InstalledGeometryCertificateV2(owned));try{v.WreckChanges=wreckChanges;v.Group=NavPhysicalMacro.Acquire(v,group);v.beforeOwner=NavPhysicalMacro.Acquire(v,(NavGeometry.OwnedBuffers)before.StorageRoot);v.currentOwner=NavPhysicalMacro.Acquire(v,(NavGeometry.OwnedBuffers)current.StorageRoot);v.Before=(NavGeometry)v.beforeOwner.Facade;v.Current=(NavGeometry)v.currentOwner.Facade;v.Members=NavPhysicalMacro.Acquire(v,members);return v;}catch{if(owned)v.Release();throw;}}
         }

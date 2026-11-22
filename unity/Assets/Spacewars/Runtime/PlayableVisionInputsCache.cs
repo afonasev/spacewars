@@ -40,7 +40,7 @@ namespace Spacewars.Runtime
                     (building.Upgrade?.Complete==true||CenterUpgraded(building.Id)||building.ProducerUpgrade?.Complete==true)!=prior.Upgraded)return false;
             }
             index=0;foreach(var site in sites.Values)
-                if(visionRelayOwners[index++]!=(site.Site.Kind==PlayableBuildingKind.RelayTower?site.Locked:null))return false;
+                if(visionRelayOwners[index++]!=(site.Site.Kind==PlayableBuildingKind.RelayTower?RelayOwnerPaint(site):null))return false;
             return true;
         }
         private void RememberVisionInputs()
@@ -53,7 +53,7 @@ namespace Spacewars.Runtime
             // Site geometry is immutable. Only latched relay ownership changes
             // its vision source; partial capture/drain/recovery is not a new source.
             if(visionRelayOwners==null||visionRelayOwners.Length!=sites.Count)visionRelayOwners=new PlayableOwner?[sites.Count];
-            index=0;foreach(var site in sites.Values)visionRelayOwners[index++]=site.Site.Kind==PlayableBuildingKind.RelayTower?site.Locked:null;
+            index=0;foreach(var site in sites.Values)visionRelayOwners[index++]=site.Site.Kind==PlayableBuildingKind.RelayTower?RelayOwnerPaint(site):null;
             visionInputProfile=profile;visionInputTeams=visions.Count;
         }
     }

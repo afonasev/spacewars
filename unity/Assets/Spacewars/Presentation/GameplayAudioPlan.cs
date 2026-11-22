@@ -16,7 +16,7 @@ namespace Spacewars.Presentation
         public float explorerImpactGain=.045f;
         public float effectsBudget=.38f,notificationGain=.12f,shotGain=.28f,impactGain=.14f,explosionGain=.30f,movementGain=.08f;
         public int voices=12,shots=6,impacts=4,explosions=3,movementGroups=3,freshTicks=6;
-        public float abilityGain=.20f;
+        public float abilityGain=.20f,nuclearImpactGain=.38f;
         public float baseGain=.16f,damageGain=.18f,motionAccentGain=.08f;
         public double warningSeconds=6,notificationSeconds=.25,baseRepeatSeconds=.4,motionRepeatSeconds=.8,heavyDamageRatio=.35;
         public int baseVoices=3;
@@ -39,7 +39,7 @@ namespace Spacewars.Presentation
     public sealed class GameplayAudioCue
     {
         public string Key,Clip;
-        public long EventId;
+        public long EventId,PhaseEndTick;
         public NavPoint Position;
         public float Gain,BaseGain,Pan,Priority,Pitch=1;
         public bool Loop,Notification;
@@ -79,18 +79,20 @@ namespace Spacewars.Presentation
                 foreach(var e in view.Sounds)
                 {
                     if(baseline){seen[e.Id]=e.Tick;continue;}
+                    if(e.PhaseEndTick>0&&tick>=e.PhaseEndTick)continue;
                     if(e.Tick>tick||tick-e.Tick>profile.freshTicks||seen.ContainsKey(e.Id))continue;
                     bool notification=PlayableSoundPolicy.OwnerOnly(e.Kind);
                     if(screen.Overview&&notification)continue;
                     if(e.Kind==PlayableSoundKind.HeavyDamage&&!HeavyDamage(view,e))continue;
                     float gain=1,pan=0;
-                    bool ability=e.Kind==PlayableSoundKind.OrbitalSystemsDisabled||e.Kind==PlayableSoundKind.OrbitalScanApplied||e.Kind==PlayableSoundKind.OrbitalMineInstalled||e.Kind==PlayableSoundKind.OrbitalControlHacked;
+                    bool ability=PlayableSoundPolicy.Ability(e.Kind);
                     if(!notification&&!(ability&&e.Owner==view.Owner)&&!Spatial(screen,e.Position,out gain,out pan))continue;
                     bool selected=screen.Selected!=null&&view.Entities.Any(u=>screen.Selected.Contains(u.Id)&&Distance(u.Position,e.Position)<3);
                     float baseGain=notification?profile.notificationGain:BaseGain(e);
-                    var cue=new GameplayAudioCue{Key="event:"+e.Id,EventId=e.Id,Position=e.Position,Kind=e.Kind,Gain=gain*baseGain,BaseGain=baseGain,
-                        Pan=pan,Priority=gain+(selected ? .5f : 0)+(e.Kind==PlayableSoundKind.BaseThreat||e.Kind==PlayableSoundKind.ProductionLimited?3f:e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.HeavyDamage?1f:0),
-                        Clip=Clip(e),Notification=notification,Pitch=e.Weapon==PlayableEntityKind.Shkval ? .85f : 1};
+                    if(baseGain<=0)continue;
+                    var cue=new GameplayAudioCue{Key="event:"+e.Id,EventId=e.Id,PhaseEndTick=e.PhaseEndTick,Position=e.Position,Kind=e.Kind,Gain=gain*baseGain,BaseGain=baseGain,
+                        Pan=pan,Priority=gain+(selected ? .5f : 0)+(e.Kind==PlayableSoundKind.OrbitalNuclearImpact ? 2.5f : e.Kind==PlayableSoundKind.BaseThreat||e.Kind==PlayableSoundKind.ProductionLimited?3f:e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.HeavyDamage?1f:0),
+                        Clip=Clip(e),Notification=notification,Pitch=Pitch(e)};
                     cue.Observers.Add(view.OwnerId);
                     if(cues.TryGetValue(e.Id,out var old))
                     {if(gain*baseGain>old.Gain){cue.Observers.UnionWith(old.Observers);cues[e.Id]=cue;}else old.Observers.Add(view.OwnerId);}
@@ -114,7 +116,15 @@ namespace Spacewars.Presentation
             {
                 int cap=CategoryCap(cue.Kind);
                 counts.TryGetValue(cue.Kind,out var count);
-                string cell=cue.Notification?"notification:"+cue.Clip:cue.Clip+":"+Math.Floor(cue.Position.X/profile.mergeDistance)+":"+Math.Floor(cue.Position.Z/profile.mergeDistance);
+                string family=cue.Clip switch
+                {
+                    VeprBuildingImpactClip or VeprUnitImpactClip => "impact",
+                    VeprShotClip or GaussTowerShotClip => "tank-shot",
+                    ExplorerBurstShotClip or SentryTurretShotClip => "burst-shot",
+                    _ when cue.Clip.StartsWith("shkval-impact-",StringComparison.Ordinal) => "shkval-impact",
+                    _ => cue.Clip,
+                };
+                string cell=cue.Notification?"notification:"+family:family+":"+Math.Floor(cue.Position.X/profile.mergeDistance)+":"+Math.Floor(cue.Position.Z/profile.mergeDistance);
                 double interval=cue.Kind==PlayableSoundKind.HeavyDamage||cue.Kind==PlayableSoundKind.BaseThreat||cue.Kind==PlayableSoundKind.ProductionLimited?profile.warningSeconds:cue.Notification?profile.notificationSeconds:cue.Kind==PlayableSoundKind.MovementStarted||cue.Kind==PlayableSoundKind.MovementStopped?profile.motionRepeatSeconds:(int)cue.Kind>2?profile.baseRepeatSeconds:profile.repeatSeconds;
                 if(count>=cap||!cue.Notification&&result.Count(c=>!c.Notification)>=profile.voices||cue.Notification&&result.Any(c=>c.Notification)||repeats.TryGetValue(cell,out var at)&&now-at<interval)continue;
                 repeats[cell]=now;counts[cue.Kind]=count+1;result.Add(cue);
@@ -130,17 +140,39 @@ namespace Spacewars.Presentation
             }
             return result.ToArray();
         }
-        public int CategoryCap(PlayableSoundKind kind)=>kind==PlayableSoundKind.Shot?profile.shots:kind==PlayableSoundKind.Impact?profile.impacts:kind==PlayableSoundKind.Destroyed?profile.explosions:profile.baseVoices;
+        public int CategoryCap(PlayableSoundKind kind)=>kind==PlayableSoundKind.Shot?profile.shots:kind==PlayableSoundKind.Impact?profile.impacts:(kind==PlayableSoundKind.Destroyed||kind==PlayableSoundKind.OrbitalNuclearImpact)?profile.explosions:profile.baseVoices;
         private bool HeavyDamage(PlayableSnapshot view,PlayableSoundEvent e)
         {
             var p=view.ActiveProfile??PlayableProfile.Default;
             return e.Building?view.Buildings.Any(b=>Distance(b.Position,e.Position)<1&&b.Health>0&&b.Health<=TerritoryRules.MaximumHealth(p,b)*profile.heavyDamageRatio):view.Entities.Any(u=>Distance(u.Position,e.Position)<3&&u.Kind==e.Weapon&&u.Health>0&&u.Health<=PlayableUnitRules.MaximumHealth(p,u)*profile.heavyDamageRatio);
         }
-        private float BaseGain(PlayableSoundEvent e)=>e.Kind==PlayableSoundKind.OrbitalSystemsDisabled||e.Kind==PlayableSoundKind.OrbitalScanApplied||e.Kind==PlayableSoundKind.OrbitalMineInstalled||e.Kind==PlayableSoundKind.OrbitalControlHacked?profile.abilityGain:e.Kind==PlayableSoundKind.HeavyDamage?profile.damageGain:e.Kind==PlayableSoundKind.MovementStarted||e.Kind==PlayableSoundKind.MovementStopped?profile.motionAccentGain:(int)e.Kind>2?profile.baseGain:e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Shkval?profile.explosionGain:e.Kind==PlayableSoundKind.Impact?(e.Weapon==PlayableEntityKind.Explorer?profile.explorerImpactGain:profile.impactGain):profile.shotGain;
+        private float BaseGain(PlayableSoundEvent e)=>e.Kind==PlayableSoundKind.OrbitalNuclearImpact?profile.nuclearImpactGain:PlayableSoundPolicy.Ability(e.Kind)?profile.abilityGain:e.Kind==PlayableSoundKind.HeavyDamage?profile.damageGain:e.Kind==PlayableSoundKind.MovementStarted||e.Kind==PlayableSoundKind.MovementStopped?profile.motionAccentGain:(int)e.Kind>2?profile.baseGain:e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Shkval?profile.explosionGain:e.Kind==PlayableSoundKind.Impact?(e.Weapon==PlayableEntityKind.Explorer?profile.explorerImpactGain:profile.impactGain):profile.shotGain;
+        internal const int MaxShkvalImpactUnits=4;
+        internal const string SentryTurretShotClip = "sentry-turret-shot";
+        internal const string GaussTowerShotClip = "gauss-tower-shot";
+        internal const string IglaShotClip = "igla-heavy-coil";
+        internal const string HawkRocketLaunchClip="hawk-rocket-launch",HawkRocketImpactClip="hawk-rocket-impact";
+        internal const string VeprBuildingImpactClip="vepr-building-impact";
+        internal const string VeprShotClip="vepr-shot",VeprUnitImpactClip="vepr-unit-impact",ExplorerBurstShotClip="explorer-burst-shot";
+        internal static string ShkvalImpactClip(int count)=>"shkval-impact-"+Math.Min(count,MaxShkvalImpactUnits);
+        private static bool UsesShkvalImpactMix(PlayableSoundEvent e)=>
+            e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Shkval&&e.ShkvalDamagedUnits.HasValue&&
+            (!e.Building||e.ShkvalDamagedUnits.Value>0);
+        private static float Pitch(PlayableSoundEvent e) =>
+            e.Weapon == PlayableEntityKind.Shkval && e.Kind != PlayableSoundKind.OrbitalNuclearImpact &&
+            e.Kind != PlayableSoundKind.OrbitalNuclearDescent && !UsesShkvalImpactMix(e) ? .85f : 1;
         private static string Clip(PlayableSoundEvent e)
         {
             switch(e.Kind)
             {
+                case PlayableSoundKind.OrbitalReinforcementStarted:return "ability-reinforcement";
+                case PlayableSoundKind.OrbitalReinforcementReady:return "ability-reinforcement-ready";
+                case PlayableSoundKind.OrbitalStasisApplied:return "ability-stasis";
+                case PlayableSoundKind.OrbitalStasisReleased:return "ability-stasis-release";
+                case PlayableSoundKind.OrbitalNanobotsDeployed:return "ability-nanobots";
+                case PlayableSoundKind.OrbitalProductionBoosted:return "ability-production-boost";
+                case PlayableSoundKind.OrbitalNuclearDescent:return "ability-nuclear-descent";
+                case PlayableSoundKind.OrbitalNuclearImpact:return "ability-nuclear-impact";
                 case PlayableSoundKind.OrbitalSystemsDisabled:return "ability-system-failure";
                 case PlayableSoundKind.OrbitalScanApplied:return "ability-scan";
                 case PlayableSoundKind.OrbitalMineInstalled:return "ability-mine";
@@ -158,9 +190,25 @@ namespace Spacewars.Presentation
                 case PlayableSoundKind.MovementStopped:return "motion-stop";
             }
             if(e.Kind==PlayableSoundKind.Destroyed&&e.Building)return "building-collapse";
+            if(UsesShkvalImpactMix(e))return ShkvalImpactClip(e.ShkvalDamagedUnits.Value);
             if(e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Shkval)return "explosion";
-            if(e.Kind==PlayableSoundKind.Impact)return "impact";
-            return e.Weapon==PlayableEntityKind.Explorer?"burst-shot":"tank-shot";
+            if(e.Kind==PlayableSoundKind.Impact)
+            {
+                if(e.Weapon==PlayableEntityKind.Tank&&e.Building&&e.Contact?.Impact.HasValue==true)
+                    return VeprBuildingImpactClip;
+                if(e.Weapon==PlayableEntityKind.Tank&&!e.Building&&e.Contact?.DamagedUnit==true)
+                    return VeprUnitImpactClip;
+                return e.Weapon==PlayableEntityKind.Hawk&&e.Contact?.Rocket==true&&e.Contact.DamagedUnit
+                    ?HawkRocketImpactClip:"impact";
+            }
+            if(e.Kind==PlayableSoundKind.Shot)
+            {
+                if(e.Weapon==PlayableEntityKind.Igla)return IglaShotClip;
+                if(e.Weapon==PlayableEntityKind.Hawk)return HawkRocketLaunchClip;
+                if(e.Weapon==PlayableEntityKind.Tank)return e.Building?GaussTowerShotClip:VeprShotClip;
+                if(e.Weapon==PlayableEntityKind.Explorer&&!e.RocketLaunch)return e.Building?SentryTurretShotClip:ExplorerBurstShotClip;
+            }
+            return e.Weapon==PlayableEntityKind.Explorer&&!e.RocketLaunch?"burst-shot":"tank-shot";
         }
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
     }

@@ -64,7 +64,7 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Карточки действий","Отступ от разделителя","Отступ текста и значений от вертикального разделителя таблицы.","px",4,20,1)] public float statColumnPadding=10;
         [SurfaceSetting("Портреты башен","Поворот","Ракурс спереди в три четверти; применяется при Bake defense portraits.","°",0,60,1)] public float defensePortraitYaw=25;
         [SurfaceSetting("Портреты юнитов","Яркость","Умножение яркости при Bake unit portraits; не меняет модели на карте.","×",.5f,2,.05f)] public float unitPortraitBrightness=1.5f;
-        [SurfaceSetting("Портреты юнитов","Яркость танка","Отдельное осветление всех вариантов танка при Bake unit portraits; сохраняет тёмный корпус.","×",.5f,2,.05f)] public float tankPortraitBrightness=1.2f;
+        [SurfaceSetting("Портреты юнитов","Яркость Вепря","Отдельное осветление всех вариантов Вепря при Bake unit portraits; сохраняет тёмный корпус.","×",.5f,2,.05f)] public float tankPortraitBrightness=1.2f;
         [SurfaceSetting("Портреты юнитов","Насыщенность","Насыщенность при Bake unit portraits; сохраняет прозрачность и контур.","×",0,1.5f,.01f)] public float unitPortraitSaturation=1.06f;
         [SurfaceSetting("Портреты башен","Высота ракурса","Наклон сверху; применяется при Bake defense portraits, не меняет камеру матча.","°",15,60,1)] public float defensePortraitElevation=35;
         [SurfaceSetting("Карточки действий","Строка характеристик","Минимальная высота строки; длинный текст переносится.","px",30,44,1)] public float statHeight=34;

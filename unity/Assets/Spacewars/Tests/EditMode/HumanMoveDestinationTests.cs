@@ -1,6 +1,8 @@
 using System;
 using System.Linq;
+using System.Threading;
 using NUnit.Framework;
+using Spacewars.Runtime;
 using Spacewars.Simulation;
 
 namespace Spacewars.Tests.EditMode
@@ -9,6 +11,71 @@ namespace Spacewars.Tests.EditMode
     {
         static PlayableEntitySnapshot Unit(int id,NavPoint point)=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Tank,point,100,false,0,0,0);
         static PlayableSnapshot View(PlayableProfile profile,NavGeometry geometry,params PlayableEntitySnapshot[] units)=>new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,1,0,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,100,geometry,units,Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:profile);
+        [Test,Timeout(30000)] public void BackgroundProjectionKeepsExactGroupsAndFifoWithAppendAndStop()
+        {
+            var p=PlayableProfile.Default;var geometry=new NavGeometry(p.ArenaHalfExtent,PlayableMap.StaticObstacles(p),1);
+            var view=View(p,geometry,Unit(1,new NavPoint(-12,0)),Unit(2,new NavPoint(12,0)));var target=new NavPoint(0,4);
+            var expected=HumanMoveDestination.Resolve(p,view,new[]{1,2},target);
+            var queue=new HumanMoveOrderQueue();var move=new PlayableCommand(1,0,"player-1",PlayableCommandKind.Move,new[]{1,2},target,mode:PlayableOrderMode.Append);
+            var stop=new PlayableCommand(1,0,"player-1",PlayableCommandKind.Stop,new[]{1,2});
+            try{
+                Assert.True(queue.Enqueue(p,view,move));Assert.True(queue.Enqueue(p,view,stop));
+                PlayableCommand taken=null;HumanMoveDestination.Group[] actual=null;
+                Assert.True(SpinWait.SpinUntil(()=>queue.TryTake(out taken,out actual),20000));Assert.AreSame(move,taken);Assert.AreEqual(PlayableOrderMode.Append,taken.Mode);
+                Assert.AreEqual(expected.Length,actual.Length);for(int i=0;i<actual.Length;i++){Assert.AreEqual(expected[i].Target,actual[i].Target);CollectionAssert.AreEqual(expected[i].Entities,actual[i].Entities);}
+                Assert.True(queue.TryTake(out taken,out actual));Assert.AreSame(stop,taken);CollectionAssert.AreEqual(new[]{1,2},actual.Single().Entities);Assert.Zero(queue.Count);
+            }finally{queue.Cancel();}
+        }
+        [TestCase(PlayableCommandKind.Stop)]
+        [TestCase(PlayableCommandKind.Hold)]
+        public void ImmediateStopRetiresOnlyItsRecipientsAndPreservesRemainingFifo(PlayableCommandKind kind)
+        {
+            var profile=PlayableProfile.Default;
+            var geometry=new NavGeometry(profile.ArenaHalfExtent,PlayableMap.StaticObstacles(profile),1);
+            var view=View(profile,geometry,Unit(1,new NavPoint(-12,0)),Unit(2,new NavPoint(-13,0)));
+            var target=new NavPoint(-8,0);
+            var queue=new HumanMoveOrderQueue();
+            var group=new PlayableCommand(1,0,"player-1",PlayableCommandKind.Move,new[]{1,2},target);
+            var append=new PlayableCommand(1,0,"player-1",PlayableCommandKind.AttackMove,new[]{1},target,mode:PlayableOrderMode.Append);
+            var other=new PlayableCommand(1,0,"player-2",PlayableCommandKind.Follow,new[]{1},target,targetId:3);
+            try{
+                Assert.True(queue.Enqueue(profile,view,group));
+                Assert.True(queue.Enqueue(profile,view,append));
+                Assert.True(queue.Enqueue(profile,view,other));
+                var stop=new PlayableCommand(1,0,"player-1",kind,new[]{1});
+                CollectionAssert.AreEqual(new[]{append},queue.SupersedeWithStop(stop));
+                Assert.AreEqual(2,queue.Count);
+                PlayableCommand taken=null;HumanMoveDestination.Group[] projected=null;
+                Assert.True(SpinWait.SpinUntil(()=>queue.TryTake(out taken,out projected),5000));
+                Assert.AreSame(group,taken);
+                CollectionAssert.AreEqual(new[]{2},projected.SelectMany(row=>row.Entities));
+                Assert.True(queue.TryTake(out taken,out projected));Assert.AreSame(other,taken);
+                CollectionAssert.AreEqual(new[]{1},projected.Single().Entities);
+            }finally{queue.Cancel();}
+        }
+
+        [Test] public void ProjectionQueueIsBoundedAndCancellationCannotPublishIntoTheNextGeneration()
+        {
+            var p=PlayableProfile.Default;var geometry=new NavGeometry(10,Array.Empty<NavObstacle>(),1);var view=View(p,geometry,Unit(1,new NavPoint(-5,0)));
+            var queue=new HumanMoveOrderQueue();var old=new PlayableCommand(1,0,"player-1",PlayableCommandKind.Move,new[]{1},new NavPoint(0,4));
+            Assert.True(queue.Enqueue(p,view,old));queue.TryTake(out _,out _);queue.Cancel();
+            Assert.Zero(queue.Count);Assert.False(queue.TryTake(out _,out _));
+            var next=new PlayableCommand(2,0,"player-1",PlayableCommandKind.Hold,new[]{1});
+            for(int i=0;i<PlayableRuntime.MaxOutstandingCommands;i++)Assert.True(queue.Enqueue(p,view,next));
+            Assert.False(queue.Enqueue(p,view,old));Assert.True(queue.TryTake(out var taken,out _));Assert.AreSame(next,taken);queue.Cancel();
+        }
+        [Test] public void RelayOrderRejectsGroundProjectionOutsideCaptureZone()
+        {
+            var p=PlayableProfile.Default;
+            var relay=new TerritorySite(7,PlayableBuildingKind.RelayTower,new NavPoint(12,0),p);
+            var barrier=new NavObstacle(-1,-20,1,20);
+            var geometry=new NavGeometry(20,new[]{barrier},1);
+            var view=new PlayableSnapshot(p.ProfileId,p.Revision,1,7,1,0,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,100,geometry,
+                new[]{Unit(1,new NavPoint(-5,0))},Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),
+                new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:p,publicSites:new[]{relay});
+            Assert.IsNotEmpty(HumanMoveDestination.Resolve(p,view,new[]{1},relay.Position,geometry),"Ordinary movement still projects to this side of the barrier");
+            Assert.IsEmpty(HumanMoveDestination.Resolve(p,view,new[]{1},relay.Position,geometry,relaySiteId:relay.Id),"An order to a relay must not substitute that ordinary projection");
+        }
         [Test] public void ReachableTargetKeepsExactCoordinatesEvenWhenItNeedsADetour()
         {
             var p=PlayableProfile.Default;var geometry=new NavGeometry(10,new[]{new NavObstacle(-1,-10,1,2)},1);var target=new NavPoint(5,.123);

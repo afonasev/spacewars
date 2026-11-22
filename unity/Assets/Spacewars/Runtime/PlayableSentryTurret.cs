@@ -6,7 +6,7 @@ namespace Spacewars.Runtime
     internal sealed partial class PlayableDomain
     {
         private double TurretRange=>profile.TurretRange;
-        private double DefenseRange(Building b)=>b.Kind==PlayableBuildingKind.GaussTower?profile.GaussRange:TurretRange;
+        private double DefenseRange(Building b)=>TerritoryRules.DefenseRange(profile,b.Kind);
         private bool TurretLegal(Building b,int id)
             =>(b.Kind!=PlayableBuildingKind.GaussTower||!AirTarget(id))&&id!=b.Id&&!wrecks.ContainsKey(id)&&VisibleTarget(b.Owner,id)&&Target(id,out var point,out var hp)&&hp>0&&Distance(b.Position,point)<=DefenseRange(b);
         private PlayableTurretSnapshot TurretSnapshot(Building b,PlayableOwner? observer=null)
@@ -93,8 +93,9 @@ namespace Spacewars.Runtime
             projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=b.Id,Target=s.Target,Faction=b.Owner,Kind=PlayableEntityKind.Explorer,
                 Damage=WeaponDamage(b.Owner,profile.TurretDamage),Radius=0,Speed=profile.TurretProjectileSpeed,Position=start.Ground,Height=start.Y,Spatial=true,
                 DirectionX=direction.X,DirectionY=direction.Y,DirectionZ=direction.Z,Remaining=Math.Max(0,TurretRange*(1+profile.ProjectileExtraRangePercent/100)-Distance(b.Position,start.Ground))});
+            b.LastCombatShotTarget=s.Target;
             s.ShotSequence++;
-            Sound(PlayableSoundKind.Shot,b.Position,PlayableEntityKind.Explorer,b.Owner,unitId:b.Id,altitude:start.Y,shotSide:side);
+            Sound(PlayableSoundKind.Shot,b.Position,PlayableEntityKind.Explorer,b.Owner,building:true,unitId:b.Id,altitude:start.Y,shotSide:side);
         }
     }
 }

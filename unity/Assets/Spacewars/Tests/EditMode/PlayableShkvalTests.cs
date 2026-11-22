@@ -3,6 +3,7 @@ using System.Collections;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using Spacewars.Presentation;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
 namespace Spacewars.Tests.EditMode
@@ -98,6 +99,73 @@ namespace Spacewars.Tests.EditMode
             Call("AdvanceIndexedCombat",interval);
             for(int c=0;c<4;c++)Assert.Zero(View().Entities.Single(x=>x.Id==gun).ShkvalCells.Remaining(c));
         }
+        [Test] public void ReleaseProfileAppliesShkvalDamageSpeedAndLaunchInterval()
+        {
+            var path=System.IO.Path.Combine(System.IO.Path.GetTempPath(),Guid.NewGuid()+".json");
+            var store=new NativeBalanceStore(PlayableProfile.Default,path,authoring:false,startOnRelease:true);
+            Assert.True(store.HasActive,store.ReleaseProblem);
+            var previous=store.Resolve(16);
+            Assert.AreEqual(10,previous.ShkvalDamage);
+            Assert.AreEqual(20,previous.ShkvalDirectHitDamage);
+            Assert.AreEqual(12,previous.ShkvalProjectileSpeed);
+            Assert.AreEqual(1.8,PlayableUnitRules.ShkvalFireInterval(previous,false),1e-9);
+            p=store.Resolve(17);
+            Assert.GreaterOrEqual(store.Active.Revision,p.Revision);
+            TestContext.WriteLine($"Active={store.ActiveIdentity}; testing {NativeBalanceStore.DefaultId}@{p.Revision}");
+            domain=Activator.CreateInstance(Domain,Flags,null,new object[]{p,1L},null);
+            Clear();
+            int gun=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0);
+            int target=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);
+            Set(target,"Reload",999d);
+            Set(gun,"StoppedSeconds",10d);
+            Set(gun,"Target",target);
+            Set(gun,"ExplicitTarget",true);
+            Call("RefreshVision");
+            Align(gun,target);
+            Call("AdvanceIndexedCombat",0d);
+
+            var shots=(IList)Domain.GetField("projectiles",Flags).GetValue(domain);
+            var shot=shots.Cast<object>().Single(x=>FieldObject(x,"Rocket")!=null);
+            var rocket=FieldObject(shot,"Rocket");
+            var flight=(BallisticFlight)FieldObject(rocket,"Flight");
+            Assert.AreEqual(20d,FieldObject(shot,"Damage"));
+            Assert.AreEqual(40d,FieldObject(rocket,"DirectDamage"));
+            Assert.AreEqual(8.4,PlayableBallistics.Length(flight.Start,flight.End,flight.ArcHeight)/flight.Duration,1e-9);
+            Assert.AreEqual(2.7,Get<double>(gun,"Reload"),1e-9);
+            Assert.AreEqual(2.16,PlayableUnitRules.ShkvalFireInterval(p,true),1e-9);
+        }
+
+        [Test]public void GuidanceShortensActiveAndSubsequentLaunchIntervals()
+        {
+            var data=p.CopyData();
+            data.revision++;
+            data.shkvalGuidanceFireIntervalMultiplier=.75;
+            p=PlayableProfile.Create(data);
+            Call("ApplyBalance",p);
+            Factory();
+            int center=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.ScientificCenter).Id;
+            int gun=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0);
+            int target=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);
+            Set(target,"Reload",999d);
+            Set(gun,"StoppedSeconds",10d);
+            Set(gun,"Target",target);
+            Set(gun,"ExplicitTarget",true);
+            Call("RefreshVision");
+            Align(gun,target);
+            Call("AdvanceIndexedCombat",0d);
+            Assert.AreEqual(1.8,Get<double>(gun,"Reload"),1e-9);
+
+            CompleteGuidance(center);
+            Assert.AreEqual(1.35,Get<double>(gun,"Reload"),1e-9);
+            Assert.AreEqual(2.7,View().Entities.Single(x=>x.Id==gun).ShkvalCells.Remaining(0),1e-9);
+            Align(gun,target);
+            Call("AdvanceIndexedCombat",1.349d);
+            Assert.AreEqual(1,View().Projectiles.Count(shot=>shot.OwnerId==gun));
+            Call("AdvanceIndexedCombat",.002d);
+            Assert.AreEqual(2,View().Projectiles.Count(shot=>shot.OwnerId==gun));
+            Assert.AreEqual(1.35,Get<double>(gun,"Reload"),1e-9);
+        }
+
         [Test]public void MixedProductionKeepsShkvalPayloadAndTypedRepeat()
         {
             int f=Factory(),before=View().Credits;Send(PlayableCommandKind.QueueShkval,f);Send(PlayableCommandKind.QueueExplorer,f);Send(PlayableCommandKind.QueueTank,f);Call("AdvanceProduction",1d);

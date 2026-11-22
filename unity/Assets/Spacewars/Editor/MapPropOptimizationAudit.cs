@@ -134,14 +134,16 @@ namespace Spacewars.Editor
                     File.WriteAllText(System.IO.Path.Combine(Output,key+".json"),JsonConvert.SerializeObject(new{key,map=map?.Id,revision=map?.Revision,rows,uniqueMeshes=filters.Select(f=>f.sharedMesh).Distinct().Count(),renderers=host.GetComponentsInChildren<Renderer>(true).Length,materials=host.GetComponentsInChildren<Renderer>(true).SelectMany(r=>r.sharedMaterials).Distinct().Count()},Formatting.Indented));
                     void Frame(string label,Vector3 center,float size){if(Environment.GetEnvironmentVariable("SPACEWARS_PROP_SKIP_FRAMES")=="1")return;camera.orthographicSize=size;camera.transform.position=center+new Vector3(0,90,-70);camera.transform.LookAt(center);Save(camera,System.IO.Path.Combine(Output,key+"-"+label+".png"));}
                     Frame("overview",Vector3.zero,(float)p.ArenaHalfExtent*1.12f);
-                    if(key=="ThreeCrossings")foreach(string label in new[]{"heavy tractor wrecks","parked service equipment","corporate extraction scenery","perimeter building compounds","service infrastructure"}){
-                        var r=host.GetComponentsInChildren<MeshRenderer>().First(x=>x.name=="Detail — "+label);Vector3 center=r.bounds.center;
-                        // Combined groups cover the map: focus an actual planned member.
-                        if(label!="parked service equipment"){
-                            var filter=r.GetComponent<MeshFilter>();var mesh=filter.sharedMesh;
-                            center=filter.transform.TransformPoint(mesh.vertices[mesh.GetIndices(0,true)[0]]);
+                    if(key=="ThreeCrossings"){
+                        var targets=new (string kind,float closeSize)[]{
+                            ("ColonyTractor",8),("PerimeterHangar",15),("BankPump",5),("MineWorkModule",5)
+                        };
+                        foreach(var target in targets){
+                            var filter=filters.First(f=>f.name=="Yard — "+target.kind);
+                            var center=filter.GetComponent<MeshRenderer>().bounds.center;
+                            Frame(target.kind+"-game",center,(float)p.CameraOrthoSize);
+                            Frame(target.kind+"-close",center,target.closeSize);
                         }
-                        Frame(label+"-game",center,(float)p.CameraOrthoSize);Frame(label+"-close",center,label=="perimeter building compounds"?15:label=="heavy tractor wrecks"?8:5);
                     }
                     if(key!="ThreeCrossings"){
                         string[] targets=key=="WhiteMeridian"?new[]{"Wreck ","Meridian decor expedition ","Meridian foundation concrete"}:key=="CrimsonGrove"?new[]{"Faceted crimson crystal clusters","Complete construction apron"}:key=="BasaltCrown"?new[]{"Basalt details — Kerb","Basalt details — Ore"}:key=="Foundry"?new[]{"Foundry grey industrial hall"}:key=="Nereida"?new[]{"Station laboratory"}:Array.Empty<string>();

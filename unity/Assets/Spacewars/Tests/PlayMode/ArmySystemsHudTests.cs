@@ -45,7 +45,7 @@ public sealed class ArmySystemsHudTests
         var actions=Get<OfflinePadAction[]>("battleActions");Assert.False(actions.Any(a=>a.Command?.Kind==PlayableCommandKind.QueueResearch&&a.Command.Research==PlayableResearchKind.AdvancedReinforcedConcrete));
         Show(new[]{Completed(PlayableResearchKind.ReinforcedConcrete),Completed(PlayableResearchKind.ScientificCenterUpgrade)});
         var action=Get<OfflinePadAction[]>("battleActions").Single(a=>a.Command?.Kind==PlayableCommandKind.QueueResearch&&a.Command.Research==PlayableResearchKind.AdvancedReinforcedConcrete);
-        Assert.AreEqual(200,action.Price);Assert.That(action.Detail,Does.Contain("30 с"));Assert.That(action.Detail,Does.Contain("50%"));Assert.That(action.Detail,Does.Contain("бетон II"));
+        Assert.AreEqual(200,action.Price);Assert.That(action.Detail,Does.Contain("30 с"));Assert.That(action.Detail,Does.Contain("+50%"));Assert.That(action.Detail,Does.Not.Contain("→"));Assert.That(action.Detail,Does.Contain("бетон II"));
         var root=Get<VisualElement>("root");var panel=host.GetComponent<UIDocument>().panelSettings;var target=new RenderTexture(1280,900,24);target.Create();panel.targetTexture=target;root.style.width=1280/panel.scale;root.style.height=900/panel.scale;
         try{Get<OrbitalBattleRing>("battleRing").Set(Get<OfflinePadAction[]>("battleActions"),"Научный центр",action.Sector.Id,contextGlyph:"science");yield return null;yield return null;
             var old=RenderTexture.active;RenderTexture.active=target;var pixels=new Texture2D(1280,900,TextureFormat.RGBA32,false);pixels.ReadPixels(new Rect(0,0,1280,900),0,0);pixels.Apply();RenderTexture.active=old;
@@ -72,11 +72,54 @@ public sealed class ArmySystemsHudTests
     {
         var data=p.CopyData();data.weaponSystemsLevel1Cost=327;data.weaponSystemsLevel1Seconds=33;p=PlayableProfile.Create(data);Set("profile",p);Show();
         var actions=Get<OfflinePadAction[]>("battleActions");var weapon=actions.Single(a=>a.Command?.Research==PlayableResearchKind.ImprovedWeaponSystems&&a.Command.Kind==PlayableCommandKind.QueueResearch);
-        Assert.AreEqual(327,weapon.Price);Assert.That(weapon.Detail,Does.Contain("33 с"));Assert.That(weapon.Detail,Does.Contain("Улучшенные оружейные системы"));Assert.That(weapon.Detail,Does.Contain("15%"));
+        Assert.AreEqual(327,weapon.Price);Assert.That(weapon.Detail,Does.Contain("33 с"));Assert.That(weapon.Detail,Does.Contain("Улучшенные оружейные системы"));Assert.That(weapon.Detail,Does.Contain("+15%"));
+        Assert.That(weapon.Detail,Does.Not.Contain("→"));
         Assert.False(actions.Any(a=>a.Command?.Kind==PlayableCommandKind.QueueResearch&&a.Command.Research==PlayableResearchKind.AdvancedWeaponSystems));
         Show(new[]{Completed(PlayableResearchKind.ScientificCenterUpgrade),Completed(PlayableResearchKind.ImprovedWeaponSystems),Completed(PlayableResearchKind.ImprovedDefensiveSystems)});
         actions=Get<OfflinePadAction[]>("battleActions");foreach(var kind in new[]{PlayableResearchKind.AdvancedWeaponSystems,PlayableResearchKind.AdvancedDefensiveSystems}){
-            var a=actions.Single(x=>x.Command?.Kind==PlayableCommandKind.QueueResearch&&x.Command.Research==kind);Assert.AreEqual(300,a.Price);Assert.That(a.Detail,Does.Contain("45 с"));Assert.That(a.Detail,Does.Contain("30%"));}
+            var a=actions.Single(x=>x.Command?.Kind==PlayableCommandKind.QueueResearch&&x.Command.Research==kind);Assert.AreEqual(300,a.Price);Assert.That(a.Detail,Does.Contain("45 с"));Assert.That(a.Detail,Does.Contain("+30%"));Assert.That(a.Detail,Does.Not.Contain("→"));}
+    }
+    [Test] public void SpecializedResearchShowsTheSameNumericChangesInCardAndHover()
+    {
+        Show(new[]{Completed(PlayableResearchKind.ImprovedDefensiveSystems)});
+        var actions=Get<OfflinePadAction[]>("battleActions");
+        var root=Get<VisualElement>("root");
+        string N(double value)=>value.ToString("0.##");
+        double tankHealth=p.TankHealth*(1+p.DefensiveSystemsLevel1BonusPercent/100);
+        var expected=new Dictionary<PlayableResearchKind,string[]>{
+            {PlayableResearchKind.TankChassis,new[]{
+                "Скорость: "+N(p.TankSpeed)+" → "+N(p.TankChassisSpeed)+" м/с",
+                "Макс. здоровье: "+N(PlayableStatRounding.MaximumHealth(p,tankHealth))+" → "+
+                    N(PlayableStatRounding.MaximumHealth(p,tankHealth*(1+p.TankChassisHealthBonusPercent/100)))+" HP"}},
+            {PlayableResearchKind.ExplorerAssaultGuns,new[]{
+                "Выстрелов в очереди: "+p.ExplorerBurstSize+" → "+p.ExplorerAssaultBurstSize}},
+            {PlayableResearchKind.ShkvalGuidance,new[]{
+                "Дальность: "+N(p.ShkvalBaseRange)+" → "+N(p.ShkvalGuidanceRange)+" м",
+                "Радиус взрыва: "+N(PlayableUnitRules.ShkvalBlastRadius(p,false))+" → "+N(PlayableUnitRules.ShkvalBlastRadius(p,true))+" м",
+                "Интервал пусков: "+N(PlayableUnitRules.ShkvalFireInterval(p,false))+" → "+N(PlayableUnitRules.ShkvalFireInterval(p,true))+" с"}},
+            {PlayableResearchKind.HawkSalvoSystems,new[]{
+                "Подготовка: "+N(p.HawkPreparationSeconds)+" → "+N(p.HawkUpgradedPreparationSeconds)+" с",
+                "Интервал ракет: "+N(p.HawkSalvoDelay)+" → "+N(p.HawkUpgradedSalvoDelay)+" с"}},
+            {PlayableResearchKind.ScientificCenterUpgrade,new[]{"Оружие: II–III","Защита: II–III","Усиленный бетон: II"}}
+        };
+        foreach(var entry in expected)
+        {
+            string suffix=entry.Key==PlayableResearchKind.TankChassis?"tank-chassis":
+                entry.Key==PlayableResearchKind.ExplorerAssaultGuns?"explorer-assault-guns":
+                entry.Key==PlayableResearchKind.ShkvalGuidance?"shkval-guidance":entry.Key.ToString();
+            var action=actions.Single(a=>a.Sector.Id.EndsWith(":"+suffix));
+            Assert.AreEqual(PlayableResearchRules.Name(entry.Key),action.Presentation.Title);
+            var hover=root.Q<Button>("research-"+entry.Key).tooltip;
+            StringAssert.Contains(action.Presentation.Description,hover);
+            foreach(string stat in entry.Value)
+            {
+                CollectionAssert.Contains(action.Presentation.Stats,stat);
+                StringAssert.Contains(stat,hover);
+            }
+            var compactCard=new RadialActionCard();
+            compactCard.Set(action,false,null,compact:true);
+            Assert.AreEqual(DisplayStyle.Flex,compactCard.Q("radial-detail").style.display.value);
+        }
     }
     [Test] public void FocusSubmitRoutesTheSelectedNewResearchOnceAndEnemyHasNoAction()
     {
@@ -121,7 +164,7 @@ public sealed class ArmySystemsHudTests
         }finally{navigation.Dispose();panel.targetTexture=null;texture.Release();UnityEngine.Object.Destroy(texture);Directory.Delete(directory,true);}
     }
     [UnityTest] public IEnumerator ApprovedBuildingUpgradeBadgeReview()=>UpgradeBadgeReview("Улучшения зданий · вариант Б",new[]{"factoryUpgraded","hangarUpgraded","refineryUpgraded","scientificCenterUpgraded"},new[]{"Фабрика","Ангар","Переработка","Научный центр"},"building-badges.png");
-    [UnityTest] public IEnumerator ApprovedUnitUpgradeBadgeReview()=>UpgradeBadgeReview("Улучшения юнитов · шевроны",new[]{"tankHybridUpgraded","explorerUpgraded","shkval-guidance-3","hawkUpgraded"},new[]{"Танк","Исследователь","Шквал","Ястреб"},"unit-badges.png");
+    [UnityTest] public IEnumerator ApprovedUnitUpgradeBadgeReview()=>UpgradeBadgeReview("Улучшения юнитов · шевроны",new[]{"tankHybridUpgraded","explorerUpgraded","shkval-guidance-3","hawkUpgraded"},new[]{"Вепрь","Исследователь","Шквал","Ястреб"},"unit-badges.png");
     IEnumerator UpgradeBadgeReview(string heading,string[] keys,string[] names,string filename)
     {
         var root=Get<VisualElement>("root");root.Clear();root.style.backgroundColor=OrbitalTheme.Background;

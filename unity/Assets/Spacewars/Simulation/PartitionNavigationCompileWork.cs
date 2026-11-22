@@ -25,6 +25,7 @@ namespace Spacewars.Simulation
         internal long ForkReserveBytes=>3*NavStorageLayout.Charge(128);
         internal long CopyMetadataBytes=>0;
         internal static long InitialStorageBytes=>2*NavStorageLayout.Charge(128);
+        internal static long StorageBytesWithFirstPage=>InitialStorageBytes+NavStorageDirectory<T>.FirstPageBytes(256,elementBytes);
         internal long DirectoryRetainedBytes=>InitialStorageBytes+pages.DirectoryBytes+NavStorageLayout.Charge(96)*pages.Count;
         internal long CommittedStorageBytes(int width)=>checked(DirectoryRetainedBytes+(long)Math.Max(width,elementBytes)*Capacity);
         internal long AppendGrowthBytes(int width,int additions=1)=>checked((long)additions*pages.WriteGrowthBytes(pageSize,Math.Max(width,elementBytes)));

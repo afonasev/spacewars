@@ -3,6 +3,27 @@ namespace Spacewars.Runtime
 {
     public sealed partial class NavigationSession
     {
+#if UNITY_INCLUDE_TESTS
+        internal object ObserveRotationMotorForTests(int actor,int peer)
+        {
+            var causal=NavCrowdMotion.Causal;
+            NavCrowdMotion.Causal=default;
+            NavCrowdMotion.CausalActor=actor;
+            NavCrowdMotion.CausalPeerActor=peer;
+            if(!causal.SelectedSeen)return null;
+            var spine=InstalledExecutionFor(actor)?.Corridor?.RecastPlan?.Spine;
+            return new
+            {
+                causal.SelectedSeen,causal.FinalSeen,causal.PolicyRefused,causal.TypedRefused,causal.HintFlags,causal.GuideTarget,
+                Body=new{causal.Body.Id,causal.Body.Position,causal.Body.Target,causal.Body.Heading,causal.Body.Active,causal.Body.Speed,causal.Body.OwnPaceCap,causal.Body.OwnedShortReverseDistance,causal.Body.LocalLookaheadSeconds},
+                Selected=new{causal.Selected.Position,causal.Selected.Heading,causal.Selected.Blocked,causal.Selected.StaticNoWinner,causal.Selected.IndependentTurn},
+                Final=new{causal.Final.Position,causal.Final.Heading},
+                Typed=new{causal.FocusContext.TypedState.Phase,causal.FocusContext.TypedState.Cursor,causal.FocusContext.LocalLength,causal.FocusContext.GlobalLength},
+                Fan=spine==null?null:new{spine.FanCenter,spine.FanRadius,Boundary=spine.Node(spine.FanNode).Position},
+                causal.ConflictCount,causal.First,causal.Last
+            };
+        }
+#endif
         internal object MovementDelayRecastReceipt;
         private void CaptureRecastMovementReceipt(NavPreparedCrowdStep frame)
         {

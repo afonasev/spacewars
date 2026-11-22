@@ -18,6 +18,147 @@ namespace Spacewars.Tests.EditMode
         private static GameplayAudioPlan Primed(GameplayAudioProfile profile=null)
         {var p=new GameplayAudioPlan(profile??new GameplayAudioProfile());p.Observe(new[]{Screen(Frame(0))},0,true);return p;}
 
+        [TestCase(0,false,"shkval-impact-0")]
+        [TestCase(1,false,"shkval-impact-1")]
+        [TestCase(2,false,"shkval-impact-2")]
+        [TestCase(3,false,"shkval-impact-3")]
+        [TestCase(8,false,"shkval-impact-4")]
+        [TestCase(0,true,"explosion")]
+        [TestCase(2,true,"shkval-impact-2")]
+        [TestCase(null,false,"explosion")]
+        public void ShkvalImpactUsesOneVoiceForTheObservedUnitDamageCount(int? count,bool building,string clip)
+        {
+            var hit=new PlayableSoundEvent(1,1,PlayableSoundKind.Impact,default,PlayableEntityKind.Shkval,
+                building:building,shkvalDamagedUnits:count);
+            var frame=Frame(1,new[]{hit});
+            var cue=Primed().Observe(new[]{Screen(frame),Screen(frame)},.1,true).Single();
+            Assert.AreEqual(clip,cue.Clip);
+            Assert.AreEqual(clip=="explosion"?.85f:1f,cue.Pitch);
+            Assert.AreEqual(new GameplayAudioProfile().explosionGain,cue.BaseGain);
+        }
+
+        [Test] public void DifferentShkvalImpactCountsShareTheRepeatLimit()
+        {
+            var first=new PlayableSoundEvent(1,1,PlayableSoundKind.Impact,default,PlayableEntityKind.Shkval,
+                shkvalDamagedUnits:0);
+            var second=new PlayableSoundEvent(2,1,PlayableSoundKind.Impact,default,PlayableEntityKind.Shkval,
+                shkvalDamagedUnits:3);
+            Assert.AreEqual(1,Primed().Observe(new[]{Screen(Frame(1,new[]{first,second}))},.1,true).Length);
+        }
+
+        [Test] public void UnitDestructionDoesNotSuppressTheRocketImpactAtTheSamePosition()
+        {
+            var destruction=new PlayableSoundEvent(1,1,PlayableSoundKind.Destroyed,default,PlayableEntityKind.Tank);
+            var impact=new PlayableSoundEvent(2,1,PlayableSoundKind.Impact,default,PlayableEntityKind.Shkval,
+                shkvalDamagedUnits:3);
+            var cues=Primed().Observe(new[]{Screen(Frame(1,new[]{destruction,impact}))},.1,true);
+            CollectionAssert.AreEquivalent(new[]{"explosion","shkval-impact-3"},cues.Select(c=>c.Clip));
+        }
+
+        [Test] public void NuclearImpactUsesDedicatedSpatialClipOnceAtAuthoredPitch()
+        {
+            var profile=new GameplayAudioProfile{nuclearImpactGain=.41f};
+            var blast=new PlayableSoundEvent(1,1,PlayableSoundKind.OrbitalNuclearImpact,new NavPoint(22,0),PlayableEntityKind.Shkval);
+            var view=Frame(1,new[]{blast});
+            var plan=Primed(profile);
+            var cue=plan.Observe(new[]{Screen(view),Screen(view)},.1,true).Single();
+            Assert.AreEqual("ability-nuclear-impact",cue.Clip);
+            Assert.AreEqual(profile.nuclearImpactGain,cue.BaseGain);
+            Assert.AreEqual(1,cue.Pitch);
+            Assert.Greater(cue.Pan,0);
+            Assert.Less(cue.Gain,cue.BaseGain);
+            Assert.False(cue.Notification);
+            Assert.IsEmpty(plan.Observe(new[]{Screen(view)},.2,true));
+        }
+
+        [Test] public void NuclearDescentUsesSharedAbilityGainAndExpiresAtImpact()
+        {
+            var profile=new GameplayAudioProfile{abilityGain=.23f};
+            var descent=new PlayableSoundEvent(1,1,PlayableSoundKind.OrbitalNuclearDescent,
+                new NavPoint(22,0),PlayableEntityKind.Shkval,phaseEndTick:16);
+            var view=Frame(1,new[]{descent});
+            var plan=Primed(profile);
+            var cue=plan.Observe(new[]{Screen(view),Screen(view)},.1,true).Single();
+            Assert.AreEqual("ability-nuclear-descent",cue.Clip);
+            Assert.AreEqual(profile.abilityGain,cue.BaseGain);
+            Assert.AreEqual(1,cue.Pitch);
+            Assert.AreEqual(16,cue.PhaseEndTick);
+            Assert.Greater(cue.Pan,0);
+            Assert.Less(cue.Gain,cue.BaseGain);
+            Assert.False(cue.Notification);
+            Assert.IsEmpty(plan.Observe(new[]{Screen(view)},.2,true));
+            Assert.IsEmpty(Primed(profile).Observe(new[]{Screen(Frame(16,new[]{descent}))},.5,true));
+        }
+
+        [TestCase(PlayableEntityKind.Explorer,true,false,0,"tank-shot")]
+        [TestCase(PlayableEntityKind.Explorer,true,false,1,"tank-shot")]
+        [TestCase(PlayableEntityKind.Hawk,false,false,0,"hawk-rocket-launch")]
+        [TestCase(PlayableEntityKind.Hawk,false,false,1,"hawk-rocket-launch")]
+        [TestCase(PlayableEntityKind.Tank,false,false,-1,"vepr-shot")]
+        [TestCase(PlayableEntityKind.Explorer,false,false,-1,"explorer-burst-shot")]
+        [TestCase(PlayableEntityKind.Explorer,false,false,0,"explorer-burst-shot")]
+        [TestCase(PlayableEntityKind.Tank,false,true,-1,"gauss-tower-shot")]
+        [TestCase(PlayableEntityKind.Explorer,false,true,0,"sentry-turret-shot")]
+        [TestCase(PlayableEntityKind.Shkval,false,false,-1,"tank-shot")]
+        [TestCase(PlayableEntityKind.Igla,false,false,-1,"igla-heavy-coil")]
+        public void ShotClipMatchesTheWeaponAndEmitter(
+            PlayableEntityKind weapon,bool rocket,bool building,int side,string clip)
+        {
+            var shot=new PlayableSoundEvent(1,1,PlayableSoundKind.Shot,default,weapon,building,shotSide:side,rocketLaunch:rocket);
+            Assert.AreEqual(clip,Primed().Observe(new[]{Screen(Frame(1,new[]{shot}))},.1,true).Single().Clip);
+        }
+
+        [TestCase(PlayableEntityKind.Tank,false,true,"vepr-unit-impact")]
+        [TestCase(PlayableEntityKind.Tank,false,false,"impact")]
+        [TestCase(PlayableEntityKind.Explorer,false,true,"impact")]
+        [TestCase(PlayableEntityKind.Explorer,true,false,"impact")]
+        public void OnlyVeprDamageToMobileUnitsUsesTheBImpact(
+            PlayableEntityKind weapon,bool building,bool damagedUnit,string clip)
+        {
+            var contact=new PlayableDirectContact(1,2,default,damagedUnit:damagedUnit);
+            var impact=new PlayableSoundEvent(1,1,PlayableSoundKind.Impact,default,weapon,building,contact:contact);
+            var cue=Primed().Observe(new[]{Screen(Frame(1,new[]{impact}))},.1,true).Single();
+            Assert.AreEqual(clip,cue.Clip);
+        }
+
+        [TestCase(PlayableEntityKind.Hawk,true,true,"hawk-rocket-impact")]
+        [TestCase(PlayableEntityKind.Hawk,true,false,"impact")]
+        [TestCase(PlayableEntityKind.Hawk,false,true,"impact")]
+        [TestCase(PlayableEntityKind.Explorer,true,true,"impact")]
+        public void OnlyHawkRocketsThatDamageUnitsUseTheNewImpactClip(
+            PlayableEntityKind weapon,bool rocket,bool damagedUnit,string clip)
+        {
+            var contact=new PlayableDirectContact(1,2,default,default(BallisticPoint),
+                rocket:rocket,damagedUnit:damagedUnit);
+            var fact=new PlayableSoundEvent(1,1,PlayableSoundKind.Impact,default,weapon,contact:contact);
+            var screen=Screen(Frame(1,new[]{fact}));
+            var cue=Primed().Observe(new[]{screen,screen},.1,true).Single();
+            Assert.AreEqual(clip,cue.Clip);
+            Assert.AreEqual(1,cue.Pitch);
+        }
+
+        [TestCase(PlayableEntityKind.Tank,true,true,"vepr-building-impact")]
+        [TestCase(PlayableEntityKind.Tank,true,false,"impact")]
+        [TestCase(PlayableEntityKind.Tank,false,true,"impact")]
+        [TestCase(PlayableEntityKind.Explorer,true,true,"impact")]
+        [TestCase(PlayableEntityKind.Hawk,true,true,"impact")]
+        [TestCase(PlayableEntityKind.Shkval,true,true,"explosion")]
+        public void VeprBuildingImpactClipRequiresDirectContactOnBuilding(
+            PlayableEntityKind weapon,bool building,bool physicalContact,string clip)
+        {
+            var contact=new PlayableDirectContact(1,2,default,physicalContact?(BallisticPoint?)default(BallisticPoint):null);
+            var hit=new PlayableSoundEvent(1,1,PlayableSoundKind.Impact,default,weapon,building,contact:contact);
+            var plan=Primed();
+            var cue=plan.Observe(new[]{Screen(Frame(1,new[]{hit}))},.1,true).Single();
+            Assert.AreEqual(clip,cue.Clip);
+            if(clip=="vepr-building-impact")
+            {
+                Assert.AreEqual(new GameplayAudioProfile().impactGain,cue.BaseGain);
+                var ordinary=new PlayableSoundEvent(2,2,PlayableSoundKind.Impact,default,PlayableEntityKind.Hawk);
+                Assert.IsEmpty(plan.Observe(new[]{Screen(Frame(2,new[]{ordinary}))},.125,true));
+            }
+        }
+
         [Test] public void ExplorerHitIsQuieterAndStillDeduplicatedAcrossScreens()
         {
             var profile=new GameplayAudioProfile();

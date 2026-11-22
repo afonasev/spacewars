@@ -55,30 +55,45 @@ namespace Spacewars.Tests.PlayMode
                 var lighting=IndustrialLightingProfile.Load(map.Id);var sun=host.GetComponentsInChildren<Light>().Single(l=>l.type==LightType.Directional);
                 Assert.AreEqual(lighting.sunIntensity,sun.intensity);Assert.AreEqual(Color.HSVToRGB(lighting.sunHue,lighting.sunSaturation,1),sun.color);Assert.AreEqual(Quaternion.Euler(lighting.sunElevation,lighting.sunAzimuth,0),sun.transform.rotation);Assert.NotNull(camera.GetComponent<VisibleShadowCoverage>());
                 NativeDisplaySettings.Shadows=false;Assert.AreEqual(LightShadows.None,sun.shadows);NativeDisplaySettings.Shadows=true;Assert.AreEqual(LightShadows.Soft,sun.shadows);
-                var equipment=host.GetComponentsInChildren<MeshRenderer>().Where(r=>r.name=="Detail — parked service equipment").ToArray();Assert.AreEqual(1,equipment.Length,"Selected one service composition is part of production world");
-                Assert.Zero(equipment.Sum(r=>r.GetComponentsInChildren<Collider>().Length));Assert.Greater(equipment[0].GetComponent<MeshFilter>().sharedMesh.colors.Distinct().Count(),2,"Authored neutral materials retained");
+                var renderers=host.GetComponentsInChildren<MeshRenderer>();
+                Assert.False(renderers.Any(r=>r.name=="Detail — parked service equipment"));
+                var equipment=renderers.Where(r=>r.name=="Yard — BankPump"||r.name=="Yard — MineWorkModule").ToArray();
+                Assert.AreEqual(1,equipment.Count(r=>r.name=="Yard — BankPump"));
+                Assert.AreEqual(4,equipment.Count(r=>r.name=="Yard — MineWorkModule"));
+                Assert.Zero(equipment.Sum(r=>r.GetComponentsInChildren<Collider>().Length));
+                foreach(var r in equipment)Assert.Greater(r.GetComponent<MeshFilter>().sharedMesh.colors.Distinct().Count(),2,"Authored neutral materials retained");
                 var diagnostic=new Material(Resources.Load<Shader>("TerritoryFog"));
                 try{using(var surfaces=new ThreeCrossingsMaterials(ThreeCrossingsSurfaceProfile.Load(),map,diagnostic,gameplay))
                 {
+                    var reservations=ThreeCrossingsDetails.Plan(map,gameplay,surfaces);
                     foreach(var renderer in equipment)
                     {
-                        var mesh=renderer.GetComponent<MeshFilter>().sharedMesh;var bounds=mesh.bounds;
-                        Assert.IsTrue(ThreeCrossingsServiceScenery.VisibleFromGameplay(map,gameplay,bounds,renderer.transform.position,renderer.transform.localScale.x,renderer.transform.eulerAngles.y),"Terrain cannot mask the selected equipment silhouette from the normal camera");
-                        var reserve=ThreeCrossingsServiceScenery.Envelope(bounds,renderer.transform.position,renderer.transform.localScale.x,.6f,gameplay,renderer.transform.eulerAngles.y);
-                        var scree=host.GetComponentsInChildren<MeshFilter>().Single(f=>f.name=="Detail — geological debris");
-                        foreach(var vertex in scree.sharedMesh.vertices){var q=scree.transform.TransformPoint(vertex);Assert.IsFalse(reserve.Contains(new NavPoint(q.x,q.z)),"Remaining scree must not intersect the full service reserve");}
-                        var physical=ThreeCrossingsDetails.CompoundEnvelope(bounds,renderer.transform.position,renderer.transform.localScale.x,0,null,renderer.transform.eulerAngles.y);
-                        var projected=ThreeCrossingsDetails.CompoundEnvelope(bounds,renderer.transform.position,renderer.transform.localScale.x,0,gameplay,renderer.transform.eulerAngles.y);
-                        for(double x=Math.Min(physical.MinX,projected.MinX);x<=Math.Max(physical.MaxX,projected.MaxX);x+=.1)for(double z=Math.Min(physical.MinZ,projected.MinZ);z<=Math.Max(physical.MaxZ,projected.MaxZ);z+=.1)
+                        var placement=renderer.transform.position;
+                        string originalKind=renderer.name=="Yard — BankPump"?"PumpNode":"CargoModule";
+                        var reserve=reservations.Single(item=>item.Kind==originalKind&&item.Position==placement);
+                        var mesh=renderer.GetComponent<MeshFilter>().sharedMesh;
+                        var bounds=mesh.bounds;
+                        var original=CrossingStartYardKit.Build(originalKind);
+                        try{
+                            bool wasVisible=ThreeCrossingsServiceScenery.VisibleFromGameplay(map,gameplay,original.bounds,placement,renderer.transform.localScale.x,renderer.transform.eulerAngles.y);
+                            if(wasVisible)Assert.IsTrue(ThreeCrossingsServiceScenery.VisibleFromGameplay(map,gameplay,bounds,placement,renderer.transform.localScale.x,renderer.transform.eulerAngles.y),renderer.name+" must retain full visibility where its predecessor was fully visible");
+                        }finally{UnityEngine.Object.Destroy(original);}
+                        // The replacement must fit its entire footprint within the
+                        // original protected pocket, including the shared art clearance.
+                        foreach(var v in mesh.vertices)
                         {
-                            var point=new NavPoint(x,z);Assert.IsTrue(map.SupportsFootprint(point,.3f+surfaces.Art.detailClearance),"Full screen projection remains supported at original clearance");
-                            float u=(float)(point.X/(map.HalfExtent*2)+.5),v=(float)(point.Z/(map.HalfExtent*2)+.5);Assert.LessOrEqual(surfaces.RoadMask.GetPixelBilinear(u,v).r,.015f);Assert.LessOrEqual(surfaces.ConstructionMask.GetPixelBilinear(u,v).g,.01f);
+                            var q=renderer.transform.TransformPoint(v)-placement;
+                            Assert.LessOrEqual(new Vector2(q.x,q.z).magnitude,reserve.Radius+.0001f,renderer.name);
                         }
-                        // Independent fine sample of the entire local rectangle, not just vertices/anchor.
+                        Assert.True(map.SupportsFootprint(new NavPoint(placement.x,placement.z),reserve.Radius+surfaces.Art.detailClearance),
+                            renderer.name+" remains in the checked ground reservation");
                         for(float x=bounds.min.x;x<=bounds.max.x+.01f;x+=.1f)for(float z=bounds.min.z;z<=bounds.max.z+.01f;z+=.1f)
                         {
-                            var q=renderer.transform.TransformPoint(new Vector3(x,0,z));var point=new NavPoint(q.x,q.z);Assert.IsTrue(map.SupportsFootprint(point,.3f+surfaces.Art.detailClearance));Assert.AreEqual(renderer.transform.position.y,(float)map.SurfaceHeight(point),.05f);
-                            float u=(float)(point.X/(map.HalfExtent*2)+.5),v=(float)(point.Z/(map.HalfExtent*2)+.5);Assert.LessOrEqual(surfaces.RoadMask.GetPixelBilinear(u,v).r,.015f);Assert.LessOrEqual(surfaces.ConstructionMask.GetPixelBilinear(u,v).g,.01f);
+                            var q=renderer.transform.TransformPoint(new Vector3(x,0,z));var point=new NavPoint(q.x,q.z);
+                            Assert.IsTrue(map.SupportsFootprint(point,0));Assert.AreEqual(placement.y,(float)map.SurfaceHeight(point),.05f);
+                            float u=(float)(point.X/(map.HalfExtent*2)+.5),v=(float)(point.Z/(map.HalfExtent*2)+.5);
+                            Assert.LessOrEqual(surfaces.RoadMask.GetPixelBilinear(u,v).r,.015f,renderer.name+" road");
+                            Assert.LessOrEqual(surfaces.ConstructionMask.GetPixelBilinear(u,v).g,.01f,renderer.name+" build area");
                         }
                     }
                 }
@@ -87,7 +102,7 @@ namespace Spacewars.Tests.PlayMode
                 foreach(var site in TerritoryRules.Sites(gameplay).Where(s=>s.Kind==PlayableBuildingKind.Mine))
                 {var actor=world.Building(16000+site.Id,"Mine",false);actor.Root.position=world.Point(site.Position);actor.Health.parent.gameObject.SetActive(false);actor.Selection.SetActive(false);PlayableWorld.PaintOwner(actor,new Color(.55f,.57f,.53f));actors.Add(actor);}
                 var hq=world.Building(18000,"Headquarters",true);hq.Root.position=world.Point(TerritoryRules.Sites(gameplay)[0].Position);hq.Health.parent.gameObject.SetActive(false);hq.Selection.SetActive(false);PlayableWorld.PaintOwner(hq,new Color(.3f,.55f,.85f));actors.Add(hq);
-                var kitPosition=equipment[0].transform.position;
+                var kitPosition=equipment.Single(r=>r.name=="Yard — BankPump").transform.position;
                 var captures=new List<(string name,Vector3 focus,Vector3 offset,float ortho)> {
                     ("gameplay",hq.Root.position,new Vector3((float)gameplay.CameraOffsetX,(float)gameplay.CameraHeight,(float)gameplay.CameraOffsetZ),(float)gameplay.CameraOrthoSize),
                     ("overview",Vector3.zero,new Vector3(0,135,-72),72),

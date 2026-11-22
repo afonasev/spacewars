@@ -58,6 +58,7 @@ internal static class NativeIdleCurrentFixture
     {
         private readonly NavigationSession session;internal int Prepared,Committed;
         internal IdleAuthority(NavigationSession session){this.session=session;session.BindMotionAuthority(this);}
+        public void ReconcilePendingSource(NavigationSession.MotionPublication publication) {}
         public NavigationMotionAdoption Prepare(NavigationSession.MotionPublication publication)
         {
             Prepared++;

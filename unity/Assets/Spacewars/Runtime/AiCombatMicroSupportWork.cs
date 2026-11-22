@@ -41,7 +41,7 @@ namespace Spacewars.Runtime
             else{
                 Type t=terrain.GetType();typeName=t.FullName;terrainId=terrain.Id;revision=terrain.Revision;if(typeName==null||typeName.Length>512||terrainId==null||terrainId.Length>512)throw new ArgumentException("Invalid terrain identity.");
                 if(t==typeof(NereidaMap))selector=AiCombatSupportSelector.UniqueSemanticSurface;
-                else if(t==typeof(ThreeCrossingsMap)||t==typeof(AntennaCityMap)||t==typeof(FoundryMap)||t==typeof(MossHighlandMap)||t==typeof(NullDockMap)||t==typeof(BasaltCrownMap)||t==typeof(WhiteMeridianMap)||t==typeof(CrimsonGroveMap)||t==typeof(AiTestMap)||t==typeof(ProvingGroundMap)||t==typeof(CampaignOpeningMap))selector=AiCombatSupportSelector.FirstDeclared;
+                else if(t==typeof(ThreeCrossingsMap)||t==typeof(DeafMirrorMap)||t==typeof(AntennaCityMap)||t==typeof(FoundryMap)||t==typeof(MossHighlandMap)||t==typeof(NullDockMap)||t==typeof(BasaltCrownMap)||t==typeof(WhiteMeridianMap)||t==typeof(CrimsonGroveMap)||t==typeof(AiTestMap)||t==typeof(ProvingGroundMap)||t==typeof(CampaignOpeningMap))selector=AiCombatSupportSelector.FirstDeclared;
                 if(selector!=AiCombatSupportSelector.Unsupported)source=terrain.Supports;
             }
             int count=source?.Count??0;if(count>WorldWire.MaxItems)throw new ArgumentException("Support catalog too large.");

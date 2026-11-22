@@ -42,6 +42,101 @@ namespace Spacewars.Tests.EditMode
                 var changed=seed;changed.TargetLeg=-1;Assert.AreEqual(RecastFormationMotion.Allows(changed,route,points[0],points[points.Length-1]),prepared.Allows(changed,route,points[0],points[points.Length-1]));
             }finally{source.ReleaseCommittedHostRoot();source.DestroyNavigationAuthority();Assert.Zero(Budget(source).PhysicalBytes);Assert.Zero(Budget(source).HeldBytes);Assert.Zero(Budget(source).ActiveScopes);}
         }
+        [Test] public void FixedSuffixKeepsEveryPhysicalLegAndPortalAcrossProjectionElision()
+        {
+            var source=Ready();try{
+                var route=Route(source);Assert.True(Budget(source).TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));
+                using(scope){var r=scope.OwnedReservation();Assert.True(NavRecastIntervals.CanTraceRemaining(route,r,source.Crowd));
+                    var at=route.Legs[0].From;var state=NavRecastIntervals.Initial(route);int cursor=state.Cursor,checkedLinks=0;
+                    // Include legal seams, terminal fan, stationary chords and a
+                    // rejected wrong-bank shortcut; retain independent cursors.
+                    var targets=route.Legs.Where(l=>l.Kind==NavTypedLegKind.Surface).Select(l=>l.To.Position).ToArray();
+                    foreach(var target in targets.Concat(targets.Reverse()).Concat(targets)){
+                        bool expected=NavRecastIntervals.AdvanceOwned(route,state,at,target,r,out var next,out var end,out var full,source.Crowd,2);
+                        bool actual=NavRecastIntervals.TryTraceRemainingOwned(route,cursor,at,target,r,out var reached,out var nextCursor,out var suffix,source.Crowd,2);
+                        try{
+                            Assert.AreEqual(expected,actual);if(!expected)continue;Assert.AreEqual(end,reached);Assert.AreEqual(full.Count,suffix.Count);
+                            for(int i=0;i<full.Count;i++){Assert.AreEqual(full[i].Kind,suffix[i].Kind);Assert.AreEqual(full[i].From,suffix[i].From);Assert.AreEqual(full[i].To,suffix[i].To);Assert.AreEqual(full[i].PortalId,suffix[i].PortalId);Assert.AreEqual(full[i].Cost,suffix[i].Cost);}
+                            state=next.After;cursor=nextCursor;at=end;checkedLinks++;
+                        }finally{(full as NavOwnedStorage)?.ReleaseOwner();(suffix as NavOwnedStorage)?.ReleaseOwner();}
+                    }
+                    Assert.Greater(checkedLinks,targets.Length);
+                }
+            }finally{source.ReleaseCommittedHostRoot();source.DestroyNavigationAuthority();Assert.Zero(Budget(source).PhysicalBytes);Assert.Zero(Budget(source).HeldBytes);}
+        }
+        [Test] public void ObservedFormationLayoutMatchesOwnedTraceAcrossLanesAndBankReach()
+        {
+            var source=Ready();var budget=Budget(source);long bytes=budget.PhysicalBytes;
+            try{
+                var route=Route(source);var portals=Enumerable.Range(0,route.Legs.Count).Where(i=>route.Legs[i].Kind==NavTypedLegKind.Portal).ToArray();int accepted=0,refused=0;
+                RecastFormationGuide.TraceObservationsForTests=0;
+                for(int i=1;i<portals.Length;i++)foreach(double pitch in new[]{route.RecastPlan.Spine.Radius,source.Crowd.Profile.ArrivalSlotSpacing,source.Crowd.Profile.ArrivalSlotSpacing*2})foreach(double reach in new[]{0,.01,2,40}){
+                    Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));using(scope){var r=scope.OwnedReservation();string entry=route.Legs[portals[i-1]].PortalId,exit=route.Legs[portals[i]].PortalId;
+                        RecastFormationGuide.DisableTraceObservationForTests=true;bool expected=RecastFormationGuide.TryLayout(route,entry,exit,pitch,r,out var oldLayout,reach);
+                        RecastFormationGuide.DisableTraceObservationForTests=false;bool actual=RecastFormationGuide.TryLayout(route,entry,exit,pitch,r,out var layout,reach);
+                        Assert.AreEqual(expected,actual);Assert.AreEqual(oldLayout,layout,"Direction, bounds, lane count and bank fallback remain exact");if(actual)accepted++;else refused++;
+                    }
+                    Assert.AreEqual(bytes,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);
+                }
+                Assert.Greater(accepted,0);Assert.Greater(refused,0);Assert.Greater(RecastFormationGuide.TraceObservationsForTests,0);
+            }finally{RecastFormationGuide.DisableTraceObservationForTests=false;RecastFormationGuide.TraceObservationsForTests=0;source.ReleaseCommittedHostRoot();source.DestroyNavigationAuthority();Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);}
+        }
+        [Test] public void ObservedTraceKeepsExactReceiptsTargetsLiveHoldAndReleasesScratch()
+        {
+            var source=Ready();var budget=Budget(source);long bytes=budget.PhysicalBytes;
+            try{
+                var route=Route(source);var at=route.Legs[0].From;var state=NavRecastIntervals.Initial(route);
+                var targets=route.Legs.Where(l=>l.Kind==NavTypedLegKind.Surface).Select(l=>l.To.Position).ToArray();int accepted=0,refused=0;
+                NavRecastIntervals.TraceObservationsForTests=0;
+                NavRecastIntervals.SurfaceConnectionsForTests=0;
+                foreach(var target in targets.Concat(targets.Reverse()).Concat(targets).Concat(new[]{at.Position,new NavPoint(4000,4000)})){
+                    Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));
+                    using(scope){var r=scope.OwnedReservation();
+                        NavRecastIntervals.DisableTraceObservationForTests=true;bool expected=NavRecastIntervals.Advance(route,state,at,target,r,out var oldReceipt,source.Crowd,2);
+                        NavRecastIntervals.DisableTraceObservationForTests=false;bool actual=NavRecastIntervals.Advance(route,state,at,target,r,out var receipt,source.Crowd,2);
+                        Assert.AreEqual(expected,actual);Assert.AreEqual(oldReceipt,receipt,"All receipt fields, including rejected prefixes, remain exact");
+                        for(int i=-1;i<=targets.Length+1;i++){
+                            NavRecastIntervals.DisableTraceObservationForTests=true;bool legal=NavRecastIntervals.CanTarget(route,state,at,i,r,source.Crowd,2);
+                            NavRecastIntervals.DisableTraceObservationForTests=false;Assert.AreEqual(legal,NavRecastIntervals.CanTarget(route,state,at,i,r,source.Crowd,2));
+                        }
+                        if(actual){accepted++;at=new NavLocation(target,receipt.ToSurface);state=receipt.After;}else refused++;
+                    }
+                    Assert.AreEqual(bytes,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);
+                }
+                Assert.Greater(accepted,0);Assert.Greater(refused,0);Assert.Greater(NavRecastIntervals.TraceObservationsForTests,0,"Production observation must execute, not silently fall back");
+                Assert.Greater(NavRecastIntervals.SurfaceConnectionsForTests,0,"The observed receipt must include the surface-only connector path.");
+                // Existing HOLD oracle below exercises live peers; the observed
+                // path must still ask the actual authority for each fresh sweep.
+                source.Crowd.TryGet(1,out var peer);var position=peer.Position;var location=peer.Location;bool held=peer.Held;
+                try{
+                    peer.Position=route.Subscription.Origin.Position;peer.Location=route.Subscription.Origin;peer.Held=true;
+                    Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));using(scope){var r=scope.OwnedReservation();var initial=NavRecastIntervals.Initial(route);
+                        NavRecastIntervals.DisableTraceObservationForTests=true;bool old=NavRecastIntervals.Advance(route,initial,route.Subscription.Origin,targets[0],r,out var oldReceipt,source.Crowd,2);
+                        NavRecastIntervals.DisableTraceObservationForTests=false;Assert.AreEqual(old,NavRecastIntervals.Advance(route,initial,route.Subscription.Origin,targets[0],r,out var receipt,source.Crowd,2));Assert.AreEqual(oldReceipt,receipt);
+                    }
+                }finally{peer.Position=position;peer.Location=location;peer.Held=held;}
+            }finally{NavRecastIntervals.DisableTraceObservationForTests=false;NavRecastIntervals.TraceObservationsForTests=0;NavRecastIntervals.SurfaceConnectionsForTests=0;source.ReleaseCommittedHostRoot();source.DestroyNavigationAuthority();Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);}
+        }
+        [Test] public void RetainedStepTraceKeepsExactProjectionAndReleasesItsPaidEdges()
+        {
+            var source=Ready();try{
+                var route=Route(source);long bytes=Budget(source).PhysicalBytes;Assert.True(Budget(source).TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));
+                using(scope){var r=scope.OwnedReservation();var at=route.Legs[0].From;var state=NavRecastIntervals.Initial(route);
+                    foreach(var leg in route.Legs.Where(l=>l.Kind==NavTypedLegKind.Surface)){
+                        bool expected=NavRecastIntervals.Advance(route,state,at,leg.To.Position,r,out var prior,source.Crowd,2);
+                        bool actual=NavRecastIntervals.AdvanceOwned(route,state,at,leg.To.Position,r,out var next,out var reached,out var trace,source.Crowd,2);
+                        try{
+                            Assert.AreEqual(expected,actual);if(!actual)continue;
+                            Assert.AreEqual(prior.After.Phase,next.After.Phase);Assert.AreEqual(prior.After.Cursor,next.After.Cursor);Assert.AreEqual(prior.After.Station,next.After.Station);Assert.AreEqual(prior.After.HighWater,next.After.HighWater);
+                            var end=at;foreach(var part in trace){Assert.AreEqual(end,part.From);end=part.To;}Assert.AreEqual(reached,end);Assert.AreEqual(leg.To.Position,reached.Position);
+                            state=next.After;at=reached;
+                        }finally{(trace as NavOwnedStorage)?.ReleaseOwner();}
+                    }
+                }
+                // The allocation scope owns the birth journal until resolution.
+                Assert.AreEqual(bytes,Budget(source).PhysicalBytes,"Retaining a step trace cannot leave cache or provider liability behind after its scope closes");
+            }finally{source.ReleaseCommittedHostRoot();source.DestroyNavigationAuthority();Assert.Zero(Budget(source).PhysicalBytes);Assert.Zero(Budget(source).HeldBytes);}
+        }
         [Test] public void RepairSuffixMemoKeepsExactStateSurfaceGoalAndLiveHoldGuards()
         {
             var source=Ready();try{
@@ -62,13 +157,224 @@ namespace Spacewars.Tests.EditMode
                 }
             }finally{source.ReleaseCommittedHostRoot();source.DestroyNavigationAuthority();Assert.Zero(Budget(source).PhysicalBytes);Assert.Zero(Budget(source).HeldBytes);Assert.Zero(Budget(source).ActiveScopes);}
         }
+        [Test]
+        public void PreparedRepairPrefixKeepsRejoinOrderAndAvoidsRepeatedTrace()
+        {
+            var session=Ready();
+            var budget=Budget(session);
+            try
+            {
+                var route=Route(session);
+                Assert.True(session.Crowd.TryGet(2,out var actor));
+                Assert.True(session.Crowd.TryGet(1,out var peer));
+                var state=NavRecastIntervals.Initial(route);
+                var local=actor.route.Take(3).ToArray();
+                var candidates=new[]{actor.routeIndex,actor.route.Length-2,actor.route.Length-1,actor.routeIndex};
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));
+                using(scope)
+                {
+                    var r=scope.OwnedReservation();
+                    int start=NavRecastIntervals.TraceObservationsForTests;
+                    var expected=candidates.Select(index=>{
+                        bool valid=NavRecastIntervals.TryContinuationRejoin(route,state,actor.Location,local,0,actor.route,
+                            index,actor.GoalLocation.Value,r,out int selected,session.Crowd,actor.Id);
+                        return (valid,selected);
+                    }).ToArray();
+                    int original=NavRecastIntervals.TraceObservationsForTests-start;
+                    Assert.True(expected.Any(result=>result.valid));
+                    start=NavRecastIntervals.TraceObservationsForTests;
+                    Assert.True(NavRecastIntervals.TryPrepareContinuationPrefix(route,state,actor.Location,local,0,r,
+                        session.Crowd,actor.Id,out var at,out var after));
+                    var memo=default(NavRecastIntervals.RepairSuffixMemo);
+                    for(int i=0;i<candidates.Length;i++)
+                    {
+                        bool valid=NavRecastIntervals.TryContinuationRejoinFromPrefix(route,after,at,actor.route,
+                            candidates[i],actor.GoalLocation.Value,r,out int selected,session.Crowd,ref memo,actor.Id);
+                        Assert.AreEqual(expected[i],(valid,selected));
+                    }
+                    int reused=NavRecastIntervals.TraceObservationsForTests-start;
+                    TestContext.WriteLine($"TYPED_REPAIR_PREFIX checks={candidates.Length} traces={original}->{reused}");
+                    Assert.Less(reused,original);
+                    var oldPosition=peer.Position;
+                    var oldLocation=peer.Location;
+                    bool oldHeld=peer.Held;
+                    try
+                    {
+                        peer.Position=local[0];
+                        peer.Location=new NavLocation(local[0],actor.Location.SurfaceId);
+                        peer.Held=true;
+                        Assert.False(NavRecastIntervals.TryPrepareContinuationPrefix(route,state,actor.Location,local,0,r,
+                            session.Crowd,actor.Id,out _,out _));
+                    }
+                    finally
+                    {
+                        peer.Position=oldPosition;
+                        peer.Location=oldLocation;
+                        peer.Held=oldHeld;
+                    }
+                    scope.Discard();
+                }
+            }
+            finally
+            {
+                session.ReleaseCommittedHostRoot();
+                session.DestroyNavigationAuthority();
+                Assert.Zero(budget.PhysicalBytes);
+                Assert.Zero(budget.HeldBytes);
+                Assert.Zero(budget.ActiveScopes);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SharedRepairFallbackKeepsExactRejoinOrderAndDoesNotRepeatFailedTail(bool heldGoal)
+        {
+            var session=Ready();
+            var budget=Budget(session);
+            try
+            {
+                var route=Route(session);
+                Assert.True(session.Crowd.TryGet(2,out var actor));
+                Assert.True(session.Crowd.TryGet(1,out var peer));
+                var goal=actor.GoalLocation.Value;
+                var state=NavRecastIntervals.Initial(route);
+                if(heldGoal)
+                {
+                    peer.Position=goal.Position;
+                    peer.Location=goal;
+                    peer.Held=true;
+                }
+                var last=actor.route.Length-1;
+                var exits=new[]{last,last-1,0,last-2,-1,last-1,last+1,1};
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));
+                using(scope)
+                {
+                    var reservation=scope.OwnedReservation();
+                    var controlMemo=default(NavRecastIntervals.RepairSuffixMemo);
+                    var candidateMemo=default(NavRecastIntervals.RepairSuffixMemo);
+                    var fallback=default(NavRecastIntervals.RepairRejoinFallback);
+                    int controlTraces=0,candidateTraces=0;
+                    bool sawFallback=false;
+                    foreach(int exit in exits)
+                    {
+                        int traces=NavRecastIntervals.TraceObservationsForTests;
+                        bool original=NavRecastIntervals.TryContinuationRejoinFromPrefix(route,state,actor.Location,
+                            actor.route,exit,goal,reservation,out int expected,session.Crowd,ref controlMemo,actor.Id);
+                        controlTraces+=NavRecastIntervals.TraceObservationsForTests-traces;
+                        traces=NavRecastIntervals.TraceObservationsForTests;
+                        bool actual=NavRecastIntervals.TryContinuationRejoinFromPrefix(route,state,actor.Location,
+                            actor.route,exit,goal,reservation,out int selected,session.Crowd,ref candidateMemo,ref fallback,actor.Id);
+                        candidateTraces+=NavRecastIntervals.TraceObservationsForTests-traces;
+                        Assert.AreEqual((original,expected),(actual,selected),$"proposed exit {exit}");
+                        if(heldGoal)Assert.False(actual);
+                        sawFallback|=fallback.Scanned;
+                    }
+                    Assert.True(sawFallback);
+                    TestContext.WriteLine($"TYPED_REPAIR_FALLBACK held={heldGoal} traces={controlTraces}->{candidateTraces}");
+                    if(heldGoal)Assert.Less(candidateTraces,controlTraces);
+                    scope.Discard();
+                }
+            }
+            finally
+            {
+                session.ReleaseCommittedHostRoot();
+                session.DestroyNavigationAuthority();
+                Assert.Zero(budget.PhysicalBytes);
+                Assert.Zero(budget.HeldBytes);
+                Assert.Zero(budget.ActiveScopes);
+            }
+        }
+
+        [Test] public void ClosedPhysicalTailDoesNotCertifyEveryLocalPrefix()
+        {
+            var profile=PlayableProfile.RecastGroupCorridorDefault;
+            var map=profile.AuthoredMap;
+            var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);
+            var session=new NavigationSession(801,geometry,profile.Navigation,null,map){UsesRecastGroundRoutes=true};
+            try
+            {
+                session.ConfigureMarch(4,profile.Revision);
+                session.Crowd.Add(1,new NavPoint(26.8,42),.58,7,7.5,canYield:true);
+                session.Crowd.Add(2,new NavPoint(26.8,45.6),.58,7,7.5,canYield:true);
+                Assert.True(session.MoveGroup(new[]{1,2},new[]{new NavPoint(-26.8,15),new NavPoint(-26.8,18.6)}));
+                using(var host=new UnityHostRouteService())
+                {
+                    var binding=new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort);
+                    for(int i=0;i<200&&session.AppliedResults<2;i++){host.Service(binding,8);session.ApplyResults();}
+                }
+                Assert.AreEqual(2,session.AppliedResults);
+                var route=Route(session);
+                Assert.True(Budget(session).TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));
+                using(scope)
+                {
+                    var reservation=scope.OwnedReservation();
+                    var frame=NavPreparedCrowdStep.Create(session.Crowd,session.Crowd.Units.Count,reservation);
+                    NavLocalRepairWorkspace scratch=null;
+                    try
+                    {
+                        frame.Observe();
+                        int row=frame.Find(2);
+                        var actor=frame.After[row];
+                        var peer=frame.After[frame.Find(1)];
+                        var state=NavRecastIntervals.Initial(route);
+                        frame.BindRecast(row,route,state);
+                        var goal=actor.GoalLocation.Value;
+                        Assert.Greater(actor.route.Length,6);
+                        // Close the approach to the choke without closing its far
+                        // endpoint. Every current local prefix stays on this bank.
+                        var original=frame.Working.Geometry;
+                        var blockers=original.Obstacles.Append(new NavObstacle(15,10,18,61)).ToArray();
+                        var blocked=new NavGeometry(original.HalfExtent,blockers,original.Revision+1);
+                        frame.Working.BindGeometryNoThrow(blocked);
+                        peer.Moving=false;
+                        Assert.True(blocked.IsFree(actor.Position,actor.Radius));
+                        Assert.True(blocked.IsFree(goal.Position,actor.Radius));
+                        Assert.True(actor.route.Zip(actor.route.Skip(1),(a,b)=>blocked.SegmentFree(a,b,actor.Radius)).Any(clear=>!clear));
+                        const System.Reflection.BindingFlags hidden=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+                        typeof(NavCrowd).GetMethod("BuildIndex",hidden).Invoke(frame.Working,null);
+                        var repair=typeof(NavCrowd).GetMethod("CommitDetour",hidden);
+                        var header=new NavUnitSaveState();actor.CopyCaptureHeaderTo(header);
+                        long checkedTraces=NavRecastIntervals.TraceObservationsForTests;
+                        var timer=System.Diagnostics.Stopwatch.StartNew();
+                        object[] args={actor,actor.Goal,scratch};
+                        bool installed;
+                        try{installed=(bool)repair.Invoke(frame.Working,args);}
+                        finally{scratch=(NavLocalRepairWorkspace)args[2];}
+                        long traces=NavRecastIntervals.TraceObservationsForTests-checkedTraces;
+                        TestContext.WriteLine($"CLOSED_FIXED_TAIL installed={installed} traces={traces} elapsed_ms={timer.Elapsed.TotalMilliseconds:R} edges={frame.Working.DetourEdgeQueriesForTests} waypoints={actor.route.Length}");
+                        Assert.False(installed);
+                        Assert.True(actor.SameCaptureHeader(header));
+                        Assert.Less(traces,128,"A known closed fixed chord must stop repeated full-tail certificates.");
+                    }
+                    finally{scratch?.ReleaseOwner();frame.Release();}
+                    scope.Discard();
+                }
+            }
+            finally
+            {
+                session.ReleaseCommittedHostRoot();
+                session.DestroyNavigationAuthority();
+                Assert.Zero(Budget(session).PhysicalBytes);
+                Assert.Zero(Budget(session).HeldBytes);
+                Assert.Zero(Budget(session).ActiveScopes);
+            }
+        }
         [Test] public void RepairReuseCapabilityRequiresTheOwnedPinnedGlobalOfItsWorkingHeader()
         {
             var source=Ready();try{var route=Route(source);Assert.True(Budget(source).TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));using(scope){var r=scope.OwnedReservation();var frame=NavPreparedCrowdStep.Create(source.Crowd,source.Crowd.Units.Count,r);
                 try{frame.Observe();int row=frame.Find(2);var actor=frame.After[row];frame.BindRecast(row,route,NavRecastIntervals.Initial(route));Assert.IsNull(actor.StorageOwner,"Working values must not own the source actor");Assert.IsNotNull(frame.Globals[row]);
                     Assert.False(frame.Working.CanReuseRepairCertificate(row,actor,route));frame.AllowRepairCertificateReuse=true;Assert.True(frame.Working.CanReuseRepairCertificate(row,actor,route),"The actual pinned global must enable the positive production path");
                     var global=actor.route;try{actor.route=(NavPoint[])global.Clone();Assert.False(frame.Working.CanReuseRepairCertificate(row,actor,route),"An unowned equal-valued clone cannot reuse a certificate");}finally{actor.route=global;}
-                    frame.AllowRepairCertificateReuse=false;Assert.False(frame.Working.CanReuseRepairCertificate(row,actor,route),"Hooked/projected preparation retains scalar behavior");
+                    var peer=frame.After[frame.Find(1)];
+                    var replacement=NavRetainedArray<NavPoint>.Copy(peer.route,r.TryReserve);
+                    try{
+                        peer.BindRouteBackingNoThrow(replacement,null);
+                        frame.ReplacedRoute(peer);
+                        Assert.True(frame.Working.CanReuseRepairCertificate(row,actor,route),"A projected replacement for another actor leaves this pinned array eligible.");
+                        actor.BindRouteBackingNoThrow(replacement,null);
+                        frame.ReplacedRoute(actor);
+                        Assert.False(frame.Working.CanReuseRepairCertificate(row,actor,route),"The receiver whose motor changed must qualify its new backing.");
+                    }finally{replacement.Release();}
                 }finally{frame.Release();}scope.Discard();}
             }finally{source.ReleaseCommittedHostRoot();source.DestroyNavigationAuthority();Assert.Zero(Budget(source).PhysicalBytes);Assert.Zero(Budget(source).HeldBytes);Assert.Zero(Budget(source).ActiveScopes);}
         }
@@ -99,11 +405,97 @@ namespace Spacewars.Tests.EditMode
                     }finally{frame.Release();}scope.Discard();}
             }finally{session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(Budget(session).PhysicalBytes);Assert.Zero(Budget(session).HeldBytes);Assert.Zero(Budget(session).ActiveScopes);}
         }
-        [Test] public void QualifiedCompleteBankRepairKeepsLegacyEndpointAndLiveHoldDenial()
+        [Test]
+        public void LocalRepairRetestsTheBlockingPeerAndFindsOtherBlockers()
+        {
+            var crowd=new NavCrowd(new NavGeometry(96,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);
+            var actor=crowd.Add(1,new NavPoint(0,0),.58,7,7.5);
+            for(int id=2;id<=12;id++)
+                // Keep these bodies inside the chord's broad bounds so the
+                // fixture still measures exact peer predicates and blocker reuse.
+                crowd.Add(id,new NavPoint(id*2,1.6),.58,7,7.5);
+            var first=crowd.Add(13,new NavPoint(10,0),.58,7,7.5);
+            var second=crowd.Add(14,new NavPoint(12,6),.58,7,7.5);
+            crowd.Stop(first.Id,true);
+            crowd.Stop(second.Id,false);
+
+            const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.Instance|
+                System.Reflection.BindingFlags.NonPublic;
+            var ordinary=typeof(NavCrowd).GetMethod("UnitFree",flags,null,
+                new[]{typeof(NavUnit),typeof(NavPoint),typeof(NavPoint),typeof(double)},null);
+            var hinted=typeof(NavCrowd).GetMethod("UnitFreeWithBlockerHint",flags);
+
+            int beforeOrdinary=crowd.NeighborCandidates;
+            var end=new NavPoint(32,0);
+            var centers=Enumerable.Range(0,12).Select(i=>new NavPoint(0,i*.01)).ToArray();
+            foreach(var from in centers)
+                Assert.False((bool)ordinary.Invoke(crowd,new object[]{actor,from,end,0d}));
+            int ordinaryQueries=crowd.NeighborCandidates-beforeOrdinary;
+
+            int beforeHint=crowd.NeighborCandidates;
+            NavUnit blocker=null;
+            bool Clear(NavPoint from,NavPoint to)
+            {
+                var args=new object[]{actor,from,to,blocker};
+                bool clear=(bool)hinted.Invoke(crowd,args);
+                blocker=(NavUnit)args[3];
+                return clear;
+            }
+            foreach(var from in centers)
+            {
+                Assert.False(Clear(from,end));
+                Assert.AreSame(first,blocker);
+            }
+            int hintedQueries=crowd.NeighborCandidates-beforeHint;
+            Assert.Less(hintedQueries,ordinaryQueries,"Retesting a known blocker must reduce actual peer predicates.");
+            Assert.False(Clear(new NavPoint(0,6),new NavPoint(32,6)));
+            Assert.AreSame(second,blocker);
+            Assert.True(Clear(new NavPoint(0,12),new NavPoint(32,12)));
+            TestContext.WriteLine($"REPAIR_BLOCKER predicates={ordinaryQueries} hinted={hintedQueries}");
+        }
+
+        [Test]
+        public void LongRepairChordsSkipDistantPeersAndKeepExactDiscClearance()
+        {
+            var crowd = new NavCrowd(new NavGeometry(96, Array.Empty<NavObstacle>(), 1),
+                PlayableProfile.Default.Navigation);
+            var actor = crowd.Add(1, new NavPoint(-60, 0), .58, 7, 7.5);
+            for (int id = 2; id <= 30; id++)
+                crowd.Add(id, new NavPoint(-62 + id * 4, 65), .8, 7, 7.5);
+            var first = crowd.Add(31, new NavPoint(-18, 2.7), .72, 7, 7.5);
+            crowd.Stop(first.Id, true);
+            crowd.Add(32, new NavPoint(19, -3.2), .58, 7, 7.5);
+
+            const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic;
+            var sweep = typeof(NavCrowd).GetMethod("UnitFree", flags, null,
+                new[] { typeof(NavUnit), typeof(NavPoint), typeof(NavPoint), typeof(double) }, null);
+            int chords = 0, blocked = 0;
+            foreach (double offset in new[] { -20d, -4.36, -4.35, -3.2, 0d, 1.4, 2.7, 3.99, 4d, 20d })
+            foreach (double tilt in new[] { -.2, 0d, .2 })
+            {
+                var from = new NavPoint(-62, offset);
+                var to = new NavPoint(62, offset + tilt);
+                bool expected = !crowd.Units.Any(peer => peer != actor &&
+                    NavCrowd.SegmentPointDistanceSquared(peer.Position, from, to) <
+                    (actor.Radius + peer.Radius) * (actor.Radius + peer.Radius) - 1e-9);
+                Assert.AreEqual(expected, (bool)sweep.Invoke(crowd, new object[] { actor, from, to, 0d }));
+                chords++;
+                if (!expected) blocked++;
+            }
+            Assert.Greater(blocked, 0);
+            Assert.Less(blocked, chords);
+            TestContext.WriteLine($"LONG_REPAIR_CHORDS chords={chords} blocked={blocked} peer_predicates={crowd.NeighborCandidates}");
+            Assert.LessOrEqual(crowd.NeighborCandidates, chords * 2,
+                "A long chord must not run disc tests against peers across the map.");
+        }
+
+        [TestCase(false)][TestCase(true)] public void QualifiedCompleteBankRepairKeepsLegacyEndpointAndLiveHoldDenial(bool observeQueries)
         {
             var profile=PlayableProfile.RecastGroupCorridorDefault;var map=profile.AuthoredMap;var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);var session=new NavigationSession(801,geometry,profile.Navigation,null,map){UsesRecastGroundRoutes=true};
+            var oldObserver=TerrainLocations.IndexedCutCandidateForTests;int callbacks=0;if(observeQueries)TerrainLocations.IndexedCutCandidateForTests=_=>callbacks++;
             try{session.ConfigureMarch(4,profile.Revision);session.Crowd.Add(1,new NavPoint(26.8,42),.58,7,7.5,canYield:true);session.Crowd.Add(2,new NavPoint(26.8,45.6),.58,7,7.5,canYield:true);Assert.True(session.MoveGroup(new[]{1,2},new[]{new NavPoint(-26.8,15),new NavPoint(-26.8,18.6)}));
-                using(var host=new UnityHostRouteService()){var binding=new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort);for(int i=0;i<200&&session.AppliedResults<2;i++){host.Service(binding,8);session.ApplyResults();}}Assert.AreEqual(2,session.AppliedResults);var route=Route(session);
+                using(var host=new UnityHostRouteService()){var binding=new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort);for(int i=0;i<200&&session.AppliedResults<2;i++){host.Service(binding,8);session.ApplyResults();}}Assert.AreEqual(2,session.AppliedResults);var route=Route(session);byte[] SourceBytes(){using(var capture=session.CaptureOwnedState())return WorldWire.Pack(w=>WorldWire.Write(w,capture));}var source=SourceBytes();
                 Assert.True(Budget(session).TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));using(scope){var r=scope.OwnedReservation();var frame=NavPreparedCrowdStep.Create(session.Crowd,session.Crowd.Units.Count,r);NavLocalRepairWorkspace scratch=null;
                     try{frame.Observe();int row=frame.Find(2);var actor=frame.After[row];var peer=frame.After[frame.Find(1)];var state=NavRecastIntervals.Initial(route);var at=actor.Location;
                         for(int i=0;i<actor.route.Length-2;i++){Assert.True(NavRecastIntervals.Advance(route,state,at,actor.route[i],r,out var moved,frame.Working,actor.Id),"Accepted route setup "+i);at=new NavLocation(moved.To,moved.ToSurface);state=moved.After;}
@@ -112,20 +504,159 @@ namespace Spacewars.Tests.EditMode
                         double dx=actor.Goal.X-at.Position.X,dz=actor.Goal.Z-at.Position.Z,length=Math.Sqrt(dx*dx+dz*dz);Assert.Greater(length,actor.Radius+peer.Radius);var direction=new NavPoint(dx/length,dz/length);double side=(actor.Radius+peer.Radius)*.8;
                         peer.Position=new NavPoint(at.Position.X+dx/2-direction.Z*side,at.Position.Z+dz/2+direction.X*side);Assert.True(map.TryLocate(peer.Position,peer.Radius,out var peerAt));peer.Location=peerAt;peer.Moving=false;peer.Outcome=NavigationOutcome.Stopped;peer.Held=true;Assert.Greater(Math.Sqrt(Math.Pow(peer.Position.X-at.Position.X,2)+Math.Pow(peer.Position.Z-at.Position.Z,2)),actor.Radius+peer.Radius);Assert.Greater(Math.Sqrt(Math.Pow(peer.Position.X-actor.Goal.X,2)+Math.Pow(peer.Position.Z-actor.Goal.Z,2)),actor.Radius+peer.Radius);
                         typeof(NavCrowd).GetMethod("BuildIndex",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(frame.Working,null);var method=typeof(NavCrowd).GetMethod("CommitDetour",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);NavPoint[] expected=null;int selected=-1;
-                        foreach(bool qualified in new[]{false,true}){frame.NewLocals[row]?.Release();frame.NewLocals[row]=null;actor.localRoute=Array.Empty<NavPoint>();actor.localIndex=0;actor.routeIndex=actor.route.Length-1;actor.noProgressTicks=27;actor.blockedSeconds=4d/30;frame.AllowRepairCertificateReuse=qualified;Assert.AreEqual(qualified,frame.Working.CanReuseRepairCertificate(row,actor,route));object[] args={actor,actor.Goal,scratch};bool installed;try{installed=(bool)method.Invoke(frame.Working,args);}finally{scratch=(NavLocalRepairWorkspace)args[2];}Assert.True(installed);Assert.Greater(actor.localRoute.Length,0);Assert.True(RecastFormationMotion.DirectionalTailAllows(hint,route,actor.localRoute.Last(),actor.route,actor.routeIndex,actor.Goal));Assert.True(NavRecastIntervals.TryContinuationRejoin(route,state,at,actor.localRoute,0,actor.route,actor.routeIndex,actor.GoalLocation.Value,r,out int same,frame.Working,actor.Id,true));Assert.AreEqual(actor.routeIndex,same);Assert.AreEqual(27,actor.noProgressTicks);Assert.AreEqual(4d/30,actor.blockedSeconds);if(!qualified){expected=actor.localRoute.ToArray();selected=actor.routeIndex;}else{CollectionAssert.AreEqual(expected,actor.localRoute);Assert.AreEqual(selected,actor.routeIndex);}}
-                        frame.NewLocals[row]?.Release();frame.NewLocals[row]=null;actor.localRoute=Array.Empty<NavPoint>();actor.localIndex=0;peer.Position=actor.Goal;peer.Location=actor.GoalLocation.Value;typeof(NavCrowd).GetMethod("BuildIndex",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(frame.Working,null);object[] blocked={actor,actor.Goal,scratch};try{Assert.False((bool)method.Invoke(frame.Working,blocked),"The optimized search must retain full live HOLD denial");}finally{scratch=(NavLocalRepairWorkspace)blocked[2];}Assert.Zero(actor.localRoute.Length);Assert.AreEqual(27,actor.noProgressTicks);
+                        var goal=actor.GoalLocation;var request=actor.InstalledRequest;var global=actor.route;var position=actor.Position;
+                        int originalEdges=0,optimizedEdges=0,originalNeighbors=0,optimizedNeighbors=0;
+                        foreach(bool original in new[]{true,false})foreach(bool qualified in new[]{false,true}){
+                            frame.NewLocals[row]?.Release();frame.NewLocals[row]=null;actor.localRoute=Array.Empty<NavPoint>();actor.localIndex=0;actor.routeIndex=actor.route.Length-1;actor.noProgressTicks=27;actor.blockedSeconds=4d/30;
+                            frame.AllowRepairCertificateReuse=qualified;Assert.AreEqual(qualified&&!observeQueries,frame.Working.CanReuseRepairCertificate(row,actor,route));frame.Working.OriginalDetourEdgeOrderForTests=original;
+                            int edges=frame.Working.DetourEdgeQueriesForTests,neighbors=frame.Working.NeighborCandidates;object[] args={actor,actor.Goal,scratch};bool installed;
+                            try{installed=(bool)method.Invoke(frame.Working,args);}finally{scratch=(NavLocalRepairWorkspace)args[2];}
+                            if(original){originalEdges+=frame.Working.DetourEdgeQueriesForTests-edges;originalNeighbors+=frame.Working.NeighborCandidates-neighbors;}else{optimizedEdges+=frame.Working.DetourEdgeQueriesForTests-edges;optimizedNeighbors+=frame.Working.NeighborCandidates-neighbors;}
+                            Assert.True(installed);Assert.Greater(actor.localRoute.Length,0);Assert.True(RecastFormationMotion.DirectionalTailAllows(hint,route,actor.localRoute.Last(),actor.route,actor.routeIndex,actor.Goal));Assert.True(NavRecastIntervals.TryContinuationRejoin(route,state,at,actor.localRoute,0,actor.route,actor.routeIndex,actor.GoalLocation.Value,r,out int same,frame.Working,actor.Id,true));Assert.AreEqual(actor.routeIndex,same);Assert.AreEqual(27,actor.noProgressTicks);Assert.AreEqual(4d/30,actor.blockedSeconds);
+                            Assert.AreEqual(goal,actor.GoalLocation);Assert.AreEqual(request,actor.InstalledRequest);Assert.AreSame(global,actor.route);Assert.AreEqual(position,actor.Position);Assert.Zero(actor.localIndex);Assert.AreEqual(state,frame.RecastStates[row]);CollectionAssert.AreEqual(source,SourceBytes());
+                            if(expected==null){expected=actor.localRoute.ToArray();selected=actor.routeIndex;}else{CollectionAssert.AreEqual(expected,actor.localRoute);Assert.AreEqual(selected,actor.routeIndex);}
+                        }
+                        if(observeQueries){Assert.Greater(callbacks,0);Assert.AreEqual(originalEdges,optimizedEdges,"Observed queries keep the original call sequence");Assert.AreEqual(originalNeighbors,optimizedNeighbors);}else Assert.LessOrEqual(optimizedEdges,originalEdges,"A successful early connector may terminate before any dominated node");Assert.LessOrEqual(optimizedNeighbors,originalNeighbors,"No invented neighbour credit");
+                        TestContext.WriteLine("detour edges "+originalEdges+" -> "+optimizedEdges+", actual peer predicates "+originalNeighbors+" -> "+optimizedNeighbors);
+                        foreach(bool original in new[]{true,false}){
+                            frame.Working.OriginalDetourEdgeOrderForTests=original;frame.NewLocals[row]?.Release();frame.NewLocals[row]=null;actor.localRoute=Array.Empty<NavPoint>();actor.localIndex=0;actor.routeIndex=selected;
+                            peer.Position=actor.Goal;peer.Location=actor.GoalLocation.Value;typeof(NavCrowd).GetMethod("BuildIndex",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(frame.Working,null);
+                            int edges=frame.Working.DetourEdgeQueriesForTests,neighbors=frame.Working.NeighborCandidates;object[] blocked={actor,actor.Goal,scratch};try{Assert.False((bool)method.Invoke(frame.Working,blocked),"Both searches must retain full live HOLD denial");}finally{scratch=(NavLocalRepairWorkspace)blocked[2];}
+                            if(original){originalEdges+=frame.Working.DetourEdgeQueriesForTests-edges;originalNeighbors+=frame.Working.NeighborCandidates-neighbors;}else{optimizedEdges+=frame.Working.DetourEdgeQueriesForTests-edges;optimizedNeighbors+=frame.Working.NeighborCandidates-neighbors;}
+                            Assert.Zero(actor.localRoute.Length);Assert.AreEqual(27,actor.noProgressTicks);Assert.AreEqual(selected,actor.routeIndex);Assert.AreEqual(goal,actor.GoalLocation);Assert.AreEqual(state,frame.RecastStates[row]);CollectionAssert.AreEqual(source,SourceBytes());
+                        }
+                        if(observeQueries){Assert.AreEqual(originalEdges,optimizedEdges);Assert.AreEqual(originalNeighbors,optimizedNeighbors);}else{Assert.Less(optimizedEdges,originalEdges,"The exhausted HOLD-denied search must reject dominated nodes before clearance");Assert.Less(optimizedNeighbors,originalNeighbors,"Count only peer predicates actually performed");}
+                        TestContext.WriteLine("success+denial detour edges "+originalEdges+" -> "+optimizedEdges+", actual peer predicates "+originalNeighbors+" -> "+optimizedNeighbors);
                     }finally{scratch?.ReleaseOwner();frame.Release();}scope.Discard();}
-            }finally{session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(Budget(session).PhysicalBytes);Assert.Zero(Budget(session).HeldBytes);Assert.Zero(Budget(session).ActiveScopes);}
+            }finally{TerrainLocations.IndexedCutCandidateForTests=oldObserver;session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(Budget(session).PhysicalBytes);Assert.Zero(Budget(session).HeldBytes);Assert.Zero(Budget(session).ActiveScopes);}
         }
-        private static NavigationSession Ready()
+        [TestCase(false)][TestCase(true)]
+        public void ReplacementRoutesRetireFrozenRolesWithoutChangingSurvivorMapping(bool replaceAll)
+        {
+            var source=Ready();try{
+                var catalog=(NavigationCommandSlots<long,GroupOrderState>)typeof(NavigationSession).GetField("groups",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(source);
+                var original=((NavigationLiveGroup)catalog.OwnerFor(source.GroupFor(1).GroupId)).ImmutableVersion;
+                Assert.True(Budget(source).TryOpenScope(NavigationPreparationKind.Projection,801,1,out var scope));
+                using(scope){var r=scope.OwnedReservation();
+                    var frame=NavPreparedCrowdStep.Create(source.Crowd,source.Crowd.Units.Count,r);
+                    var membership=NavigationCommandSlots<int,long>.CreateOwned(4,r);
+                    RecastFormationPlan frozen=null,result=null;NavigationAuthorityGroup group=null;
+                    try{frame.Observe();
+                        var installed=new NavigationInstalledExecutionOwner[frame.After.Length];
+                        NavigationInstalledExecutionOwner Owner(int id)=>(NavigationInstalledExecutionOwner)source.Crowd.Units.Single(u=>u.Id==id).StorageOwner.InstalledExecution;
+                        var routes=original.Members.Select(v=>Owner(((NavigationAuthorityMember)v).Data.Entity).Corridor.TypedRoute).ToArray();
+                        var paths=routes.Select(route=>route.RecastPlan.Spine).Distinct().ToArray();
+                        int first=Enumerable.Range(0,routes[0].Legs.Count).First(i=>routes[0].Legs[i].Kind==NavTypedLegKind.Portal);
+                        int last=Enumerable.Range(first+1,routes[0].Legs.Count-first-1).First(i=>routes[0].Legs[i].Kind==NavTypedLegKind.Portal);
+                        string entry=routes[0].Legs[first].PortalId,exit=routes[0].Legs[last].PortalId;
+                        Assert.True(RecastFormationGuide.TryLayout(routes[0],entry,exit,source.Crowd.Profile.ArrivalSlotSpacing,r,out var layout));
+                        var entries=original.Members.Select((v,i)=>{var m=((NavigationAuthorityMember)v).Data;int row=frame.Find(m.Entity);
+                            membership.Add(m.Entity,original.Data.GroupId);installed[row]=Owner(m.Entity);
+                            frame.BindRecast(row,routes[i],NavRecastIntervals.Initial(routes[i]));
+                            return new RecastFormationEntry(m.Entity,m.Slot,Array.IndexOf(paths,routes[i].RecastPlan.Spine),i,i%layout.Lanes,RecastPassageStage.Admitted,m.Incarnation,m.OrderRevision,m.MobilityRevision,routes[i].Subscription.RequestSequence+(replaceAll||i==0?100:0));}).ToArray();
+                        var d=original.Data;
+                        frozen=RecastFormationPlan.Create(d.WorldGeneration,d.GroupId,d.OrderRevision,d.CommandSequence,d.MembershipRevision,layout.Lanes,RecastFormationPhase.Feeding,0,false,entry,exit,entries,paths,r);
+                        group=NavigationAuthorityGroup.CopyWithFormationOwned(original,frozen,r);
+                        result=RecastFormationGuide.Prepare(frame,group,installed,new bool[frame.After.Length],membership,1d/30,r,out bool clear);
+                        Assert.NotNull(result);Assert.False(clear);Assert.AreEqual(frozen.Seal,result.Seal);
+                        for(int i=0;i<entries.Length;i++){
+                            var before=entries[i];var after=result.Entries[i];
+                            Assert.AreEqual(replaceAll||i==0?RecastPassageStage.Tombstone:RecastPassageStage.Admitted,after.Stage);
+                            Assert.AreEqual(before.Request,after.Request);Assert.AreEqual(before.EntryOrdinal,after.EntryOrdinal);Assert.AreEqual(before.Lane,after.Lane);Assert.AreEqual(before.SpineIndex,after.SpineIndex);
+                            Assert.AreEqual(routes[i].Subscription.RequestSequence,installed[frame.Find(before.Entity)].Corridor.TypedRoute.Subscription.RequestSequence);
+                        }
+                        Assert.True(frozen.Entries.All(e=>e.Stage==RecastPassageStage.Admitted),"Detached preparation cannot mutate the source");
+                    }finally{result?.Release();group?.ReleaseStorage();frozen?.Release();membership.ReleaseStorage();frame.Release();}
+                }
+            }finally{source.ReleaseCommittedHostRoot();source.DestroyNavigationAuthority();Assert.Zero(Budget(source).PhysicalBytes);Assert.Zero(Budget(source).HeldBytes);Assert.Zero(Budget(source).ActiveScopes);}
+        }
+        [TestCase(false)][TestCase(true)]
+        public void CollectingFormationFreezesOnlyAcceptedPassageRoles(bool held)
+        {
+            var source=Ready(threeMembers:true);
+            try{
+                if(!held)source.SetFormationContact(3,true,1);
+                var catalog=(NavigationCommandSlots<long,GroupOrderState>)typeof(NavigationSession).GetField("groups",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(source);
+                var original=((NavigationLiveGroup)catalog.OwnerFor(source.GroupFor(1).GroupId)).ImmutableVersion;
+                Assert.True(Budget(source).TryOpenScope(NavigationPreparationKind.Projection,801,1,out var scope));
+                using(scope){
+                    var r=scope.OwnedReservation();
+                    var frame=NavPreparedCrowdStep.Create(source.Crowd,source.Crowd.Units.Count,r);
+                    var membership=NavigationCommandSlots<int,long>.CreateOwned(4,r);
+                    RecastFormationPlan collecting=null,frozen=null,resumed=null;
+                    NavigationAuthorityGroup group=null,frozenGroup=null;
+                    try{
+                        frame.Observe();
+                        var installed=new NavigationInstalledExecutionOwner[frame.After.Length];
+                        foreach(var unit in source.Crowd.Units){
+                            int row=frame.Find(unit.Id);
+                            membership.Add(unit.Id,original.Data.GroupId);
+                            installed[row]=(NavigationInstalledExecutionOwner)unit.StorageOwner.InstalledExecution;
+                            var route=installed[row].Corridor.TypedRoute;
+                            frame.BindRecast(row,route,NavRecastIntervals.Initial(route));
+                        }
+                        int excluded=frame.Find(3);
+                        frame.After[excluded].Held=held;
+                        var detached=new bool[frame.After.Length];
+                        collecting=RecastFormationPlan.Collect(original.Data,original.Members,r);
+                        group=NavigationAuthorityGroup.CopyWithFormationOwned(original,collecting,r);
+                        frozen=RecastFormationGuide.Prepare(frame,group,installed,detached,membership,1d/30,r,out bool clear);
+                        Assert.False(clear);
+                        Assert.NotNull(frozen);
+                        Assert.AreEqual(RecastFormationPhase.Feeding,frozen.Phase);
+                        var skipped=frozen.Entries.Single(e=>e.Entity==3);
+                        Assert.AreEqual(RecastPassageStage.Tombstone,skipped.Stage);
+                        Assert.AreEqual(-1,skipped.SpineIndex);
+                        Assert.AreEqual(-1,skipped.EntryOrdinal);
+                        Assert.AreEqual(0,skipped.Request);
+                        Assert.Zero(frame.Formation[excluded].Flags);
+                        CollectionAssert.AreEquivalent(new[]{0,1},frozen.Entries.Where(e=>e.Entity!=3).Select(e=>e.EntryOrdinal));
+                        Assert.True(collecting.Entries.All(e=>e.Stage==RecastPassageStage.Staging));
+
+                        // Leaving HOLD/contact must not enroll an unassigned role in an already frozen plan.
+                        if(!held){
+                            source.SetFormationContact(3,false,2);
+                            original=((NavigationLiveGroup)catalog.OwnerFor(source.GroupFor(1).GroupId)).ImmutableVersion;
+                        }
+                        frame.After[excluded].Held=false;
+                        frozenGroup=NavigationAuthorityGroup.CopyWithFormationOwned(original,frozen,r);
+                        resumed=RecastFormationGuide.Prepare(frame,frozenGroup,installed,detached,membership,1d/30,r,out clear);
+                        Assert.False(clear);
+                        var next=resumed??frozen;
+                        Assert.AreEqual(frozen.Seal,next.Seal);
+                        Assert.AreEqual(RecastPassageStage.Tombstone,next.Entries.Single(e=>e.Entity==3).Stage);
+                        Assert.Zero(frame.Formation[excluded].Flags);
+                    }finally{
+                        resumed?.Release();frozenGroup?.ReleaseStorage();frozen?.Release();
+                        group?.ReleaseStorage();collecting?.Release();membership.ReleaseStorage();frame.Release();
+                    }
+                }
+            }finally{source.ReleaseCommittedHostRoot();source.DestroyNavigationAuthority();Assert.Zero(Budget(source).PhysicalBytes);Assert.Zero(Budget(source).HeldBytes);Assert.Zero(Budget(source).ActiveScopes);}
+        }
+        [Test] public void RouteReplacementDropsOnlyRequestLocalRecastProgress()
+        {
+            var member=new GroupMemberState{Entity=2,ProgressVersion=2,ProgressRequest=71,Progress=12,ProgressOffset=4,Recast=new RecastMemberProgress(71,RecastMovementPhase.Shared,2,3,4)};
+            Assert.DoesNotThrow(()=>new NavigationAuthorityMember.Values(member).Validate());
+            NavigationSession.ResetRouteProgress(member);
+            Assert.Zero(member.ProgressRequest);Assert.AreEqual(default(RecastMemberProgress),member.Recast);
+            Assert.AreEqual(12,member.Progress);Assert.AreEqual(12,member.ProgressOffset);
+            Assert.DoesNotThrow(()=>new NavigationAuthorityMember.Values(member).Validate());
+            // The validator must still reject the old mismatched sidecar.
+            member.Recast=new RecastMemberProgress(71,RecastMovementPhase.Shared,2,3,4);
+            Assert.Throws<ArgumentException>(()=>new NavigationAuthorityMember.Values(member).Validate());
+        }
+        private static NavigationSession Ready(bool threeMembers=false)
         {
             var profile=PlayableProfile.RecastGroupCorridorDefault;var map=profile.AuthoredMap;
             var g=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);
             var s=new NavigationSession(801,g,profile.Navigation,null,map){UsesRecastGroundRoutes=true};
             try{s.ConfigureMarch(4,profile.Revision);s.Crowd.Add(1,new NavPoint(-27.25,42),.72,4,4.5,canYield:true);s.Crowd.Add(2,new NavPoint(-27.25,48),.72,4,4.5,canYield:true);
-                Assert.True(s.MoveGroup(new[]{1,2},new[]{new NavPoint(-46,46),new NavPoint(-42.4,42.4)}));
-                using(var host=new UnityHostRouteService()){var binding=new PlayableRouteBinding(g,profile,s.Admission,s.RoutePort);for(int i=0;i<200&&s.AppliedResults<2;i++){host.Service(binding,8);s.ApplyResults();}}
-                Assert.AreEqual(2,s.AppliedResults);return s;
+                if(threeMembers)s.Crowd.Add(3,new NavPoint(-27.25,45),.72,4,4.5,canYield:true);
+                var ids=threeMembers?new[]{1,2,3}:new[]{1,2};
+                var goals=threeMembers?new[]{new NavPoint(-46,46),new NavPoint(-42.4,42.4),new NavPoint(-46,42.4)}:new[]{new NavPoint(-46,46),new NavPoint(-42.4,42.4)};
+                Assert.True(s.MoveGroup(ids,goals));
+                using(var host=new UnityHostRouteService()){var binding=new PlayableRouteBinding(g,profile,s.Admission,s.RoutePort);for(int i=0;i<200&&s.AppliedResults<ids.Length;i++){host.Service(binding,8);s.ApplyResults();}}
+                Assert.AreEqual(ids.Length,s.AppliedResults);return s;
             }catch{s.ReleaseCommittedHostRoot();throw;}
         }
         private static NavigationRetentionBudget Budget(NavigationSession s)=>s.PhysicalHostBudget;
@@ -237,7 +768,11 @@ namespace Spacewars.Tests.EditMode
                         foreach(var peer in frame.After.Where(a=>a.Id!=actor.Id)){if(peer.Id>=101){peer.Position=endpoints[peer.Id-101];Assert.True(map.TryLocate(peer.Position,peer.Radius,out var location));peer.Location=location;}peer.Moving=false;peer.Held=false;peer.Outcome=NavigationOutcome.Stopped;Assert.GreaterOrEqual(Math.Pow(peer.Position.X-actor.Position.X,2)+Math.Pow(peer.Position.Z-actor.Position.Z,2),Math.Pow(peer.Radius+actor.Radius,2),"Fixed start must be clear of endpoint cover");}
                         typeof(NavCrowd).GetMethod("BuildIndex",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(frame.Working,null);
                         var repair=typeof(NavCrowd).GetMethod("CommitDetour",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);object[] args={actor,actor.route[actor.routeIndex],scratch};bool installed;try{installed=(bool)repair.Invoke(frame.Working,args);}finally{scratch=(NavLocalRepairWorkspace)args[2];}
-                        TestContext.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(new{Case="directional-bank-partial",installed,Start=start,Target=target,Goal=actor.Goal,Local=actor.localRoute,actor.routeIndex}));Assert.True(installed);Assert.Greater(actor.localRoute.Length,0);
+                        int smoothed=frame.Working.SmoothedDetourPrefixesForTests;
+                        TestContext.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(new{Case="directional-bank-partial",installed,Start=start,Target=target,Goal=actor.Goal,Local=actor.localRoute,actor.routeIndex,smoothed}));
+                        Assert.True(installed);Assert.Greater(actor.localRoute.Length,0);
+                        if(qualifiedProof&&!coverEndpoints)
+                            Assert.Less(smoothed,32,"Only nodes with a possible directional tail should require smoothing.");
                         double Distance(NavPoint a,NavPoint b)=>Math.Sqrt(Math.Pow(a.X-b.X,2)+Math.Pow(a.Z-b.Z,2));var end=actor.localRoute.Last();Assert.Less(Distance(end,target),Distance(start.Position,target));Assert.Greater(Distance(end,actor.Goal),Distance(start.Position,actor.Goal),"This fixed bank alignment must exercise the old final-goal-progress rejection");
                         if(!coverEndpoints){
                             // A clear typed motor connection is not a complete
@@ -350,6 +885,54 @@ namespace Spacewars.Tests.EditMode
                     Assert.False(NavRecastIntervals.CanTarget(route,state,route.Subscription.Origin,surfaces,r),"A safe goal trace cannot swallow the shared route before physical fan admission.");scope.Discard();}
             }finally{s.ReleaseCommittedHostRoot();}
         }
+        [TestCase(1)]
+        [TestCase(-1)]
+        public void IntegratedFanEntryOpensTerminalWithoutASecondMotorWaypoint(int side)
+        {
+            // Exact east withdrawal trace, and its reflection across X.
+            var start=At(side*2.926533212800608,0,"open-ground");
+            var entry=At(side*3.406533191318399,.00014360682417100933,"open-ground");
+            var moved=At(entry.Position.X,.00014360682417101725,"open-ground");
+            var goal=At(side*4.1265331590951195,.00035901694838249735,"open-ground");
+            const double radius=.72;
+            double dx=moved.Position.X-goal.Position.X,dz=moved.Position.Z-goal.Position.Z;
+            Assert.Greater(dx*dx+dz*dz,radius*radius);
+            Assert.AreNotEqual(entry,moved);
+
+            var map=new ProvingGroundMap();
+            var geometry=new NavGeometry(map.HalfExtent,Array.Empty<NavObstacle>(),map.Revision);
+            var budget=new NavigationRetentionBudget();
+            Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,1,1,out var scope));
+            using(scope)
+            {
+                var r=scope.OwnedReservation();
+                var provider=PartitionNavigationProvider.CopyOwned(new PartitionNavigationProvider(map,geometry,""),r);
+                var first=NavTypedLeg.CreateOwned(start,entry,.48,NavTypedLegKind.Surface,null,r,provider);
+                var last=NavTypedLeg.CreateOwned(entry,goal,.72,NavTypedLegKind.Surface,null,r,provider);
+                string binding=new string('a',64);
+                var spine=NavRecastSpine.Create(1,1,1,1,radius,binding,binding,binding,provider.Binding,binding,"",1,goal.Position,radius,1,new[]{first,last},r);
+                var plan=NavRecastMemberPlan.Create(spine,0,1,0,1,binding,binding,r);
+                var subscription=new NavRouteSubscription(1,1,1,1,0,1,1,1,1,1,1,start,goal,"");
+                var route=NavTypedRoute.CopySubscriptionAndCreateOwned(subscription,new[]{first,last},1.2,r,plan);
+                try
+                {
+                    var before=NavRecastIntervals.Initial(route);
+                    Assert.False(NavRecastIntervals.CanTarget(route,before,start,1,r));
+                    Assert.False(NavRecastIntervals.CanTarget(route,before,At(entry.Position.X-side*1e-10,entry.Position.Z,entry.SurfaceId),1,r));
+                    Assert.True(NavRecastIntervals.Advance(route,before,start,moved.Position,r,out var receipt));
+                    Assert.AreEqual(2,receipt.After.Phase);
+                    Assert.True(NavRecastIntervals.CanTarget(route,receipt.After,moved,1,r));
+                }
+                finally
+                {
+                    route.ReleaseOwner();plan.Release();spine.Release();last.ReleaseOwner();first.ReleaseOwner();((INavStorageFacade)provider).StorageRoot.Release();
+                }
+                scope.Discard();
+            }
+            Assert.Zero(budget.PhysicalBytes);
+            Assert.Zero(budget.HeldBytes);
+        }
+
         [Test] public void PhysicalRejoinRemainsAvailableAfterForecastTargetAheadAndDisplacementOutsideFan()
         {
             var s=Ready();try{var route=Route(s);var p=route.RecastPlan;var fan=p.Spine.Node(p.Exit);double dx=fan.Position.X-p.Spine.FanCenter.X,dz=fan.Position.Z-p.Spine.FanCenter.Z,len=Math.Sqrt(dx*dx+dz*dz);
@@ -788,6 +1371,610 @@ namespace Spacewars.Tests.EditMode
                 CollectionAssert.AreEqual(source,Bytes());Assert.AreEqual(publications,s.OwnedMovementPublications);
             }finally{s.ReleaseCommittedHostRoot();s.DestroyNavigationAuthority();Assert.Zero(Budget(s).PhysicalBytes);Assert.Zero(Budget(s).HeldBytes);Assert.Zero(Budget(s).ActiveScopes);Assert.AreEqual(native,RecastNative.sw_recast_allocation_count());Assert.AreEqual(faults,RecastNative.ReleaseFaults);}
         }
+        [TestCase(false)]
+        [TestCase(true)]
+        public void TypedFilterDistinguishesRejectedTranslationFromAnEntryGate(bool preEntry)
+        {
+            var session=Ready();
+            var budget=Budget(session);
+            try
+            {
+                var route=Route(session);
+                int entry=Enumerable.Range(0,route.Legs.Count).First(i=>route.Legs[i].Kind==NavTypedLegKind.Portal);
+                var from=At(-29.49991393925073,45.58051079028784,"bank/west");
+                var crossing=new NavPoint(-29.51317328835296,45.57291391940347);
+                var state=new NavRecastStepState(1,route.RecastPlan.OriginLegs+1,1.7,2.2);
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));
+                using(scope)
+                {
+                    var frame=NavPreparedCrowdStep.Create(session.Crowd,session.Crowd.Units.Count,scope.OwnedReservation());
+                    try
+                    {
+                        frame.Observe();
+                        int row=frame.Find(2),peer=frame.Find(1);
+                        var actor=frame.After[row];
+                        actor.Location=new NavLocation(from.Position,actor.Location.NameReference);
+                        actor.Position=from.Position;
+                        var body=new NavMotionBody{Id=actor.Id,Position=from.Position,Active=true,OwnMoving=true};
+                        frame.Motion[row]=body;
+                        frame.Motion[peer]=new NavMotionBody{Id=1,Position=frame.After[peer].Position};
+                        frame.Proposals[peer]=new NavMotionProposal{Position=frame.After[peer].Position};
+                        frame.BindRecast(row,route,state);
+                        var step=crossing;
+                        if(preEntry)
+                            frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.PreEntry,TargetLeg=entry};
+                        else
+                        {
+                            // A pending formation guide may offer a physically safe step
+                            // while no accepted motor suffix remains after the step.
+                            frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.Guide};
+                            actor.route=new[]{new NavPoint(10000,10000)};
+                            actor.routeIndex=0;
+                        }
+                        Assert.True(NavRecastIntervals.Advance(route,state,actor.Location,step,frame.Reservation,
+                            out _,frame.Working,actor.Id),"The raw typed crossing is valid.");
+                        frame.Proposals[row]=new NavMotionProposal{Position=step,
+                            Velocity=new NavPoint(30*(step.X-from.Position.X),30*(step.Z-from.Position.Z))};
+                        typeof(NavCrowd).GetMethod("FilterRecastSweeps",
+                            System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)
+                            .Invoke(frame.Working,new object[]{1d/30,frame.Motion,frame.Proposals});
+                        Assert.AreEqual(from.Position,frame.Proposals[row].Position);
+                        Assert.True(frame.RecastReceipts[row].Verified);
+                        Assert.AreEqual(from.Position,frame.RecastReceipts[row].To);
+                        // The pre-entry denial remains policy, while a refused
+                        // physical continuation can use bounded stall recovery.
+                        Assert.AreEqual(!preEntry,frame.Proposals[row].TypedTranslationRefused);
+                    }
+                    finally { frame.Release(); }
+                    scope.Discard();
+                }
+            }
+            finally
+            {
+                session.ReleaseCommittedHostRoot();
+                session.DestroyNavigationAuthority();
+                Assert.Zero(budget.PhysicalBytes);
+                Assert.Zero(budget.HeldBytes);
+                Assert.Zero(budget.ActiveScopes);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void MissingTypedMotorTargetUsesBlockedClockButVoluntaryWaitDoesNot(bool wait)
+        {
+            var session=Ready();
+            var budget=Budget(session);
+            const double dt=1d/30;
+            try
+            {
+                var route=Route(session);
+                var state=NavRecastIntervals.Initial(route);
+                var position=new NavPoint(-24.75,48);
+                for(int i=0;i<8;i++)
+                {
+                    double angle=i*Math.PI/4;
+                    var point=new NavPoint(position.X+.95*Math.Cos(angle),position.Z+.95*Math.Sin(angle));
+                    var blocker=session.Crowd.Add(101+i,point,.15,4,4.5);
+                    blocker.Held=true;
+                }
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,801,1,out var scope));
+                using(scope)
+                {
+                    var frame=NavPreparedCrowdStep.Create(session.Crowd,session.Crowd.Units.Count,scope.OwnedReservation());
+                    try
+                    {
+                        frame.Observe();
+                        int row=frame.Find(2);
+                        var actor=frame.After[row];
+                        var origin=new NavLocation(position,actor.Location.NameReference);
+                        actor.Position=position;
+                        actor.Location=origin;
+                        actor.routeIndex=NavRecastIntervals.FirstTargetSurface(route,state);
+                        actor.noProgressTicks=(int)Math.Ceiling(frame.Profile.BlockedTimeoutSeconds/dt)-1;
+                        int prior=actor.noProgressTicks;
+                        frame.BindRecast(row,route,state);
+                        Assert.True(frame.Working.ValidLocation(origin,actor.Radius));
+                        for(int i=actor.routeIndex;i<actor.route.Length;i++)
+                            Assert.False(NavRecastIntervals.CanTarget(route,state,origin,i,frame.Reservation,frame.Working,actor.Id),
+                                "Held footprints must cover every eligible typed target from the actual pose.");
+                        Assert.True(NavRecastIntervals.Advance(route,state,origin,origin.Position,frame.Reservation,out _,frame.Working,actor.Id));
+                        if(wait)
+                        {
+                            frame.Preferred[row]=0;
+                            frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.Wait};
+                        }
+
+                        frame.Compute(dt);
+
+                        Assert.False(frame.Motion[row].Active);
+                        Assert.AreEqual(origin,actor.Location);
+                        Assert.AreEqual(wait?prior:0,actor.noProgressTicks);
+                        Assert.AreEqual(wait?NavigationOutcome.Moving:NavigationOutcome.Blocked,actor.Outcome);
+                        Assert.AreEqual(wait,actor.Moving);
+                    }
+                    finally { frame.Release(); }
+                    scope.Discard();
+                }
+            }
+            finally
+            {
+                session.ReleaseCommittedHostRoot();
+                session.DestroyNavigationAuthority();
+                Assert.Zero(budget.PhysicalBytes);
+                Assert.Zero(budget.HeldBytes);
+                Assert.Zero(budget.ActiveScopes);
+            }
+        }
+
+        [Test]
+        public void RecordedAntennaRepairMustLeaveTheProducedPeerPocket()
+        {
+            var map=new AntennaCityMap();
+            var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);
+            const double radius=.58;
+            var buildings=new (PlayableBuildingKind,NavPoint)[]{
+                (PlayableBuildingKind.Headquarters,new NavPoint(60.000000000000014,103.92304845413263)),
+                (PlayableBuildingKind.Headquarters,new NavPoint(120.0,0.0)),
+                (PlayableBuildingKind.Headquarters,new NavPoint(60.000000000000014,-103.92304845413263)),
+                (PlayableBuildingKind.Headquarters,new NavPoint(-59.99999999999998,-103.92304845413264)),
+                (PlayableBuildingKind.Headquarters,new NavPoint(-59.99999999999998,103.92304845413264)),
+                (PlayableBuildingKind.Headquarters,new NavPoint(-120.0,-1.469576158976824e-14)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-53.49999999999998,103.92304845413264)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-113.5,-1.469576158976824e-14)),
+                (PlayableBuildingKind.Refinery,new NavPoint(66.50000000000001,103.92304845413263)),
+                (PlayableBuildingKind.Refinery,new NavPoint(126.5,0.0)),
+                (PlayableBuildingKind.Refinery,new NavPoint(66.50000000000001,-103.92304845413263)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-53.49999999999998,-103.92304845413264)),
+                (PlayableBuildingKind.Factory,new NavPoint(62.00861046343717,110.10491581005112)),
+                (PlayableBuildingKind.Factory,new NavPoint(-57.99138953656282,110.10491581005114)),
+                (PlayableBuildingKind.Refinery,new NavPoint(62.00861046343717,-97.74118109821413)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-117.99138953656283,6.181867355918483)),
+                (PlayableBuildingKind.Refinery,new NavPoint(122.00861046343717,6.181867355918498)),
+                (PlayableBuildingKind.Factory,new NavPoint(-57.99138953656282,-97.74118109821414)),
+                (PlayableBuildingKind.Refinery,new NavPoint(114.74138953656285,3.820604139901076)),
+                (PlayableBuildingKind.Factory,new NavPoint(54.741389536562856,-100.10244431423155)),
+                (PlayableBuildingKind.Factory,new NavPoint(-125.25861046343715,3.8206041399010613)),
+                (PlayableBuildingKind.Factory,new NavPoint(114.74138953656285,-3.8206041399010746)),
+                (PlayableBuildingKind.Refinery,new NavPoint(54.741389536562856,107.7436525940337)),
+                (PlayableBuildingKind.Refinery,new NavPoint(54.741389536562856,100.10244431423155)),
+                (PlayableBuildingKind.Refinery,new NavPoint(54.741389536562856,-107.7436525940337)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-65.25861046343714,-100.10244431423156)),
+                (PlayableBuildingKind.Hangar,new NavPoint(62.00861046343717,-110.10491581005112)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-65.25861046343714,107.74365259403372)),
+                (PlayableBuildingKind.Outpost,new NavPoint(-40.999999999999986,71.01408311032398)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-65.25861046343714,100.10244431423156)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-65.25861046343714,-107.74365259403372)),
+                (PlayableBuildingKind.Mine,new NavPoint(-70.99999999999997,122.9756073373903)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-125.25861046343715,-3.8206041399010893)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-34.499999999999986,71.01408311032398)),
+                (PlayableBuildingKind.Outpost,new NavPoint(-82.0,-1.0042103753008296e-14)),
+                (PlayableBuildingKind.RepairTower,new NavPoint(-68.49999999999997,-103.92304845413264)),
+                (PlayableBuildingKind.RepairTower,new NavPoint(-62.62664445218703,112.00702884264145)),
+                (PlayableBuildingKind.Outpost,new NavPoint(41.00000000000001,-71.01408311032397)),
+                (PlayableBuildingKind.Hangar,new NavPoint(-75.5,-1.0042103753008296e-14)),
+                (PlayableBuildingKind.Outpost,new NavPoint(82.0,0.0)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-44.249999999999986,65.38491798572514)),
+                (PlayableBuildingKind.SentryTurret,new NavPoint(-36.749999999999986,78.3752990424917)),
+                (PlayableBuildingKind.Refinery,new NavPoint(88.5,0.0)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-85.25,5.629165124598842)),
+                (PlayableBuildingKind.ScientificCenter,new NavPoint(62.00861046343717,97.74118109821413)),
+                (PlayableBuildingKind.Refinery,new NavPoint(78.75,5.629165124598852)),
+                (PlayableBuildingKind.Mine,new NavPoint(71.00000000000001,-122.97560733739029)),
+                (PlayableBuildingKind.Refinery,new NavPoint(47.50000000000001,-71.01408311032397)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-85.25,-5.629165124598859)),
+                (PlayableBuildingKind.Refinery,new NavPoint(37.75000000000001,-65.38491798572511)),
+                (PlayableBuildingKind.SentryTurret,new NavPoint(-77.75,-7.361215932167739)),
+                (PlayableBuildingKind.Outpost,new NavPoint(-40.999999999999986,-71.01408311032398)),
+                (PlayableBuildingKind.ScientificCenter,new NavPoint(-117.99138953656285,-6.181867355918514))
+            };
+            var obstacles=map.MovementBlockers.Concat(buildings.Select(b=>{
+                double size=TerritoryRules.Radius(profile,b.Item1);
+                return new NavObstacle(b.Item2.X-size,b.Item2.Z-size,b.Item2.X+size,b.Item2.Z+size);
+            })).ToArray();
+            var geometry=new NavGeometry(map.HalfExtent,obstacles,135);
+            var session=new NavigationSession(1,geometry,profile.Navigation,null,map);
+            var budget=session.PhysicalHostBudget;
+            try
+            {
+                var start=new NavLocation(new NavPoint(-58.709311722631668,-99.789511018083417),"city/street");
+                var goal=new NavLocation(new NavPoint(-34.90437817456598,-33.22557726028393),"city/plaza/2");
+                var mover=session.Crowd.Add(155,start.Position,radius,PlayableUnitRules.Speed(profile,PlayableEntityKind.Explorer),
+                    PlayableUnitRules.Turn(profile,PlayableEntityKind.Explorer),start);
+                var peer=new NavLocation(new NavPoint(-57.99138953656282,-100.74118109821414),"city/street");
+                session.Crowd.Add(169,peer.Position,radius,mover.Speed,mover.TurnSpeed,peer);
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,1,1,out var scope));
+                using(scope)
+                {
+                    var reservation=scope.OwnedReservation();
+                    var provider=PartitionNavigationProvider.CopyOwned(new PartitionNavigationProvider(map,geometry,""),reservation);
+                    NavTypedLeg[] typed=null,shared=null;
+                    NavRecastSpine spine=null;
+                    NavRecastMemberPlan plan=null;
+                    NavTypedRoute route=null;
+                    NavPreparedCrowdStep frame=null;
+                    try
+                    {
+                        var recorded=new (NavLocation From,NavLocation To,double Cost,string Portal)[]{
+                            (new NavLocation(new NavPoint(-60.09138953656283,-100.74118109821414),"city/street"),new NavLocation(new NavPoint(-60.09138953656283,-100.74118109821414),"city/street"),0.0,null),
+                (new NavLocation(new NavPoint(-60.09138953656283,-100.74118109821414),"city/street"),new NavLocation(new NavPoint(-60.09138870239258,-100.74118041992188),"city/street"),1.0751373898306163e-06,null),
+                (new NavLocation(new NavPoint(-60.09138870239258,-100.74118041992188),"city/street"),new NavLocation(new NavPoint(-59.28141403198242,-100.55033874511719),"city/street"),0.8321535384460607,null),
+                (new NavLocation(new NavPoint(-59.28141403198242,-100.55033874511719),"city/street"),new NavLocation(new NavPoint(-58.68359375,-100.40948486328125),"city/street"),0.6141896332386233,null),
+                (new NavLocation(new NavPoint(-58.68359375,-100.40948486328125),"city/street"),new NavLocation(new NavPoint(-58.2542724609375,-100.30833435058594),"city/street"),0.4410761787501239,null),
+                (new NavLocation(new NavPoint(-58.2542724609375,-100.30833435058594),"city/street"),new NavLocation(new NavPoint(-56.19999694824219,-99.8243179321289),"city/street"),2.110525947576945,null),
+                (new NavLocation(new NavPoint(-56.19999694824219,-99.8243179321289),"city/street"),new NavLocation(new NavPoint(-55.79999923706055,-99.42431640625),"city/street"),0.5656848854760081,null),
+                (new NavLocation(new NavPoint(-55.79999923706055,-99.42431640625),"city/street"),new NavLocation(new NavPoint(-54.79999923706055,-96.0243148803711),"city/street"),3.5440104932094783,null),
+                (new NavLocation(new NavPoint(-54.79999923706055,-96.0243148803711),"city/street"),new NavLocation(new NavPoint(-45.78434753417969,-83.22431945800781),"city/street"),15.656367983672952,null),
+                (new NavLocation(new NavPoint(-45.78434753417969,-83.22431945800781),"city/street"),new NavLocation(new NavPoint(-42.47887420654297,-78.53136444091797),"city/street"),5.740207375360797,null),
+                (new NavLocation(new NavPoint(-42.47887420654297,-78.53136444091797),"city/street"),new NavLocation(new NavPoint(-42.0,-77.85148620605469),"city/street"),0.831597811404629,null),
+                (new NavLocation(new NavPoint(-42.0,-77.85148620605469),"city/street"),new NavLocation(new NavPoint(-39.00712966918945,-73.60234832763672),"city/street"),5.197349856114402,null),
+                (new NavLocation(new NavPoint(-39.00712966918945,-73.60234832763672),"city/street"),new NavLocation(new NavPoint(-38.984230041503906,-73.56983947753906),"city/street"),0.03976453549091891,null),
+                (new NavLocation(new NavPoint(-38.984230041503906,-73.56983947753906),"city/street"),new NavLocation(new NavPoint(-38.599998474121094,-73.02432250976562),"city/street"),0.6672500726880278,null),
+                (new NavLocation(new NavPoint(-38.599998474121094,-73.02432250976562),"city/street"),new NavLocation(new NavPoint(-37.48139190673828,-70.42431640625),"city/street"),2.830426185384537,null),
+                (new NavLocation(new NavPoint(-37.48139190673828,-70.42431640625),"city/street"),new NavLocation(new NavPoint(-36.982696533203125,-69.26519012451172),"city/street"),1.2618521357915842,null),
+                (new NavLocation(new NavPoint(-36.982696533203125,-69.26519012451172),"city/street"),new NavLocation(new NavPoint(-32.198795318603516,-58.14584732055664),"city/street"),12.104771589043521,null),
+                (new NavLocation(new NavPoint(-32.198795318603516,-58.14584732055664),"city/street"),new NavLocation(new NavPoint(-31.97441864013672,-57.62431716918945),"city/street"),0.5677487055246131,null),
+                (new NavLocation(new NavPoint(-31.97441864013672,-57.62431716918945),"city/street"),new NavLocation(new NavPoint(-31.788787841796875,-57.19285202026367),"city/street"),0.4697030636794211,null),
+                (new NavLocation(new NavPoint(-31.788787841796875,-57.19285202026367),"city/street"),new NavLocation(new NavPoint(-31.37809181213379,-56.238258361816406),"city/street"),1.0391921292661706,null),
+                (new NavLocation(new NavPoint(-31.37809181213379,-56.238258361816406),"city/street"),new NavLocation(new NavPoint(-31.36836591406832,-56.21565227104132),"city/street"),0.02460951916050506,null),
+                (new NavLocation(new NavPoint(-31.36836591406832,-56.21565227104132),"city/street"),new NavLocation(new NavPoint(-31.36836591406832,-56.21565227104132),"city/ramp/2/-1"),0.0,"ca4e1cda0dbbab92178e0ed4768f86865bcef50f748d71e38349d97b8c8e4781"),
+                (new NavLocation(new NavPoint(-31.36836591406832,-56.21565227104132),"city/ramp/2/-1"),new NavLocation(new NavPoint(-31.200000762939453,-55.824317932128906),"city/ramp/2/-1"),0.4260157144128175,null),
+                (new NavLocation(new NavPoint(-31.200000762939453,-55.824317932128906),"city/ramp/2/-1"),new NavLocation(new NavPoint(-32.903770446777344,-45.430389404296875),"city/ramp/2/-1"),10.532643608194745,null),
+                (new NavLocation(new NavPoint(-32.903770446777344,-45.430389404296875),"city/ramp/2/-1"),new NavLocation(new NavPoint(-33.003116607666016,-44.824317932128906),"city/ramp/2/-1"),0.6141598237097301,null),
+                (new NavLocation(new NavPoint(-33.003116607666016,-44.824317932128906),"city/ramp/2/-1"),new NavLocation(new NavPoint(-33.92257372992244,-39.21511622702292),"city/ramp/2/-1"),5.684060623201691,null),
+                (new NavLocation(new NavPoint(-33.92257372992244,-39.21511622702292),"city/ramp/2/-1"),new NavLocation(new NavPoint(-33.92257372992244,-39.21511622702292),"city/plaza/2"),0.0,"2390d3067391c5cdac0c53346a659858dee225b2d5e0b2eab54bfc03f0ef0281"),
+                (new NavLocation(new NavPoint(-33.92257372992244,-39.21511622702292),"city/plaza/2"),new NavLocation(new NavPoint(-33.9734992980957,-38.904441833496094),"city/plaza/2"),0.31482057157534926,null),
+                (new NavLocation(new NavPoint(-33.9734992980957,-38.904441833496094),"city/plaza/2"),new NavLocation(new NavPoint(-34.22821666750916,-37.350526425591866),"city/plaza/2"),1.5746536232464183,null),
+                (new NavLocation(new NavPoint(-34.22821666750916,-37.350526425591866),"city/plaza/2"),new NavLocation(new NavPoint(-34.90437817456598,-33.22557726028393),"city/plaza/2"),4.180000000000001,null)
+                        };
+                        typed=recorded.Select(l=>NavTypedLeg.CreateOwned(l.From,l.To,l.Cost,
+                            l.Portal==null?NavTypedLegKind.Surface:NavTypedLegKind.Portal,l.Portal,reservation,provider)).ToArray();
+                        var recordedSpine=new (NavLocation From,NavLocation To,double Cost,string Portal)[]{
+                            (new NavLocation(new NavPoint(-60.09138953656283,-100.74118109821414),"city/street"),new NavLocation(new NavPoint(-60.09138870239258,-100.74118041992188),"city/street"),1.0751373898306163e-06,null),
+                (new NavLocation(new NavPoint(-60.09138870239258,-100.74118041992188),"city/street"),new NavLocation(new NavPoint(-59.28141403198242,-100.55033874511719),"city/street"),0.8321535384460607,null),
+                (new NavLocation(new NavPoint(-59.28141403198242,-100.55033874511719),"city/street"),new NavLocation(new NavPoint(-58.68359375,-100.40948486328125),"city/street"),0.6141896332386233,null),
+                (new NavLocation(new NavPoint(-58.68359375,-100.40948486328125),"city/street"),new NavLocation(new NavPoint(-58.2542724609375,-100.30833435058594),"city/street"),0.4410761787501239,null),
+                (new NavLocation(new NavPoint(-58.2542724609375,-100.30833435058594),"city/street"),new NavLocation(new NavPoint(-56.19999694824219,-99.8243179321289),"city/street"),2.110525947576945,null),
+                (new NavLocation(new NavPoint(-56.19999694824219,-99.8243179321289),"city/street"),new NavLocation(new NavPoint(-55.79999923706055,-99.42431640625),"city/street"),0.5656848854760081,null),
+                (new NavLocation(new NavPoint(-55.79999923706055,-99.42431640625),"city/street"),new NavLocation(new NavPoint(-54.79999923706055,-96.0243148803711),"city/street"),3.5440104932094783,null),
+                (new NavLocation(new NavPoint(-54.79999923706055,-96.0243148803711),"city/street"),new NavLocation(new NavPoint(-45.78434753417969,-83.22431945800781),"city/street"),15.656367983672952,null),
+                (new NavLocation(new NavPoint(-45.78434753417969,-83.22431945800781),"city/street"),new NavLocation(new NavPoint(-42.47887420654297,-78.53136444091797),"city/street"),5.740207375360797,null),
+                (new NavLocation(new NavPoint(-42.47887420654297,-78.53136444091797),"city/street"),new NavLocation(new NavPoint(-42.0,-77.85148620605469),"city/street"),0.831597811404629,null),
+                (new NavLocation(new NavPoint(-42.0,-77.85148620605469),"city/street"),new NavLocation(new NavPoint(-39.00712966918945,-73.60234832763672),"city/street"),5.197349856114402,null),
+                (new NavLocation(new NavPoint(-39.00712966918945,-73.60234832763672),"city/street"),new NavLocation(new NavPoint(-38.984230041503906,-73.56983947753906),"city/street"),0.03976453549091891,null),
+                (new NavLocation(new NavPoint(-38.984230041503906,-73.56983947753906),"city/street"),new NavLocation(new NavPoint(-38.599998474121094,-73.02432250976562),"city/street"),0.6672500726880278,null),
+                (new NavLocation(new NavPoint(-38.599998474121094,-73.02432250976562),"city/street"),new NavLocation(new NavPoint(-37.48139190673828,-70.42431640625),"city/street"),2.830426185384537,null),
+                (new NavLocation(new NavPoint(-37.48139190673828,-70.42431640625),"city/street"),new NavLocation(new NavPoint(-36.982696533203125,-69.26519012451172),"city/street"),1.2618521357915842,null),
+                (new NavLocation(new NavPoint(-36.982696533203125,-69.26519012451172),"city/street"),new NavLocation(new NavPoint(-32.198795318603516,-58.14584732055664),"city/street"),12.104771589043521,null),
+                (new NavLocation(new NavPoint(-32.198795318603516,-58.14584732055664),"city/street"),new NavLocation(new NavPoint(-31.97441864013672,-57.62431716918945),"city/street"),0.5677487055246131,null),
+                (new NavLocation(new NavPoint(-31.97441864013672,-57.62431716918945),"city/street"),new NavLocation(new NavPoint(-31.788787841796875,-57.19285202026367),"city/street"),0.4697030636794211,null),
+                (new NavLocation(new NavPoint(-31.788787841796875,-57.19285202026367),"city/street"),new NavLocation(new NavPoint(-31.37809181213379,-56.238258361816406),"city/street"),1.0391921292661706,null),
+                (new NavLocation(new NavPoint(-31.37809181213379,-56.238258361816406),"city/street"),new NavLocation(new NavPoint(-31.36836591406832,-56.21565227104132),"city/street"),0.02460951916050506,null),
+                (new NavLocation(new NavPoint(-31.36836591406832,-56.21565227104132),"city/street"),new NavLocation(new NavPoint(-31.36836591406832,-56.21565227104132),"city/ramp/2/-1"),0.0,"ca4e1cda0dbbab92178e0ed4768f86865bcef50f748d71e38349d97b8c8e4781"),
+                (new NavLocation(new NavPoint(-31.36836591406832,-56.21565227104132),"city/ramp/2/-1"),new NavLocation(new NavPoint(-31.200000762939453,-55.824317932128906),"city/ramp/2/-1"),0.4260157144128175,null),
+                (new NavLocation(new NavPoint(-31.200000762939453,-55.824317932128906),"city/ramp/2/-1"),new NavLocation(new NavPoint(-32.903770446777344,-45.430389404296875),"city/ramp/2/-1"),10.532643608194745,null),
+                (new NavLocation(new NavPoint(-32.903770446777344,-45.430389404296875),"city/ramp/2/-1"),new NavLocation(new NavPoint(-33.003116607666016,-44.824317932128906),"city/ramp/2/-1"),0.6141598237097301,null),
+                (new NavLocation(new NavPoint(-33.003116607666016,-44.824317932128906),"city/ramp/2/-1"),new NavLocation(new NavPoint(-33.92257372992244,-39.21511622702292),"city/ramp/2/-1"),5.684060623201691,null),
+                (new NavLocation(new NavPoint(-33.92257372992244,-39.21511622702292),"city/ramp/2/-1"),new NavLocation(new NavPoint(-33.92257372992244,-39.21511622702292),"city/plaza/2"),0.0,"2390d3067391c5cdac0c53346a659858dee225b2d5e0b2eab54bfc03f0ef0281"),
+                (new NavLocation(new NavPoint(-33.92257372992244,-39.21511622702292),"city/plaza/2"),new NavLocation(new NavPoint(-33.9734992980957,-38.904441833496094),"city/plaza/2"),0.31482057157534926,null),
+                (new NavLocation(new NavPoint(-33.9734992980957,-38.904441833496094),"city/plaza/2"),new NavLocation(new NavPoint(-34.22821666750916,-37.350526425591866),"city/plaza/2"),1.5746536232464183,null),
+                (new NavLocation(new NavPoint(-34.22821666750916,-37.350526425591866),"city/plaza/2"),new NavLocation(new NavPoint(-34.90437698364258,-33.22557830810547),"city/plaza/2"),4.179998773333339,null),
+                (new NavLocation(new NavPoint(-34.90437698364258,-33.22557830810547),"city/plaza/2"),new NavLocation(new NavPoint(-34.90437817456598,-33.22557726028393),"city/plaza/2"),1.5862624389445543e-06,null)
+                        };
+                        shared=recordedSpine.Select(l=>NavTypedLeg.CreateOwned(l.From,l.To,l.Cost,
+                            l.Portal==null?NavTypedLegKind.Surface:NavTypedLegKind.Portal,l.Portal,reservation,provider)).ToArray();
+                        var graph=new string('a',64);
+                        spine=NavRecastSpine.Create(1,114,115,2305843009213694242,radius,graph,graph,graph,
+                            provider.Binding,graph,"",geometry.Revision,new NavPoint(-34.90437817456598,-33.22557726028393),4.1800000000000015,28,shared,reservation);
+                        plan=NavRecastMemberPlan.Create(spine,0,28,1,29,graph,graph,reservation);
+                        var subscription=new NavRouteSubscription(1,114,115,2305843009213694242,15551,115,155,mover.Incarnation,115,
+                            mover.MobilityRevision,412,recorded[0].From,goal,"");
+                        route=NavTypedRoute.CopySubscriptionAndCreateOwned(subscription,typed,typed.Sum(l=>l.Cost),reservation,plan);
+                        frame=NavPreparedCrowdStep.Create(session.Crowd,session.Crowd.Units.Count,reservation);
+                        frame.Observe();
+                        int row=frame.Find(155);
+                        var actor=frame.After[row];
+                        actor.Heading=-0.013870193685676352;
+                        actor.route=typed.Where(l=>l.Kind==NavTypedLegKind.Surface).Select(l=>l.To.Position).ToArray();
+                        actor.routeIndex=5;
+                        actor.Moving=true;
+                        actor.Outcome=NavigationOutcome.Moving;
+                        actor.Goal=goal.Position;
+                        actor.GoalLocation=goal;
+                        actor.InstalledRequest=412;
+                        actor.InstalledOrder=2;
+                        actor.InstalledGroupId=114;
+                        actor.InstalledRevision=115;
+                        frame.BindRecast(row,route,new NavRecastStepState(1,4,1.8874204255721976,1.8874204255721976));
+                        frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.Bound,TargetLeg=21,ForwardLimit=-.58};
+                        int repairs=0;
+                        double separation=0;
+                        for(int tick=0;tick<300;tick++)
+                        {
+                            frame.Compute(1d/30);
+                            if(frame.RecastReceipts[row].Verified)frame.RecastStates[row]=frame.RecastReceipts[row].After;
+                            separation=Math.Max(separation,LayeredNavigationProvider.Distance(start.Position,actor.Position));
+                            if(repairs!=frame.Working.RepairCount||tick%30==0||tick==299)
+                            {
+                                repairs=frame.Working.RepairCount;
+                                TestContext.WriteLine($"ANTENNA_POCKET tick={tick} x={actor.Position.X:R} z={actor.Position.Z:R} separation={separation:R} ix={actor.routeIndex} li={actor.localIndex} local={string.Join(" ",actor.localRoute.Select(p=>$"{p.X:R},{p.Z:R}"))} repairs={repairs} outcome={actor.Outcome}");
+                            }
+                            if(separation>5)break;
+                        }
+                        Assert.Greater(separation,5,"The original route must leave the pocket while the new peer remains stationary.");
+                        Assert.AreEqual(412,actor.InstalledRequest);
+                    }
+                    finally
+                    {
+                        frame?.Release();route?.ReleaseOwner();plan?.Release();spine?.Release();
+                        if(typed!=null)foreach(var leg in typed)leg.ReleaseOwner();
+                        if(shared!=null)foreach(var leg in shared)leg.ReleaseOwner();
+                        ((INavStorageFacade)provider).StorageRoot.Release();
+                    }
+                    scope.Discard();
+                }
+            }
+            finally
+            {
+                session.DestroyNavigationAuthority();
+                Assert.Zero(budget.PhysicalBytes);
+                Assert.Zero(budget.HeldBytes);
+            }
+        }
+
+        [Test]
+        public void RecordedAntennaMotorFromFactoryPocket()
+        {
+            var map=new AntennaCityMap();
+            var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);
+            const double radius=.58;
+            var buildings=new (PlayableBuildingKind,NavPoint)[]{
+                (PlayableBuildingKind.Headquarters,new NavPoint(60.000000000000014,103.92304845413263)),
+                (PlayableBuildingKind.Headquarters,new NavPoint(120.0,0.0)),
+                (PlayableBuildingKind.Headquarters,new NavPoint(60.000000000000014,-103.92304845413263)),
+                (PlayableBuildingKind.Headquarters,new NavPoint(-59.99999999999998,-103.92304845413264)),
+                (PlayableBuildingKind.Headquarters,new NavPoint(-59.99999999999998,103.92304845413264)),
+                (PlayableBuildingKind.Headquarters,new NavPoint(-120.0,-1.469576158976824e-14)),
+                (PlayableBuildingKind.Refinery,new NavPoint(66.50000000000001,-103.92304845413263)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-53.49999999999998,-103.92304845413264)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-53.49999999999998,103.92304845413264)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-113.5,-1.469576158976824e-14)),
+                (PlayableBuildingKind.Refinery,new NavPoint(66.50000000000001,103.92304845413263)),
+                (PlayableBuildingKind.Refinery,new NavPoint(126.5,0.0)),
+                (PlayableBuildingKind.Refinery,new NavPoint(62.00861046343717,-97.74118109821413)),
+                (PlayableBuildingKind.Factory,new NavPoint(-57.99138953656282,110.10491581005114)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-117.99138953656283,6.181867355918483)),
+                (PlayableBuildingKind.Factory,new NavPoint(-57.99138953656282,-97.74118109821414)),
+                (PlayableBuildingKind.Factory,new NavPoint(62.00861046343717,110.10491581005112)),
+                (PlayableBuildingKind.Refinery,new NavPoint(122.00861046343717,6.181867355918498)),
+                (PlayableBuildingKind.Refinery,new NavPoint(114.74138953656285,3.820604139901076)),
+                (PlayableBuildingKind.Factory,new NavPoint(-125.25861046343715,3.8206041399010613)),
+                (PlayableBuildingKind.Factory,new NavPoint(54.741389536562856,-100.10244431423155)),
+                (PlayableBuildingKind.Factory,new NavPoint(114.74138953656285,-3.8206041399010746)),
+                (PlayableBuildingKind.Refinery,new NavPoint(54.741389536562856,107.7436525940337)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-65.25861046343714,107.74365259403372)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-65.25861046343714,100.10244431423156)),
+                (PlayableBuildingKind.Outpost,new NavPoint(82.0,0.0)),
+                (PlayableBuildingKind.Mine,new NavPoint(-142.0,-1.7389984547892416e-14)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-65.25861046343714,-100.10244431423156)),
+                (PlayableBuildingKind.Outpost,new NavPoint(-82.0,-1.0042103753008296e-14)),
+                (PlayableBuildingKind.Refinery,new NavPoint(54.741389536562856,-107.7436525940337)),
+                (PlayableBuildingKind.Outpost,new NavPoint(-40.999999999999986,-71.01408311032398)),
+                (PlayableBuildingKind.Outpost,new NavPoint(41.00000000000001,71.01408311032397)),
+                (PlayableBuildingKind.Outpost,new NavPoint(-40.999999999999986,71.01408311032398)),
+                (PlayableBuildingKind.Hangar,new NavPoint(-75.5,-1.0042103753008296e-14)),
+                (PlayableBuildingKind.Hangar,new NavPoint(62.00861046343717,-110.10491581005112)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-34.499999999999986,-71.01408311032398)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-85.25,5.629165124598842)),
+                (PlayableBuildingKind.Refinery,new NavPoint(47.50000000000001,71.01408311032397)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-44.249999999999986,-65.38491798572512)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-85.25,-5.629165124598859)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-34.499999999999986,71.01408311032398)),
+                (PlayableBuildingKind.Refinery,new NavPoint(37.75000000000001,76.64324823492282)),
+                (PlayableBuildingKind.Refinery,new NavPoint(-44.249999999999986,76.64324823492284)),
+                (PlayableBuildingKind.SentryTurret,new NavPoint(-77.75,-7.361215932167739)),
+                (PlayableBuildingKind.Mine,new NavPoint(71.00000000000001,-122.97560733739029)),
+                (PlayableBuildingKind.ScientificCenter,new NavPoint(-125.25861046343715,-3.8206041399010893)),
+                (PlayableBuildingKind.Factory,new NavPoint(-44.249999999999986,65.38491798572514))
+            };
+            var obstacles=map.MovementBlockers.Concat(buildings.Select(b=>{
+                double size=TerritoryRules.Radius(profile,b.Item1);
+                return new NavObstacle(b.Item2.X-size,b.Item2.Z-size,b.Item2.X+size,b.Item2.Z+size);
+            })).ToArray();
+            var geometry=new NavGeometry(map.HalfExtent,obstacles,92);
+            var session=new NavigationSession(1,geometry,profile.Navigation,null,map);
+            var budget=session.PhysicalHostBudget;
+            try
+            {
+                var start=new NavLocation(new NavPoint(-58.786464769451641,108.03145523548126),"city/street");
+                var goal=new NavLocation(new NavPoint(2.8200000000000034,52.0),"city/plaza/0");
+                var mover=session.Crowd.Add(91,start.Position,radius,PlayableUnitRules.Speed(profile,PlayableEntityKind.Explorer),
+                    PlayableUnitRules.Turn(profile,PlayableEntityKind.Explorer),start);
+                var peers=new (int Id,NavLocation Pose,double Radius,double Heading)[]{
+                    (83,new NavLocation(new NavPoint(-59.19966212400606,106.7411177140195),"city/street"),0.58,1.2928982836967604),
+                (98,new NavLocation(new NavPoint(-55.772136884927086,100.30194555318901),"city/street"),0.58,-1.6158718125738438),
+                (102,new NavLocation(new NavPoint(-53.67400405769558,107.05649826900425),"city/street"),0.58,2.2283217588652797),
+                (107,new NavLocation(new NavPoint(-57.94518018681752,100.72965098912273),"city/street"),0.58,-2.372402629379617),
+                (114,new NavLocation(new NavPoint(-55.85140623938652,104.94998486374676),"city/street"),0.58,1.56967765578828),
+                (119,new NavLocation(new NavPoint(-55.89138953656281,107.10491581005114),"city/street"),0.58,0.0),
+                (121,new NavLocation(new NavPoint(-54.12831091024006,101.06504148495316),"city/street"),0.58,-0.7392658899869307),
+                (125,new NavLocation(new NavPoint(-55.91063226080128,102.82273924688577),"city/street"),0.58,0.03672323767049658),
+                (130,new NavLocation(new NavPoint(-57.99138953656282,107.10491581005114),"city/street"),0.58,-1.5707963267948966)
+                };
+                foreach(var p in peers)
+                {
+                    var peer=session.Crowd.Add(p.Id,p.Pose.Position,p.Radius,mover.Speed,mover.TurnSpeed,p.Pose);
+                    peer.Heading=p.Heading;
+                    peer.Team=5;
+                }
+                mover.Team=5;
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,1,1,out var scope));
+                using(scope)
+                {
+                    var reservation=scope.OwnedReservation();
+                    var provider=PartitionNavigationProvider.CopyOwned(new PartitionNavigationProvider(map,geometry,""),reservation);
+                    NavTypedLeg[] typed=null,shared=null;
+                    NavRecastSpine spine=null;
+                    NavRecastMemberPlan plan=null;
+                    NavTypedRoute route=null;
+                    NavPreparedCrowdStep frame=null;
+                    try
+                    {
+                        var recorded=new (NavLocation From,NavLocation To,double Cost,string Portal)[]{
+                            (new NavLocation(new NavPoint(-60.09138953656283,107.10491581005114),"city/street"),new NavLocation(new NavPoint(-50.02438013895052,106.45222603991476),"city/street"),10.088145624823982,null),
+                (new NavLocation(new NavPoint(-50.02438013895052,106.45222603991476),"city/street"),new NavLocation(new NavPoint(-50.02437973022461,106.45222473144531),"city/street"),1.3708206197076609e-06,null),
+                (new NavLocation(new NavPoint(-50.02437973022461,106.45222473144531),"city/street"),new NavLocation(new NavPoint(-49.89316940307617,106.0886459350586),"city/street"),0.38653032369067125,null),
+                (new NavLocation(new NavPoint(-49.89316940307617,106.0886459350586),"city/street"),new NavLocation(new NavPoint(-49.340972900390625,104.55853271484375),"city/street"),1.6267044735459444,null),
+                (new NavLocation(new NavPoint(-49.340972900390625,104.55853271484375),"city/street"),new NavLocation(new NavPoint(-47.569183349609375,99.64897155761719),"city/street"),5.2194855080558895,null),
+                (new NavLocation(new NavPoint(-47.569183349609375,99.64897155761719),"city/street"),new NavLocation(new NavPoint(-46.2435417175293,95.9756851196289),"city/street"),3.905170801925643,null),
+                (new NavLocation(new NavPoint(-46.2435417175293,95.9756851196289),"city/street"),new NavLocation(new NavPoint(-45.126399993896484,92.880126953125),"city/street"),3.2909703725330495,null),
+                (new NavLocation(new NavPoint(-45.126399993896484,92.880126953125),"city/street"),new NavLocation(new NavPoint(-44.79999923706055,91.9756851196289),"city/street"),0.9615365225725171,null),
+                (new NavLocation(new NavPoint(-44.79999923706055,91.9756851196289),"city/street"),new NavLocation(new NavPoint(-44.20000076293945,90.77568054199219),"city/street"),1.3416441984731722,null),
+                (new NavLocation(new NavPoint(-44.20000076293945,90.77568054199219),"city/street"),new NavLocation(new NavPoint(-42.0,86.9756851196289),"city/street"),4.39089610067422,null),
+                (new NavLocation(new NavPoint(-42.0,86.9756851196289),"city/street"),new NavLocation(new NavPoint(-41.44390106201172,86.14154052734375),"city/street"),1.0025184435561592,null),
+                (new NavLocation(new NavPoint(-41.44390106201172,86.14154052734375),"city/street"),new NavLocation(new NavPoint(-41.08799743652344,85.60768127441406),"city/street"),0.6416175594342372,null),
+                (new NavLocation(new NavPoint(-41.08799743652344,85.60768127441406),"city/street"),new NavLocation(new NavPoint(-40.7675666809082,85.12703704833984),"city/street"),0.5776631727941767,null),
+                (new NavLocation(new NavPoint(-40.7675666809082,85.12703704833984),"city/street"),new NavLocation(new NavPoint(-39.4666633605957,83.1756820678711),"city/street"),2.3452368129040364,null),
+                (new NavLocation(new NavPoint(-39.4666633605957,83.1756820678711),"city/street"),new NavLocation(new NavPoint(-32.775508880615234,73.13894653320312),"city/street"),12.062653458830251,null),
+                (new NavLocation(new NavPoint(-32.775508880615234,73.13894653320312),"city/street"),new NavLocation(new NavPoint(-32.75833511352539,73.1131820678711),"city/street"),0.030963623009939267,null),
+                (new NavLocation(new NavPoint(-32.75833511352539,73.1131820678711),"city/street"),new NavLocation(new NavPoint(-32.74399948120117,73.09168243408203),"city/street"),0.025840754772238822,null),
+                (new NavLocation(new NavPoint(-32.74399948120117,73.09168243408203),"city/street"),new NavLocation(new NavPoint(-32.400001525878906,72.57568359375),"city/street"),0.6201527202954934,null),
+                (new NavLocation(new NavPoint(-32.400001525878906,72.57568359375),"city/street"),new NavLocation(new NavPoint(-32.400001525878906,70.37568664550781),"city/street"),2.1999969482421875,null),
+                (new NavLocation(new NavPoint(-32.400001525878906,70.37568664550781),"city/street"),new NavLocation(new NavPoint(-32.400001525878906,69.37568664550781),"city/street"),1.0,null),
+                (new NavLocation(new NavPoint(-32.400001525878906,69.37568664550781),"city/street"),new NavLocation(new NavPoint(-32.509891510009766,68.4599380493164),"city/street"),0.9223184374384,null),
+                (new NavLocation(new NavPoint(-32.509891510009766,68.4599380493164),"city/street"),new NavLocation(new NavPoint(-33.56288528442383,59.68496322631836),"city/street"),8.83792843562361,null),
+                (new NavLocation(new NavPoint(-33.56288528442383,59.68496322631836),"city/street"),new NavLocation(new NavPoint(-33.599998474121094,59.37568283081055),"city/street"),0.31149920047244767,null),
+                (new NavLocation(new NavPoint(-33.599998474121094,59.37568283081055),"city/street"),new NavLocation(new NavPoint(-33.599998474121094,58.77568435668945),"city/street"),0.5999984741210938,null),
+                (new NavLocation(new NavPoint(-33.599998474121094,58.77568435668945),"city/street"),new NavLocation(new NavPoint(-33.39999847412109,58.57568435668945),"city/street"),0.28284271247462306,null),
+                (new NavLocation(new NavPoint(-33.39999847412109,58.57568435668945),"city/street"),new NavLocation(new NavPoint(-33.199998474121095,58.375684356689455),"city/street"),0.28284271247461296,null),
+                (new NavLocation(new NavPoint(-33.199998474121095,58.375684356689455),"city/street"),new NavLocation(new NavPoint(-33.0,58.37568283081055),"city/street"),0.199998474126916,null),
+                (new NavLocation(new NavPoint(-33.0,58.37568283081055),"city/street"),new NavLocation(new NavPoint(-33.0,58.37568283081055),"city/ramp/0/-1"),0.0,"8aaea741eaaadbe39602f58a29d2b25e18abc1c72c516c915b60d99dab9caa9e"),
+                (new NavLocation(new NavPoint(-33.0,58.37568283081055),"city/ramp/0/-1"),new NavLocation(new NavPoint(-29.200000762939453,57.81686019897461),"city/ramp/0/-1"),3.8408692942500378,null),
+                (new NavLocation(new NavPoint(-29.200000762939453,57.81686019897461),"city/ramp/0/-1"),new NavLocation(new NavPoint(-28.339860916137695,57.69036865234375),"city/ramp/0/-1"),0.869390975007918,null),
+                (new NavLocation(new NavPoint(-28.339860916137695,57.69036865234375),"city/ramp/0/-1"),new NavLocation(new NavPoint(-27.56000518798828,57.57568359375),"city/ramp/0/-1"),0.7882433757362662,null),
+                (new NavLocation(new NavPoint(-27.56000518798828,57.57568359375),"city/ramp/0/-1"),new NavLocation(new NavPoint(-16.999999999999996,56.02274112351564),"city/ramp/0/-1"),10.673581399239765,null),
+                (new NavLocation(new NavPoint(-16.999999999999996,56.02274112351564),"city/ramp/0/-1"),new NavLocation(new NavPoint(-16.999999999999996,56.02274112351564),"city/plaza/0"),0.0,"a1fbebf73db2776f67e15241e620a5a06c42de3d4f2e8e3c84a7bdf41c3fa2c0"),
+                (new NavLocation(new NavPoint(-16.999999999999996,56.02274112351564),"city/plaza/0"),new NavLocation(new NavPoint(-16.39999771118164,55.934505462646484),"city/plaza/0"),0.6064555040860637,null),
+                (new NavLocation(new NavPoint(-16.39999771118164,55.934505462646484),"city/plaza/0"),new NavLocation(new NavPoint(-3.5999975204467773,54.052154541015625),"city/plaza/0"),12.937667868475256,null),
+                (new NavLocation(new NavPoint(-3.5999975204467773,54.052154541015625),"city/plaza/0"),new NavLocation(new NavPoint(-2.1308770179748535,53.83610534667969),"city/plaza/0"),1.484921649500931,null),
+                (new NavLocation(new NavPoint(-2.1308770179748535,53.83610534667969),"city/plaza/0"),new NavLocation(new NavPoint(-1.7873413562774658,53.785587310791016),"city/plaza/0"),0.34723021586248964,null),
+                (new NavLocation(new NavPoint(-1.7873413562774658,53.785587310791016),"city/plaza/0"),new NavLocation(new NavPoint(-1.2003055810928345,53.699256896972656),"city/plaza/0"),0.5933497633745801,null),
+                (new NavLocation(new NavPoint(-1.2003055810928345,53.699256896972656),"city/plaza/0"),new NavLocation(new NavPoint(1.0000027418136597,53.37568283081055),"city/plaza/0"),2.223973221993527,null),
+                (new NavLocation(new NavPoint(1.0000027418136597,53.37568283081055),"city/plaza/0"),new NavLocation(new NavPoint(2.5625444120965453,52.97908452723586),"city/plaza/0"),1.612087679305548,null),
+                (new NavLocation(new NavPoint(2.5625444120965453,52.97908452723586),"city/plaza/0"),new NavLocation(new NavPoint(2.8200000000000034,52.0),"city/plaza/0"),1.0123684562526567,null)
+                        };
+                        typed=recorded.Select(l=>NavTypedLeg.CreateOwned(l.From,l.To,l.Cost,
+                            l.Portal==null?NavTypedLegKind.Surface:NavTypedLegKind.Portal,l.Portal,reservation,provider)).ToArray();
+                        var recordedSpine=new (NavLocation From,NavLocation To,double Cost,string Portal)[]{
+                            (new NavLocation(new NavPoint(-50.02438013895052,106.45222603991476),"city/street"),new NavLocation(new NavPoint(-50.02437973022461,106.45222473144531),"city/street"),1.3708206197076609e-06,null),
+                (new NavLocation(new NavPoint(-50.02437973022461,106.45222473144531),"city/street"),new NavLocation(new NavPoint(-49.89316940307617,106.0886459350586),"city/street"),0.38653032369067125,null),
+                (new NavLocation(new NavPoint(-49.89316940307617,106.0886459350586),"city/street"),new NavLocation(new NavPoint(-49.340972900390625,104.55853271484375),"city/street"),1.6267044735459444,null),
+                (new NavLocation(new NavPoint(-49.340972900390625,104.55853271484375),"city/street"),new NavLocation(new NavPoint(-47.569183349609375,99.64897155761719),"city/street"),5.2194855080558895,null),
+                (new NavLocation(new NavPoint(-47.569183349609375,99.64897155761719),"city/street"),new NavLocation(new NavPoint(-46.2435417175293,95.9756851196289),"city/street"),3.905170801925643,null),
+                (new NavLocation(new NavPoint(-46.2435417175293,95.9756851196289),"city/street"),new NavLocation(new NavPoint(-45.126399993896484,92.880126953125),"city/street"),3.2909703725330495,null),
+                (new NavLocation(new NavPoint(-45.126399993896484,92.880126953125),"city/street"),new NavLocation(new NavPoint(-44.79999923706055,91.9756851196289),"city/street"),0.9615365225725171,null),
+                (new NavLocation(new NavPoint(-44.79999923706055,91.9756851196289),"city/street"),new NavLocation(new NavPoint(-44.20000076293945,90.77568054199219),"city/street"),1.3416441984731722,null),
+                (new NavLocation(new NavPoint(-44.20000076293945,90.77568054199219),"city/street"),new NavLocation(new NavPoint(-42.0,86.9756851196289),"city/street"),4.39089610067422,null),
+                (new NavLocation(new NavPoint(-42.0,86.9756851196289),"city/street"),new NavLocation(new NavPoint(-41.44390106201172,86.14154052734375),"city/street"),1.0025184435561592,null),
+                (new NavLocation(new NavPoint(-41.44390106201172,86.14154052734375),"city/street"),new NavLocation(new NavPoint(-41.08799743652344,85.60768127441406),"city/street"),0.6416175594342372,null),
+                (new NavLocation(new NavPoint(-41.08799743652344,85.60768127441406),"city/street"),new NavLocation(new NavPoint(-40.7675666809082,85.12703704833984),"city/street"),0.5776631727941767,null),
+                (new NavLocation(new NavPoint(-40.7675666809082,85.12703704833984),"city/street"),new NavLocation(new NavPoint(-39.4666633605957,83.1756820678711),"city/street"),2.3452368129040364,null),
+                (new NavLocation(new NavPoint(-39.4666633605957,83.1756820678711),"city/street"),new NavLocation(new NavPoint(-32.775508880615234,73.13894653320312),"city/street"),12.062653458830251,null),
+                (new NavLocation(new NavPoint(-32.775508880615234,73.13894653320312),"city/street"),new NavLocation(new NavPoint(-32.75833511352539,73.1131820678711),"city/street"),0.030963623009939267,null),
+                (new NavLocation(new NavPoint(-32.75833511352539,73.1131820678711),"city/street"),new NavLocation(new NavPoint(-32.74399948120117,73.09168243408203),"city/street"),0.025840754772238822,null),
+                (new NavLocation(new NavPoint(-32.74399948120117,73.09168243408203),"city/street"),new NavLocation(new NavPoint(-32.400001525878906,72.57568359375),"city/street"),0.6201527202954934,null),
+                (new NavLocation(new NavPoint(-32.400001525878906,72.57568359375),"city/street"),new NavLocation(new NavPoint(-32.400001525878906,70.37568664550781),"city/street"),2.1999969482421875,null),
+                (new NavLocation(new NavPoint(-32.400001525878906,70.37568664550781),"city/street"),new NavLocation(new NavPoint(-32.400001525878906,69.37568664550781),"city/street"),1.0,null),
+                (new NavLocation(new NavPoint(-32.400001525878906,69.37568664550781),"city/street"),new NavLocation(new NavPoint(-32.509891510009766,68.4599380493164),"city/street"),0.9223184374384,null),
+                (new NavLocation(new NavPoint(-32.509891510009766,68.4599380493164),"city/street"),new NavLocation(new NavPoint(-33.56288528442383,59.68496322631836),"city/street"),8.83792843562361,null),
+                (new NavLocation(new NavPoint(-33.56288528442383,59.68496322631836),"city/street"),new NavLocation(new NavPoint(-33.599998474121094,59.37568283081055),"city/street"),0.31149920047244767,null),
+                (new NavLocation(new NavPoint(-33.599998474121094,59.37568283081055),"city/street"),new NavLocation(new NavPoint(-33.599998474121094,58.77568435668945),"city/street"),0.5999984741210938,null),
+                (new NavLocation(new NavPoint(-33.599998474121094,58.77568435668945),"city/street"),new NavLocation(new NavPoint(-33.39999847412109,58.57568435668945),"city/street"),0.28284271247462306,null),
+                (new NavLocation(new NavPoint(-33.39999847412109,58.57568435668945),"city/street"),new NavLocation(new NavPoint(-33.199998474121095,58.375684356689455),"city/street"),0.28284271247461296,null),
+                (new NavLocation(new NavPoint(-33.199998474121095,58.375684356689455),"city/street"),new NavLocation(new NavPoint(-33.0,58.37568283081055),"city/street"),0.199998474126916,null),
+                (new NavLocation(new NavPoint(-33.0,58.37568283081055),"city/street"),new NavLocation(new NavPoint(-33.0,58.37568283081055),"city/ramp/0/-1"),0.0,"8aaea741eaaadbe39602f58a29d2b25e18abc1c72c516c915b60d99dab9caa9e"),
+                (new NavLocation(new NavPoint(-33.0,58.37568283081055),"city/ramp/0/-1"),new NavLocation(new NavPoint(-29.200000762939453,57.81686019897461),"city/ramp/0/-1"),3.8408692942500378,null),
+                (new NavLocation(new NavPoint(-29.200000762939453,57.81686019897461),"city/ramp/0/-1"),new NavLocation(new NavPoint(-28.339860916137695,57.69036865234375),"city/ramp/0/-1"),0.869390975007918,null),
+                (new NavLocation(new NavPoint(-28.339860916137695,57.69036865234375),"city/ramp/0/-1"),new NavLocation(new NavPoint(-27.56000518798828,57.57568359375),"city/ramp/0/-1"),0.7882433757362662,null),
+                (new NavLocation(new NavPoint(-27.56000518798828,57.57568359375),"city/ramp/0/-1"),new NavLocation(new NavPoint(-16.999999999999996,56.02274112351564),"city/ramp/0/-1"),10.673581399239765,null),
+                (new NavLocation(new NavPoint(-16.999999999999996,56.02274112351564),"city/ramp/0/-1"),new NavLocation(new NavPoint(-16.999999999999996,56.02274112351564),"city/plaza/0"),0.0,"a1fbebf73db2776f67e15241e620a5a06c42de3d4f2e8e3c84a7bdf41c3fa2c0"),
+                (new NavLocation(new NavPoint(-16.999999999999996,56.02274112351564),"city/plaza/0"),new NavLocation(new NavPoint(-16.39999771118164,55.934505462646484),"city/plaza/0"),0.6064555040860637,null),
+                (new NavLocation(new NavPoint(-16.39999771118164,55.934505462646484),"city/plaza/0"),new NavLocation(new NavPoint(-3.5999975204467773,54.052154541015625),"city/plaza/0"),12.937667868475256,null),
+                (new NavLocation(new NavPoint(-3.5999975204467773,54.052154541015625),"city/plaza/0"),new NavLocation(new NavPoint(-2.1308770179748535,53.83610534667969),"city/plaza/0"),1.484921649500931,null),
+                (new NavLocation(new NavPoint(-2.1308770179748535,53.83610534667969),"city/plaza/0"),new NavLocation(new NavPoint(-1.7873413562774658,53.785587310791016),"city/plaza/0"),0.34723021586248964,null),
+                (new NavLocation(new NavPoint(-1.7873413562774658,53.785587310791016),"city/plaza/0"),new NavLocation(new NavPoint(-1.2003055810928345,53.699256896972656),"city/plaza/0"),0.5933497633745801,null),
+                (new NavLocation(new NavPoint(-1.2003055810928345,53.699256896972656),"city/plaza/0"),new NavLocation(new NavPoint(1.0000027418136597,53.37568283081055),"city/plaza/0"),2.223973221993527,null),
+                (new NavLocation(new NavPoint(1.0000027418136597,53.37568283081055),"city/plaza/0"),new NavLocation(new NavPoint(2.5625444120965453,52.97908452723586),"city/plaza/0"),1.612087679305548,null),
+                (new NavLocation(new NavPoint(2.5625444120965453,52.97908452723586),"city/plaza/0"),new NavLocation(new NavPoint(6.420000076293945,52.0),"city/plaza/0"),3.9797701834052273,null),
+                (new NavLocation(new NavPoint(6.420000076293945,52.0),"city/plaza/0"),new NavLocation(new NavPoint(6.4200000000000035,52.0),"city/plaza/0"),7.62939418308406e-08,null)
+                        };
+                        shared=recordedSpine.Select(l=>NavTypedLeg.CreateOwned(l.From,l.To,l.Cost,
+                            l.Portal==null?NavTypedLegKind.Surface:NavTypedLegKind.Portal,l.Portal,reservation,provider)).ToArray();
+                        var graph=new string('a',64);
+                        spine=NavRecastSpine.Create(1,88,89,2305843009213694179,radius,graph,graph,graph,
+                            provider.Binding,graph,"",geometry.Revision,new NavPoint(6.4200000000000035,51.1),4.290795063055894,39,shared,reservation);
+                        plan=NavRecastMemberPlan.Create(spine,0,39,1,40,graph,graph,reservation);
+                        var subscription=new NavRouteSubscription(1,88,89,2305843009213694179,13517,89,91,mover.Incarnation,89,
+                            mover.MobilityRevision,268,recorded[0].From,goal,"");
+                        route=NavTypedRoute.CopySubscriptionAndCreateOwned(subscription,typed,typed.Sum(l=>l.Cost),reservation,plan);
+                        frame=NavPreparedCrowdStep.Create(session.Crowd,session.Crowd.Units.Count,reservation);
+                        frame.Observe();
+                        int row=frame.Find(91);
+                        var actor=frame.After[row];
+                        actor.Heading=-0.72165690661789217;
+                        actor.route=typed.Where(l=>l.Kind==NavTypedLegKind.Surface).Select(l=>l.To.Position).ToArray();
+                        actor.routeIndex=2;
+                        actor.Moving=true;
+                        actor.Outcome=NavigationOutcome.Moving;
+                        actor.Goal=goal.Position;
+                        actor.GoalLocation=goal;
+                        actor.InstalledRequest=268;
+                        actor.InstalledOrder=1;
+                        actor.InstalledGroupId=88;
+                        actor.InstalledRevision=89;
+                        frame.BindRecast(row,route,new NavRecastStepState(0,0,0,0));
+                        frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.Bound,TargetLeg=27,ForwardLimit=-.58,Target=new NavPoint(-25.18,53.8)};
+                        int repairs=0;
+                        double separation=0;
+                        for(int tick=0;tick<300;tick++)
+                        {
+                            var before=actor.Location;
+                            frame.Compute(1d/30);
+                            if(!actor.Location.Equals(before)){
+                                Assert.True(frame.RecastReceipts[row].Verified);
+                                Assert.True(RecastFormationMotion.Allows(frame.Formation[row],route,before.Position,actor.Position));
+                            }
+                            if(frame.RecastReceipts[row].Verified)frame.RecastStates[row]=frame.RecastReceipts[row].After;
+                            separation=Math.Max(separation,LayeredNavigationProvider.Distance(start.Position,actor.Position));
+                            if(repairs!=frame.Working.RepairCount||tick%30==0||tick==299)
+                            {
+                                repairs=frame.Working.RepairCount;
+                                TestContext.WriteLine($"ANTENNA_MOTOR tick={tick} x={actor.Position.X:R} z={actor.Position.Z:R} separation={separation:R} ix={actor.routeIndex} li={actor.localIndex} local={string.Join(" ",actor.localRoute.Select(p=>$"{p.X:R},{p.Z:R}"))} repairs={repairs} failures={frame.Working.RepairFailed} outcome={actor.Outcome}");
+                            }
+                            if(separation>5)break;
+                        }
+                        Assert.Greater(separation,5,"The accepted route leaves the occupied factory apron in a bounded window.");
+                        Assert.AreEqual(268,actor.InstalledRequest);
+                        Assert.AreEqual(goal,actor.GoalLocation);
+                    }
+                    finally
+                    {
+                        frame?.Release();route?.ReleaseOwner();plan?.Release();spine?.Release();
+                        if(typed!=null)foreach(var leg in typed)leg.ReleaseOwner();
+                        if(shared!=null)foreach(var leg in shared)leg.ReleaseOwner();
+                        ((INavStorageFacade)provider).StorageRoot.Release();
+                    }
+                    scope.Discard();
+                }
+            }
+            finally
+            {
+                session.DestroyNavigationAuthority();
+                Assert.Zero(budget.PhysicalBytes);
+                Assert.Zero(budget.HeldBytes);
+            }
+        }
+
         [Test] public void OccupiedAcceptedEndpointsAllowOnlyTypedPartialProgressWithoutCounterOrInstallCredit()
         {
             ulong native=RecastNative.sw_recast_allocation_count();long faults=RecastNative.ReleaseFaults;var s=Ready();

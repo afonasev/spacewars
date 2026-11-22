@@ -601,18 +601,42 @@ namespace Spacewars.Tests.EditMode
                 var restored=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c);CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes());
             }
         }
-        private static OfflineMatchConfiguration ProfileConfig(OfflineMatchConfiguration c,PlayableProfile p)=>new OfflineMatchConfiguration(p,c.SourceIdentity,c.MapIdentity,c.RouteProvenance,c.Seed,c.Roster.ToArray(),c.Starts.ToArray(),c.Sites.ToArray(),c.Obstacles.ToArray(),new double[,]{{0,c.RouteCost(0,1)},{c.RouteCost(1,0),0}},scenarioBuildings:c.ScenarioBuildings.ToArray());
+        private static OfflineMatchConfiguration ProfileConfig(OfflineMatchConfiguration c,PlayableProfile p)=>new OfflineMatchConfiguration(p,c.SourceIdentity,c.MapIdentity,c.RouteProvenance,c.Seed,c.Roster.ToArray(),c.Starts.ToArray(),c.Sites.ToArray(),c.Obstacles.ToArray(),new double[,]{{0,c.RouteCost(0,1)},{c.RouteCost(1,0),0}},c.Spectators.ToArray(),c.ScenarioUnits.ToArray(),scenarioBuildings:c.ScenarioBuildings.ToArray());
         [Test] public void LiveFundingHonorsPauseCancelledBuildRepriceRestoreAndPaidTerms()
         {
-            var c=PostOpeningCompetingSpendConfig();var a=new PlayableAuthorityTick(c,71);var ledger=(AiBudgetLedger)Get(Owner(a),"budget");int actor=View(a,c).Entities.Single(e=>e.Owner==PlayableOwner.Player).Id;
+            var ready=PostOpeningCompetingSpendConfig();
+            var ai=AiProfile.Initial;
+            Assert.AreEqual(PlayableAiOpening.ExplorerAllIn,PlayableAiOpeningComposition.Initialize(ready.Seed,"west-owner",aiProfile:ai).Opening);
+            // The funded post-opening case supplies a live combat wave separate
+            // from the original automatic Explorer, which retains the capture role.
+            var wave=Enumerable.Range(0,(int)ai.Value("openingsMidgame.allInMax"))
+                .Select(i=>new OfflineScenarioUnit(1,PlayableEntityKind.Explorer,new NavPoint(-25+i*4,-19))).ToArray();
+            var c=new OfflineMatchConfiguration(ready.Profile,ready.SourceIdentity+"-initial-force-ready",ready.MapIdentity,ready.RouteProvenance,
+                ready.Seed,ready.Roster.ToArray(),ready.Starts.ToArray(),ready.Sites.ToArray(),ready.Obstacles.ToArray(),
+                new double[,]{{0,ready.RouteCost(0,1)},{ready.RouteCost(1,0),0}},ready.Spectators.ToArray(),ready.ScenarioUnits.Concat(wave).ToArray(),
+                scenarioBuildings:ready.ScenarioBuildings.ToArray());
+            var a=new PlayableAuthorityTick(c,71);var ledger=(AiBudgetLedger)Get(Owner(a),"budget");
+            int actor=View(a,c).Entities.Where(e=>e.Owner==PlayableOwner.Player).Min(e=>e.Id);
             using(var host=new UnityHostRouteService())
             {
                 for(int i=0;i<100&&Planner(a).Capture().SiteId==0;i++)Step(a,host);
-                var first=ledger.Capture().Reserved.Single(e=>e.Purpose=="expansion-build");Assert.AreEqual(c.Profile.MineCreditCost,first.Amount);
-                long tick=a.Tick;Assert.True(a.TryAdvance(true));Assert.AreEqual(tick,a.Tick);Assert.AreEqual(first.Amount,ledger.Capture().Reserved.Single(e=>e.Purpose=="expansion-build").Amount);
+                Assert.True(Checkpoint(a).OpeningExecution.InitialForceFulfilled,"Post-opening finance requires an actual initial force");
+                var first=ledger.Capture().Reserved.SingleOrDefault(e=>e.Purpose=="expansion-build");
+                Assert.NotNull(first,Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,State=Planner(a).Capture(),Checkpoint(a).OpeningExecution,ledger=ledger.Capture()}));
+                Assert.AreEqual(c.Profile.MineCreditCost,first.Amount);
+                var scheduled=Checkpoint(a).Records.Single(r=>r.Policy=="expansion"&&r.Kind==PlayableCommandKind.Move&&r.Status==PlayableAiDeliveryStatus.Scheduled);
+                // Pause immediately before the accepted Move can be delivered.
+                // Keep the original setup budget and 80 exact continuation steps.
+                Assert.LessOrEqual(scheduled.DueTick-1,100);
+                while(a.Tick<scheduled.DueTick-1)Step(a,host);
+                long tick=a.Tick;Assert.True(a.TryAdvance(true));Assert.AreEqual(tick,a.Tick);
+                Assert.True(Checkpoint(a).Records.Any(r=>r.ActionId==scheduled.ActionId&&r.Status==PlayableAiDeliveryStatus.Cancelled));
+                Assert.AreEqual(first.Amount,ledger.Capture().Reserved.Single(e=>e.Purpose=="expansion-build").Amount);
                 var b=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c);CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());
                 for(int i=0;i<80;i++){Step(a,host);Step(b,host);CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());}
-                Assert.True(Checkpoint(a).Records.Any(r=>r.Policy=="expansion"&&r.Kind==PlayableCommandKind.Move&&r.Status==PlayableAiDeliveryStatus.Applied));
+                Assert.True(Checkpoint(a).Records.Any(r=>r.Policy=="expansion"&&r.Kind==PlayableCommandKind.Move&&r.Status==PlayableAiDeliveryStatus.Applied),
+                    Newtonsoft.Json.JsonConvert.SerializeObject(new{PausedAt=tick,a.Tick,State=Planner(a).Capture(),
+                        Records=Checkpoint(a).Records.Where(r=>r.Policy=="expansion"||r.Policy=="scout").ToArray()}));
                 var data=c.Profile.CopyData();data.revision++;data.mineCreditCost=150;var next=PlayableProfile.Create(data);double bank=View(a,c).ExactCredits;long paid=ledger.PaidTotal;
                 Assert.IsNull(a.ApplyProfile(next));c=ProfileConfig(c,next);Assert.AreEqual(bank,View(a,c).ExactCredits);Assert.AreEqual(paid,ledger.PaidTotal);
                 Assert.AreEqual(150,ledger.Capture().Reserved.Single(e=>e.Purpose=="expansion-build").Amount);

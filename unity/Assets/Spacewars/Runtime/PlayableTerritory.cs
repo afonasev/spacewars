@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 using Spacewars.Simulation;
 
 namespace Spacewars.Runtime
@@ -11,7 +12,8 @@ namespace Spacewars.Runtime
         {
             public TerritorySite Site;
             public PlayableOwner? Claimant,Locked;
-            public double Progress,ControlledSeconds;
+            public int RelayClaimTeam,RelayOwnerTeam;
+            public double Progress,ControlledSeconds,MineReserve,MineReserveCapacity;
             public bool Contested;
             public int CenterId;
             public readonly Dictionary<int,NavPoint> Rallies=new Dictionary<int,NavPoint>();
@@ -19,7 +21,8 @@ namespace Spacewars.Runtime
         private readonly Dictionary<int,SiteState> sites=new Dictionary<int,SiteState>();
         private void InitializeSites()
         {
-            foreach(var site in (offline==null?TerritoryRules.Sites(profile):offline.Sites))sites.Add(site.Id,new SiteState{Site=site});
+            foreach(var site in (offline==null?TerritoryRules.Sites(profile):offline.Sites))sites.Add(site.Id,new SiteState{Site=site,MineReserve=site.Kind==PlayableBuildingKind.Mine?profile.MineReserveCredits:0,
+                    MineReserveCapacity=site.Kind==PlayableBuildingKind.Mine?profile.MineReserveCredits:0});
         }
         private PlayableCommandStatus BuildAt(int siteId,int slotId,PlayableBuildingKind kind,int parentId,PlayableOwner owner,out string message)
         {
@@ -64,23 +67,40 @@ namespace Spacewars.Runtime
         {
             message="Select own unfinished building.";
             if(!buildings.TryGetValue(id,out var b)||b.Owner!=owner||b.Ready||b.Sale!=null)return PlayableCommandStatus.InvalidEntity;
+            bool solid=b.Phase!=ConstructionPhase.Pending;
+            if(solid&&!TryRebuildGeometry(removal:b))
+            {
+                message="Construction cancellation is waiting for navigation. Try again.";
+                return PlayableCommandStatus.Rejected;
+            }
             Sound(PlayableSoundKind.ConstructionCancelled,b.Position,PlayableEntityKind.Tank,owner,true);
             AddCredits(owner,b.PaidCost*profile.BuildingCancellationRefundRatio);
-            bool solid=b.Phase!=ConstructionPhase.Pending;RemoveBuilding(b,true);if(solid)RebuildGeometry();
+            RemoveBuilding(b,true);
+            if(solid)ReconcileWreckRoutes();
             message="Construction cancelled.";return PlayableCommandStatus.Applied;
         }
         private void RemoveBuilding(Building b,bool cancellation)=>RemoveBuildingWithAttacker(b,cancellation,null);
-        private void RemoveBuildingWithAttacker(Building b,bool cancellation,PlayableOwner? attacker)
+        private void RemoveBuildingWithAttacker(Building b,bool cancellation,PlayableOwner? attacker,bool destroyed=false)
         {
             if(!buildings.Remove(b.Id))return;
+            boosts.Remove(b.Id);
+            boostWear.Remove(b.Id);
+            if(offline!=null&&TerritoryRules.Center(b.Kind)&&b.Phase!=ConstructionPhase.Pending)
+                lastRemovedCenter[b.Owner]=b.Kind;
             if(!cancellation&&b.Sale==null&&b.Phase!=ConstructionPhase.Pending)AddLingeringVision(b.Owner,b.Position,PlayableVision.BuildingRadius(profile,b.Kind,b.Phase));
             if(b.Ready)RecordBuildingCount(b.Owner,b.Kind);
             if(!cancellation&&b.Sale==null&&b.Phase!=ConstructionPhase.Pending)BeginBuildingDestruction(b);
             if(!cancellation&&b.Sale==null)Fact(b.Owner,MatchFactKind.BuildingLost,0,(int)b.Kind);
             RecordKill(attacker,b.Owner,b.Id,true,(int)b.Kind,TerritoryRules.Cost(profile,b.Kind));
+            if(destroyed)
+            {
+                if(b.Kind==PlayableBuildingKind.ScientificCenter)RefundDestroyedResearchQueue(b);
+                if(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)
+                    AddCredits(b.Owner,b.Orders.Sum(order=>order.PaidCost));
+            }
             if(b.Kind==PlayableBuildingKind.ScientificCenter)InterruptResearchCenter(b.Id);
             var children=new List<Building>();foreach(var child in buildings.Values)if(child.ParentId==b.Id)children.Add(child);
-            foreach(var child in children)RemoveBuildingWithAttacker(child,false,attacker);
+            foreach(var child in children)RemoveBuildingWithAttacker(child,false,attacker,destroyed);
             if(b.SlotId==0&&sites.TryGetValue(b.SiteId,out var site)&&site.CenterId==b.Id)
             {
                 site.CenterId=0;site.Contested=false;
@@ -95,7 +115,7 @@ namespace Spacewars.Runtime
                 if(state.Site.Kind==PlayableBuildingKind.RelayTower){AdvanceRelayCapture(state,dt);continue;}
                 if(state.Locked.HasValue||state.CenterId!=0){state.Contested=false;continue;}
                 var present=new HashSet<PlayableOwner>();double radius=TerritoryRules.CaptureRadius(profile,state.Site.Kind);
-                foreach(var u in units.Values)if(!eliminated.Contains(u.Owner)&&TryActor(u.Id,out var n)&&Distance(n.Position,state.Site.Position)<=radius)present.Add(u.Owner);
+                foreach(var u in units.Values)if(u.Kind!=PlayableEntityKind.Skat&&!eliminated.Contains(u.Owner)&&!Materializing(u)&&!Frozen(u)&&TryActor(u.Id,out var n)&&Distance(n.Position,state.Site.Position)<=radius)present.Add(u.Owner);
                 state.Contested=present.Select(TeamOf).Distinct().Count()>1;if(state.Contested)continue;
                 double delta=dt/TerritoryRules.CaptureSeconds(profile,state.Site.Kind);
                 var captureOwner=Owners.Where(present.Contains).Select(x=>(PlayableOwner?)x).FirstOrDefault();
@@ -158,10 +178,41 @@ namespace Spacewars.Runtime
             return false;
         }
         private NavPoint FactoryExit(Building b)=>new NavPoint(b.Position.X+Math.Cos(b.Heading)*profile.FactoryExitDistance,b.Position.Z+Math.Sin(b.Heading)*profile.FactoryExitDistance);
+        private const int MineReserveStateMarker=0x4D525331; // MRS1
+        private void WriteMineReserves(BinaryWriter writer)
+        {
+            if(profile.MineReserveCredits==0&&!sites.Values.Any(s=>s.MineReserveCapacity>0))return;
+            writer.Write(MineReserveStateMarker);
+            foreach(var site in sites.Values.Where(s=>s.Site.Kind==PlayableBuildingKind.Mine).OrderBy(s=>s.Site.Id))
+            {
+                WorldWire.Number(writer,site.MineReserveCapacity);
+                WorldWire.Number(writer,site.MineReserve);
+            }
+        }
+
+        private void ReadMineReserves(BinaryReader reader)
+        {
+            long start=reader.BaseStream.Position;
+            if(start==reader.BaseStream.Length||reader.ReadInt32()!=MineReserveStateMarker)
+            {
+                reader.BaseStream.Position=start;
+                if(profile.MineReserveCredits>0)throw new ArgumentException("Missing mine reserves.");
+                return;
+            }
+            foreach(var site in sites.Values.Where(s=>s.Site.Kind==PlayableBuildingKind.Mine).OrderBy(s=>s.Site.Id))
+            {
+                site.MineReserveCapacity=WorldWire.Number(reader);
+                site.MineReserve=WorldWire.Number(reader);
+                if(site.MineReserveCapacity<0||site.MineReserveCapacity>100000||site.MineReserve<0||site.MineReserve>site.MineReserveCapacity)
+                    throw new ArgumentException("Invalid mine reserve.");
+            }
+        }
+
         private TerritorySiteSnapshot[] SiteSnapshots()
         {
             var result=new List<TerritorySiteSnapshot>();
-            foreach(var s in sites.Values)result.Add(new TerritorySiteSnapshot(s.Site,s.Claimant,s.Locked,s.Progress,s.Contested,s.CenterId,s.Site.Kind==PlayableBuildingKind.RelayTower?s.Locked.HasValue:buildings.TryGetValue(s.CenterId,out var center)&&center.Ready,s.ControlledSeconds));
+            foreach(var s in sites.Values)result.Add(new TerritorySiteSnapshot(s.Site,RelayClaimantPaint(s),RelayOwnerPaint(s),s.Progress,s.Contested,s.CenterId,s.Site.Kind==PlayableBuildingKind.RelayTower?RelayOwnerPaint(s).HasValue:buildings.TryGetValue(s.CenterId,out var center)&&center.Ready,s.ControlledSeconds,
+                s.MineReserveCapacity>0?s.MineReserve:(double?)null,s.MineReserveCapacity,s.MineReserveCapacity>0&&s.MineReserve==0));
             return result.ToArray();
         }
     }

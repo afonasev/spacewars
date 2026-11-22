@@ -17,7 +17,7 @@ namespace Spacewars.Tests.PlayMode
         private static PlayableProfile Profile()=>PlayableProfile.Create(JsonUtility.FromJson<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text),new BasaltCrownMap());
         [Test] public void NativeWarmPaintAndImportsRetainAllSourceRoles(){
             var art=BasaltCrownArtProfile.Load();art.Validate();
-            Assert.AreEqual(45,art.Parameters().Count());
+            Assert.AreEqual(44,art.Parameters().Count());
             Assert.Throws<ArgumentException>(()=>BasaltCrownArtProfile.Role("unknown"));
             var invalid=BasaltCrownArtProfile.Load();invalid.detailTile=float.NaN;Assert.Throws<ArgumentException>(()=>invalid.Validate());
             var m=new BasaltCrownMap();CollectionAssert.AreEquivalent(BasaltCrownArtProfile.Roles,m.Materials.Select(p=>p.Material).Distinct());
@@ -42,9 +42,31 @@ namespace Spacewars.Tests.PlayMode
                 File.WriteAllText(Path.Combine(folder,"native-import.json"),"{\"textures\":9,\"width\":1254,\"height\":1254,\"format\":\"RGB24\",\"mipmaps\":true,\"repeat\":true,\"filter\":\"Trilinear\",\"aniso\":8,\"runtime_bytes\":"+memory+"}\n");
             }finally{foreach(var mask in masks)UnityEngine.Object.DestroyImmediate(mask);}
         }
+        [Test] public void CitadelCrestMaskMarksCliffsAndLeavesBothRampsClear()
+        {
+            var map = new BasaltCrownMap();
+            var masks = PlayableWorld.BuildBasaltPaintMasks(map, BasaltCrownArtProfile.Load());
+            try
+            {
+                float Crest(double x, double z) => masks[1].GetPixelBilinear(
+                    (float)(x / (2 * map.HalfExtent) + .5), (float)(z / (2 * map.HalfExtent) + .5)).a;
+                Assert.Greater(Crest(0, 24), .5f);
+                foreach (int side in new[] { -1, 1 })
+                {
+                    Assert.Greater(Crest(side * 22, 10), .5f);
+                    Assert.Zero(Crest(side * 22, 0));
+                    Assert.Zero(Crest(side * 14, 0), "Adjacent plateau supports share an internal seam.");
+                }
+            }
+            finally
+            {
+                foreach (var mask in masks) UnityEngine.Object.DestroyImmediate(mask);
+            }
+        }
         [Test] public void EngineeredRoadsAndErodedRidgesArePresentationOnly(){
             var p=Profile();var m=(BasaltCrownMap)p.AuthoredMap;var art=BasaltCrownArtProfile.Load();
             var host=new GameObject("Basalt presentation contract");
+            var plaza=BasaltCrownRoads.Plaza(m,p);
             var blockers=m.MovementBlockers.ToArray();var supports=m.Supports.ToArray();var transitions=m.SurfaceTransitions.ToArray();
             var heights=new[]{new NavPoint(-22,0),new NavPoint(22,0),new NavPoint(0,0),new NavPoint(40,20)}.Select(m.SurfaceHeight).ToArray();
             using(var world=new PlayableWorld(host.transform,p)){
@@ -64,16 +86,76 @@ namespace Spacewars.Tests.PlayMode
                     Assert.AreEqual(0,properties.GetFloat("_RoadSurface"),"Ridges cannot inherit road paint");
                 }
                 foreach(var point in new[]{new NavPoint(-22,0),new NavPoint(22,0),new NavPoint(0,0),new NavPoint(-40,18),new NavPoint(40,-18),new NavPoint(0,32),new NavPoint(0,-32)}){
-                    Assert.Greater(BasaltCrownRoads.Coverage((float)point.X,(float)point.Z,art),.99f);
+                    Assert.Greater(BasaltCrownRoads.Coverage((float)point.X,(float)point.Z,art,plaza),.99f);
                     Assert.True(m.SupportsFootprint(point,p.TankCollisionRadius),"Paving follows existing routes: "+point);
                 }
-                Assert.AreEqual(0,BasaltCrownRoads.Coverage(0,14,art),"Central mine remains natural basalt");
-                Assert.AreEqual(0,BasaltCrownRoads.Coverage(0,44,art),"No road painted through boundary ridge");
+                Assert.AreEqual(0,BasaltCrownRoads.Coverage(0,14,art,plaza),"Central mine remains natural basalt");
+                Assert.AreEqual(0,BasaltCrownRoads.Coverage(0,44,art,plaza),"No road painted through boundary ridge");
                 CollectionAssert.AreEqual(blockers,m.MovementBlockers);CollectionAssert.AreEqual(supports,m.Supports);
                 CollectionAssert.AreEqual(transitions,m.SurfaceTransitions);
                 CollectionAssert.AreEqual(heights,new[]{new NavPoint(-22,0),new NavPoint(22,0),new NavPoint(0,0),new NavPoint(40,20)}.Select(m.SurfaceHeight));
             }
             UnityEngine.Object.DestroyImmediate(host);
+        }
+        [Test] public void BorderRocksStayOnStoneGroundAndKeepThreeCompactTiers()
+        {
+            var profile=Profile();
+            var map=(BasaltCrownMap)profile.AuthoredMap;
+            var playable=map.Supports.Single(support=>support.Id=="outer-ring").Bounds;
+            var art=BasaltCrownArtProfile.Load();
+            var pads=BasaltCrownDetails.SitePads(map,profile,art);
+            var mines=BasaltCrownDetails.Mines(map,profile);
+            var plaza=BasaltCrownRoads.Plaza(map,profile);
+            var host=new GameObject("Basalt border rocks");
+            try
+            {
+                using var world=new PlayableWorld(host.transform,profile);
+                var groups=host.GetComponentsInChildren<ModelDetailLod>().Where(lod=>lod.name.StartsWith("Basalt border — ")).ToArray();
+                Assert.AreEqual(8,groups.Length);
+                Assert.IsEmpty(host.GetComponentsInChildren<Collider>());
+                var totals=new long[3];
+                foreach(var group in groups)
+                {
+                    var bounds=group.ReferenceBounds;
+                    Assert.True(bounds.min.x>playable.MinX&&bounds.max.x<playable.MaxX&&
+                        bounds.min.z>playable.MinZ&&bounds.max.z<playable.MaxZ);
+                    NavPoint Closest(NavPoint point)=>new NavPoint(
+                        Math.Max(bounds.min.x,Math.Min(bounds.max.x,point.X)),
+                        Math.Max(bounds.min.z,Math.Min(bounds.max.z,point.Z)));
+                    foreach(var pad in pads)
+                        Assert.Greater(BasaltCrownDetails.PadDistance(Closest(pad.Center),pad),art.detailClearance);
+                    foreach(var mine in mines)
+                    {
+                        var point=Closest(mine.Position);
+                        double dx=point.X-mine.Position.X,dz=point.Z-mine.Position.Z;
+                        double apronExtent=art.mineApronRadius+art.mineApronFeather+art.detailClearance;
+                        Assert.Greater(Math.Max(Math.Max(Math.Abs(dx),Math.Abs(dz)),(Math.Abs(dx)+Math.Abs(dz))*.70710678),
+                            apronExtent);
+                    }
+                    foreach(float x in new[]{bounds.min.x,bounds.center.x,bounds.max.x})
+                    foreach(float z in new[]{bounds.min.z,bounds.center.z,bounds.max.z})
+                    {
+                        var point=new NavPoint(x,z);
+                        Assert.True(map.SupportsFootprint(point,0));
+                        Assert.Greater(BasaltCrownRoads.SignedDistance(x,z,art,plaza),art.detailClearance);
+                        Assert.AreEqual(GroundTrailSurfaceKind.Hard,world.TrailSurface(point));
+                    }
+                    var tiers=new[]{group.OriginalMeshes.Single(),group.NormalMeshes.Single(),group.FarMeshes.Single()};
+                    for(int i=0;i<tiers.Length;i++)
+                    {
+                        Assert.AreEqual(bounds,tiers[i].bounds);
+                        CollectionAssert.AreEquivalent(new[]{new Color32(255,0,0,255),new Color32(0,255,0,255),new Color32(0,0,255,255)},
+                            tiers[i].colors32.Distinct(), "Each detail level preserves all three basalt paint roles.");
+                        group.SetDetail(i);
+                        Assert.AreSame(tiers[i],group.GetComponent<MeshFilter>().sharedMesh);
+                        totals[i]+=tiers[i].GetIndexCount(0)/3;
+                    }
+                    Assert.Greater(tiers[0].GetIndexCount(0),tiers[1].GetIndexCount(0));
+                    Assert.Greater(tiers[1].GetIndexCount(0),tiers[2].GetIndexCount(0));
+                }
+                Debug.Log("BASALT_BORDER_RENDERERS "+groups.Length+" TRIANGLES "+string.Join("/",totals));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(host); }
         }
         [Test] public void DetailedShouldersAndMineApronsPreserveFullClearance(){
             var p=Profile();var m=(BasaltCrownMap)p.AuthoredMap;var art=BasaltCrownArtProfile.Load();
@@ -85,21 +167,77 @@ namespace Spacewars.Tests.PlayMode
                 if(mine.Id>=7)Assert.Greater(BasaltCrownRoads.SignedDistance((float)mine.Position.X,(float)mine.Position.Z,art),art.mineApronRadius);
             }
             var pads=BasaltCrownDetails.SitePads(m,p,art);
-            Assert.AreEqual(m.Sites(p).Where(site=>site.Kind!=PlayableBuildingKind.Mine).Sum(site=>1+site.Slots.Count),pads.Length);
-            foreach(var pad in pads){Assert.Less(BasaltCrownDetails.PadDistance(pad.Center,pad,art.siteLinkWidth),0);Assert.True(m.SupportsFootprint(pad.Center,pad.Radius));}
+            var sites=m.Sites(p).Where(site=>TerritoryRules.Center(site.Kind)).ToArray();
+            Assert.AreEqual(4,pads.Length);
+            float Area(BasaltCrownDetails.SitePad pad)=>4*pad.HalfX*pad.HalfZ-2*pad.Corner*pad.Corner;
+            var smallestHeadquarters=sites.Where(site=>site.Kind==PlayableBuildingKind.Headquarters)
+                .Min(site=>Area(pads.Single(pad=>pad.Hub.Equals(site.Position))));
+            foreach(var site in sites){
+                var pad=pads.Single(item=>item.Hub.Equals(site.Position));
+                if(site.Kind==PlayableBuildingKind.Outpost)Assert.Less(Area(pad),smallestHeadquarters);
+                float Distance(NavPoint point)=>BasaltCrownDetails.PadDistance(point,pad);
+                Assert.Greater(pad.Corner,0);
+                Assert.Greater(Distance(new NavPoint(pad.Center.X+pad.HalfX,pad.Center.Z+pad.HalfZ)),0);
+                Assert.LessOrEqual(Distance(site.Position)+TerritoryRules.Radius(p,site.Kind),-art.siteApronFeather);
+                double slotRadius=Math.Max(p.ScienceFootprintRadius,Math.Max(p.FactoryFootprintRadius,p.RefineryFootprintRadius));
+                foreach(var slot in site.Slots)
+                    Assert.LessOrEqual(Distance(slot.Position)+slotRadius,-art.siteApronFeather);
+                var defense=site.DefenseSlots(p);
+                Assert.IsNotEmpty(defense);
+                var markerHalf=ConstructionApronMesh.DefenseSupportHalf(p,EnvironmentArtProfile.Load());
+                double defenseRadius=Math.Max(Math.Sqrt(2)*p.TurretFootprintRadius,markerHalf.magnitude);
+                foreach(var slot in defense)
+                    Assert.LessOrEqual(Distance(slot.Position)+defenseRadius,-art.siteApronFeather,
+                        "HQ "+site.Id+" defense slot "+slot.Id+" must fit even with a rotated marker");
+                foreach(var approach in new[]{new NavPoint(site.Position.X-Math.Sign(site.Position.X)*12,site.Position.Z),
+                    new NavPoint(site.Position.X,site.Position.Z-Math.Sign(site.Position.Z)*12)}){
+                    Assert.Greater(BasaltCrownRoads.Coverage((float)approach.X,(float)approach.Z,art,BasaltCrownRoads.Plaza(m,p)),.99f);
+                    Assert.True(m.SupportsSweep(approach,site.Position,p.TankCollisionRadius));
+                }
+            }
+            var plaza=BasaltCrownRoads.Plaza(m,p);
             var details=BasaltCrownDetails.Plan(m,p,art);
             Assert.Greater(details.Count(d=>d.Type==BasaltCrownDetails.Kind.Kerb),30);
             Assert.Greater(details.Count(d=>d.Type==BasaltCrownDetails.Kind.Rubble),30);
             Assert.GreaterOrEqual(details.Count(d=>d.Type==BasaltCrownDetails.Kind.Ore),8);
             foreach(var detail in details){
                 Assert.True(BasaltCrownDetails.Clear(detail,m,p,art));
+                if(detail.Type==BasaltCrownDetails.Kind.Rubble)
+                    Assert.True(pads.Where(pad=>pad.IsOutpost).All(pad=>BasaltCrownDetails.PadDistance(detail.Center,pad)>=detail.Radius));
+                if(detail.Type==BasaltCrownDetails.Kind.Kerb)
+                    Assert.True(pads.All(pad=>BasaltCrownDetails.PadDistance(detail.Center,pad)>=detail.Radius));
                 var mesh=BasaltCrownDetails.Build(new[]{detail},m);
                 try{foreach(var v in mesh.vertices){
                     Assert.True(m.SupportsFootprint(new NavPoint(v.x,v.z),0));
-                    if(detail.Type==BasaltCrownDetails.Kind.Kerb)Assert.GreaterOrEqual(BasaltCrownRoads.SignedDistance(v.x,v.z,art),-.001f);
+                    if(detail.Type==BasaltCrownDetails.Kind.Kerb)Assert.GreaterOrEqual(BasaltCrownRoads.SignedDistance(v.x,v.z,art,plaza),-.001f);
                     Assert.LessOrEqual(v.y-m.SurfaceHeight(new NavPoint(v.x,v.z)),detail.Height+.001);
                 }}finally{UnityEngine.Object.DestroyImmediate(mesh);}
             }
+        }
+        [Test] public void RelayPlazaUsesProfileRadiusAndLeavesBothRoadOpeningsClear()
+        {
+            var p=Profile();
+            var map=(BasaltCrownMap)p.AuthoredMap;
+            var art=BasaltCrownArtProfile.Load();
+            var plaza=BasaltCrownRoads.Plaza(map,p);
+            Assert.AreEqual((float)p.RelayCaptureRadius,plaza.Radius);
+            Assert.That(BasaltCrownRoads.SignedDistance(plaza.Center.x,plaza.Center.y+plaza.Radius,art,plaza),Is.EqualTo(0).Within(1e-5));
+            var data=p.CopyData();
+            data.relayCaptureRadius-=1;
+            Assert.AreEqual((float)data.relayCaptureRadius,BasaltCrownRoads.Plaza(map,PlayableProfile.Create(data,map)).Radius);
+
+            float rim=plaza.Radius+art.kerbWidth*.5f+art.detailClearance;
+            var ringKerbs=BasaltCrownDetails.Plan(map,p,art).Where(detail=>detail.Type==BasaltCrownDetails.Kind.Kerb
+                && Math.Abs(plaza.SignedDistance((float)detail.Center.X,(float)detail.Center.Z)-(rim-plaza.Radius))<1e-4).ToArray();
+            Assert.That(ringKerbs.Length,Is.GreaterThan(4));
+            foreach(int side in new[]{-1,1})
+            {
+                Assert.True(ringKerbs.Any(kerb=>side*(kerb.Center.Z-plaza.Center.y)>BasaltCrownRoads.CausewayHalfWidth));
+                Assert.Greater(BasaltCrownRoads.Coverage(plaza.Center.x+side*rim,plaza.Center.y,art,plaza),.99f);
+                Assert.True(map.SupportsSweep(new NavPoint(plaza.Center.x+side*rim,plaza.Center.y),
+                    new NavPoint(plaza.Center.x,plaza.Center.y),p.TankCollisionRadius));
+            }
+            Assert.True(ringKerbs.All(kerb=>Math.Abs(kerb.Center.Z-plaza.Center.y)>BasaltCrownRoads.CausewayHalfWidth));
         }
         [Test] public void EveryArtControlRejectsNonfiniteAndOutOfRangeValues(){
             var art=BasaltCrownArtProfile.Load();
@@ -153,15 +291,37 @@ namespace Spacewars.Tests.PlayMode
                 foreach(var u in overview.Entities){var actor=world.Tank(u.Id,u.Owner==PlayableOwner.Player,u.Kind);actor.Root.position=new Vector3((float)u.Position.X,(float)m.SurfaceHeight(u.Position),(float)u.Position.Z);}
                 yield return null;
                 string folder=Path.Combine(Directory.GetParent(Application.dataPath).Parent.FullName,"artifacts/playtest/basalt-crown-site-aprons");Directory.CreateDirectory(folder);
-                foreach(string pose in new[]{"presentation","mine-south","mine-north","mine-west","mine-east","base","outpost","overview","oblique","ramp-close","east-ramp","ring-close","scree-close","cliff-close","road-corner","normal-camera","orbit"}){
+                foreach(string pose in new[]{"presentation","mine-south","mine-north","mine-west","mine-east","base","outpost","relay-plaza","overview","oblique","ramp-close","east-ramp","ring-close","scree-close","cliff-close","road-corner","normal-camera","orbit"}){
                     if(pose=="overview")world.InspectionSites();
-                    camera.orthographicSize=pose=="presentation"||pose=="overview"||pose=="oblique"||pose=="orbit"?52:pose=="normal-camera"?26:pose=="base"||pose=="outpost"?14:(float)p.CameraMinZoom;
+                    camera.orthographicSize=pose=="relay-plaza"?15:pose=="presentation"||pose=="overview"||pose=="oblique"||pose=="orbit"?52:pose=="normal-camera"?26:pose=="base"||pose=="outpost"?14:(float)p.CameraMinZoom;
                     var focus=pose=="mine-west"?new Vector3(-48,0,0):pose=="mine-east"?new Vector3(48,0,0):pose=="base"?new Vector3(-40,0,-32):pose=="outpost"?new Vector3(40,0,-32):pose=="mine-south"?new Vector3(0,1,-12):pose=="mine-north"?new Vector3(0,1,14):pose=="ramp-close"?new Vector3(-22,0,0):pose=="east-ramp"?new Vector3(22,0,0):pose=="ring-close"?new Vector3(-36,0,12):pose=="scree-close"?new Vector3(10,0,-24):pose=="cliff-close"?new Vector3(-16,1,-16):pose=="road-corner"?new Vector3(40,0,32):pose=="normal-camera"?new Vector3(-25,0,-4):Vector3.zero;
                     camera.transform.position=focus+(pose=="overview"?new Vector3(0,120,-.01f):pose=="orbit"?new Vector3(32,70,52):new Vector3(-32,70,-52));camera.transform.LookAt(focus);
+                    if(pose=="relay-plaza")world.RenderSites(overview,camera);
                     camera.Render();var png=new Texture2D(image.width,image.height,TextureFormat.RGB24,false);var previous=RenderTexture.active;RenderTexture.active=image;png.ReadPixels(new Rect(0,0,image.width,image.height),0,0);png.Apply();RenderTexture.active=previous;
                     var pixels=png.GetPixels();Assert.Greater(pixels.Count(c=>c.maxColorComponent>.05f),pixels.Length/10);
                     Assert.Less(pixels.Count(c=>c.r>.8f&&c.b>.8f&&c.g<.1f),pixels.Length/100,"Error-shader pixels in "+pose);
                     File.WriteAllBytes(Path.Combine(folder,pose+".png"),png.EncodeToPNG());UnityEngine.Object.DestroyImmediate(png);
+                }
+                var edgeGroups=host.GetComponentsInChildren<ModelDetailLod>()
+                    .Where(lod=>lod.name.StartsWith("Basalt border — ")).ToArray();
+                if(edgeGroups.Length>0){
+                    var edgeFocus=new Vector3(-34,0,48);
+                    camera.orthographicSize=14;
+                    camera.transform.position=edgeFocus+new Vector3(-32,45,-35);
+                    camera.transform.LookAt(edgeFocus);
+                    for(int tier=0;tier<3;tier++){
+                        foreach(var group in edgeGroups)group.SetDetail(tier);
+                        camera.Render();
+                        var pixels=new Texture2D(image.width,image.height,TextureFormat.RGB24,false);
+                        var previous=RenderTexture.active;
+                        RenderTexture.active=image;
+                        pixels.ReadPixels(new Rect(0,0,image.width,image.height),0,0);
+                        pixels.Apply();
+                        RenderTexture.active=previous;
+                        File.WriteAllBytes(Path.Combine(folder,"border-lod-"+tier+".png"),pixels.EncodeToPNG());
+                        UnityEngine.Object.DestroyImmediate(pixels);
+                    }
+                    foreach(var group in edgeGroups)group.SetDetail(0);
                 }
                 File.WriteAllBytes(Path.Combine(folder,"minimap.png"),minimap.Texture.EncodeToPNG());
                 camera.orthographicSize=52;camera.transform.position=new Vector3(-32,70,-52);camera.transform.LookAt(Vector3.zero);camera.Render();

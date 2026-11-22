@@ -55,14 +55,14 @@ namespace Spacewars.Runtime
         private static double[] Weights(AiRosterDescriptorData d)
         {double sum=d.reconWeight+d.lineWeight+d.supportWeight;return sum<=0?new double[3]:new[]{d.reconWeight/sum,d.lineWeight/sum,d.supportWeight/sum};}
         private static void Normalize(double[] a){double sum=a.Sum();if(sum>0)for(int i=0;i<a.Length;i++)a[i]/=sum;}
-        public AiCompositionAssessment Assess(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState ledger=null,int reconCap=1,IEnumerable<int> startupProducers=null,bool usefulScoutDemand=false)
+        public AiCompositionAssessment Assess(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState ledger=null,int reconCap=1,IEnumerable<int> startupProducers=null,bool usefulScoutDemand=false,bool massAirThreat=false,bool relayGroundSupport=false)
         {
             Bind(o);if(o.Tick<observed)throw new ArgumentException("Composition assessment clock regressed");if(ledger!=null&&(ledger.OwnerId!=owner||ledger.Generation!=generation))throw new ArgumentException("Composition ledger binding");
-            if(Doctrine?.Ready==true)return Doctrine.Assess(o,p,ai,ledger,reconCap,usefulScoutDemand);
-            var descriptors=roster.CopyData().Where(d=>string.IsNullOrWhiteSpace(d.exclusionReason)).ToArray();
+            if(Doctrine?.Ready==true)return Doctrine.Assess(o,p,ai,ledger,reconCap,usefulScoutDemand,massAirThreat,relayGroundSupport);
+            var descriptors=roster.CopyData().Where(d=>d.kind!=PlayableEntityKind.Skat&&string.IsNullOrWhiteSpace(d.exclusionReason)).ToArray();
             var value=new double[3];int support=0,recon=0;
             void Count(PlayableEntityKind kind,double credits,bool countMinimum=true)
-            {var d=roster.For(kind);var weights=Weights(d);for(int i=0;i<3;i++)value[i]+=credits*weights[i];if(countMinimum&&d.supportWeight>0)support++;if(d.reconWeight>0)recon++;}
+            {if(kind==PlayableEntityKind.Skat)return;var d=roster.For(kind);var weights=Weights(d);for(int i=0;i<3;i++)value[i]+=credits*weights[i];if(countMinimum&&d.supportWeight>0)support++;if(d.reconWeight>0)recon++;}
             foreach(var u in o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0))Count(u.Kind,roster.CreditCost(u.Kind,p));
             foreach(var q in o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&b.PrivateState!=null).SelectMany(b=>b.PrivateState.Orders))Count(q.Kind,q.PaidCost);
             // Paid history is settlement history, not another unit. Accepted delayed commands
@@ -122,7 +122,8 @@ namespace Spacewars.Runtime
                     targets=true;
                     foreach(var d in normal.Select(x=>x.Item1).GroupBy(d=>d.kind).Select(g=>g.First()).Where(d=>Combat(d)&&d.targetTags.Contains(tag)))
                     {
-                        double effectiveness=Math.Min(hp,PlayableUnitRules.DamagePerSecond(p,d.kind,o.OwnerResearch.Any(r=>r.Kind==PlayableResearchKind.ExplorerAssaultGuns&&r.Complete))*ai.Value("utility.forceHorizonSeconds"))/Math.Max(1,roster.CreditCost(d.kind,p));
+                        var research=d.kind==PlayableEntityKind.Shkval?PlayableResearchKind.ShkvalGuidance:PlayableResearchKind.ExplorerAssaultGuns;
+                        double effectiveness=Math.Min(hp,PlayableUnitRules.DamagePerSecond(p,d.kind,o.OwnerResearch.Any(r=>r.Kind==research&&r.Complete))*ai.Value("utility.forceHorizonSeconds"))/Math.Max(1,roster.CreditCost(d.kind,p));
                         var weights=Weights(d);for(int i=0;i<3;i++)response[i]+=effectiveness*weights[i];
                     }
                 }

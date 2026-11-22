@@ -55,7 +55,7 @@ namespace Spacewars.Simulation
             return state.PersonalitySeed==AiRandom.Key(state.MatchSeed,state.OwnerId,key,"personality",0);
         }
         public static IReadOnlyList<PlayableAiOpening> Supported=>Array.AsReadOnly(AiOpeningCatalog.All.Select(d=>d.Opening).ToArray());
-        public static PlayableAiOpeningCompositionState Initialize(int matchSeed,string ownerId,string sourceProfileIdentity=null,AiProfile aiProfile=null,PlayableAiOpening? forcedOpening=null)
+        public static PlayableAiOpeningCompositionState Initialize(int matchSeed,string ownerId,string sourceProfileIdentity=null,AiProfile aiProfile=null,PlayableAiOpening? forcedOpening=null,AiDifficulty difficulty=AiDifficulty.Fighter)
         {
             if(String.IsNullOrEmpty(ownerId))throw new ArgumentException("Owner identity is required.",nameof(ownerId));
             var ai=aiProfile??AiProfile.Initial;var binding=ProfileBinding(ai);
@@ -64,8 +64,10 @@ namespace Spacewars.Simulation
             var weights=AiOpeningCatalog.All.Select(d=>ai.Value(d.WeightPath)).ToArray();
             var pick=Random(personalitySeed,"opening")*weights.Sum();var cursor=0d;var selected=weights.Length-1;
             for(var i=0;i<weights.Length;i++){cursor+=weights[i];if(pick<cursor){selected=i;break;}}
+            if(!forcedOpening.HasValue&&Random(personalitySeed,"early-ground-opening")<ai.DifficultyValue(difficulty,"opening.earlyGroundShare"))
+                forcedOpening=PlayableAiOpening.BlindRush;
             var definition=forcedOpening.HasValue?AiOpeningCatalog.For(forcedOpening.Value):AiOpeningCatalog.All[selected];
-            return new PlayableAiOpeningCompositionState(ownerId,matchSeed,binding,SourceIdentity,personalitySeed,forcedOpening??definition.Opening,PlayableAiOpeningPhase.Active,new PlayableAiCompositionIntent(1,1,.5),definition.Milestones.Select(m=>m.Id));
+            return new PlayableAiOpeningCompositionState(ownerId,matchSeed,binding,SourceIdentity,personalitySeed,definition.Opening,PlayableAiOpeningPhase.Active,new PlayableAiCompositionIntent(1,1,.5),definition.Milestones.Select(m=>m.Id));
         }
         private static uint Hash(string text)
         {
@@ -79,9 +81,9 @@ namespace Spacewars.Simulation
     public sealed class PlayableAiOpeningCompositionAuthority
     {
         private readonly Dictionary<string,PlayableAiOpeningCompositionState> states=new Dictionary<string,PlayableAiOpeningCompositionState>();
-        public PlayableAiOpeningCompositionState Initialize(int matchSeed,string ownerId,string sourceProfileIdentity=null,AiProfile aiProfile=null)
+        public PlayableAiOpeningCompositionState Initialize(int matchSeed,string ownerId,string sourceProfileIdentity=null,AiProfile aiProfile=null,AiDifficulty difficulty=AiDifficulty.Fighter)
         {
-            var state=PlayableAiOpeningComposition.Initialize(matchSeed,ownerId,sourceProfileIdentity,aiProfile);states[ownerId]=state;return state;
+            var state=PlayableAiOpeningComposition.Initialize(matchSeed,ownerId,sourceProfileIdentity,aiProfile,difficulty:difficulty);states[ownerId]=state;return state;
         }
         public PlayableAiOpeningCompositionState ForOwner(string ownerId)=>ownerId!=null&&states.TryGetValue(ownerId,out var state)?state:null;
         public IReadOnlyList<PlayableAiOpeningCompositionState> Capture()=>states.Values.OrderBy(x=>x.OwnerId,StringComparer.Ordinal).Select(x=>x.Restore()).ToArray();

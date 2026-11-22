@@ -36,6 +36,87 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",home.SiteId,slot,kind,home.Id,PlayableOwner.Enemy,null));Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
             return View().Buildings.Single(b=>b.Kind==kind&&b.SlotId==slot&&b.Owner==PlayableOwner.Enemy).Id;
         }
+        private void UnlockBoost(PlayableOwner owner=PlayableOwner.Enemy)
+        {
+            var data=profile.CopyData();
+            Call("CreditOrbital",(PlayableOwner?)owner,owner==PlayableOwner.Enemy?PlayableOwner.Player:PlayableOwner.Enemy,
+                data.orbitalThreshold1+data.orbitalThreshold2+data.orbitalThreshold3);
+            foreach(int ability in new[]{1,2,OrbitalAbilities.AcceleratedProduction})
+                Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.ChooseOrbital,owner:owner,ability:ability));
+        }
+        [Test] public void BoostDoublesPaidWorkAndFailureEndsItWithoutResettingProgress()
+        {
+            int id=Build(PlayableBuildingKind.Factory,1);
+            UnlockBoost();
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,id,owner:PlayableOwner.Enemy));
+            Call("AdvanceProduction",.5d);
+            var before=View().Buildings.Single(b=>b.Id==id);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,id,owner:PlayableOwner.Enemy,ability:OrbitalAbilities.AcceleratedProduction));
+            Assert.AreEqual(1,View().Sounds.Count(sound=>sound.Kind==PlayableSoundKind.OrbitalProductionBoosted));
+            type.GetField("elapsed",F).SetValue(domain,1d);
+            Call("AdvanceProduction",1d);Call("AdvanceBoostWear",1d);
+            var active=View().Buildings.Single(b=>b.Id==id);
+            Assert.AreEqual(before.PrivateState.Orders.Single().Remaining-2,active.PrivateState.Orders.Single().Remaining,1e-9);
+            Assert.Less(active.ExactHealth.Value,before.ExactHealth.Value);
+            Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.StartBuildingRepair,id,owner:PlayableOwner.Enemy));
+            Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.SellBuilding,id,owner:PlayableOwner.Enemy));
+            Assert.AreEqual(PlayableCommandStatus.Applied,VisibleFailure(active.Position));
+            Assert.Zero(View().Buildings.Single(b=>b.Id==id).BoostRemaining);
+            type.GetField("elapsed",F).SetValue(domain,31d);
+            Call("AdvanceProduction",1d);
+            var after=View().Buildings.Single(b=>b.Id==id);
+            Assert.AreEqual(active.ExactHealth.Value,after.ExactHealth.Value,1e-9);
+            Assert.AreEqual(active.PrivateState.Orders.Single().Remaining-1,after.PrivateState.Orders.Single().Remaining,1e-9);
+        }
+        [Test] public void RefineryBoostPaysItsOwnerAndCombatCanCrossWearFloor()
+        {
+            int id=Build(PlayableBuildingKind.Refinery,1);
+            UnlockBoost();
+            double rate=profile.RefineryIncomePerPeriod/profile.IncomePeriodSeconds;
+            double seconds=profile.IncomeSettlementSeconds;
+            double baseline=(double)Call("Balance",PlayableOwner.Enemy);
+            Call("SettleIncome",PlayableOwner.Enemy);
+            double before=(double)Call("Balance",PlayableOwner.Enemy);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,id,owner:PlayableOwner.Enemy,ability:OrbitalAbilities.AcceleratedProduction));
+            type.GetField("elapsed",F).SetValue(domain,seconds);
+            Call("SettleIncome",PlayableOwner.Enemy);
+            Assert.AreEqual(before-baseline+2*rate*seconds,(double)Call("Balance",PlayableOwner.Enemy)-before,1e-7);
+            type.GetField("elapsed",F).SetValue(domain,30d);
+            Call("AdvanceBoostWear",30d);
+            var worn=View().Buildings.Single(b=>b.Id==id);
+            Assert.AreEqual(worn.MaxHealth*.30,worn.ExactHealth.Value,1e-9);
+            Call("DamageWithOwner",id,5d,0,(PlayableOwner?)PlayableOwner.Player);
+            Assert.AreEqual(worn.ExactHealth.Value-5,View().Buildings.Single(b=>b.Id==id).ExactHealth.Value,1e-9);
+        }
+        [Test] public void CurrentCheckpointRestoresAnActiveBoostWithIncomeAndWear()
+        {
+            int id=Build(PlayableBuildingKind.Refinery,1);
+            UnlockBoost();
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,id,owner:PlayableOwner.Enemy,ability:OrbitalAbilities.AcceleratedProduction));
+            type.GetField("elapsed",F).SetValue(domain,1d);
+            Call("AdvanceBoostWear",1d);
+            var active=View().Buildings.Single(b=>b.Id==id);
+            Call("CreditOrbital",(PlayableOwner?)PlayableOwner.Player,PlayableOwner.Enemy,profile.CopyData().orbitalThreshold4);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.ChooseOrbital,ability:OrbitalAbilities.RepairNanobots));
+            var home=View(PlayableOwner.Player).Buildings.Single(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.Headquarters);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,target:home.Position,ability:OrbitalAbilities.RepairNanobots));
+            var bytes=(byte[])Call("CaptureWorldBytes",7,config.SourceIdentity);
+            var restored=OfflineParticipantAuthority.Restore(bytes,config);
+            try
+            {
+                CollectionAssert.AreEqual(bytes,restored.CaptureBytes());
+                var building=restored.View("player-2").Buildings.Single(b=>b.Id==id);
+                Assert.AreEqual(29d,building.BoostRemaining,1e-9);
+                Assert.IsNotEmpty(restored.View("player-1").Orbital.RepairRims);
+                Assert.AreEqual(active.ExactHealth.Value,building.ExactHealth.Value,1e-9);
+                Assert.AreEqual(View().IncomePerSecond,restored.View("player-2").IncomePerSecond,1e-9);
+            }
+            finally
+            {
+                var other=typeof(OfflineParticipantAuthority).GetProperty("Domain",F).GetValue(restored);
+                type.GetMethod("DestroyOwnedNavigation",F).Invoke(other,null);
+            }
+        }
         [Test] public void SelectionUsesCentersNearestLargeTieBreakAndEveryTower()
         {
             var c=new[]{new OrbitalBuildingTarget(7,PlayableBuildingKind.Factory,new NavPoint(2,0)),new OrbitalBuildingTarget(6,PlayableBuildingKind.Headquarters,new NavPoint(-2,0)),new OrbitalBuildingTarget(8,PlayableBuildingKind.Refinery,new NavPoint(3,0)),new OrbitalBuildingTarget(3,PlayableBuildingKind.SentryTurret,new NavPoint(0,0)),new OrbitalBuildingTarget(4,PlayableBuildingKind.RepairTower,new NavPoint(5,0)),new OrbitalBuildingTarget(5,PlayableBuildingKind.GaussTower,new NavPoint(5.01,0))};

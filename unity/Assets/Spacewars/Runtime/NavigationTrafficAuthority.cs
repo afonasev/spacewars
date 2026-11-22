@@ -50,6 +50,7 @@ namespace Spacewars.Runtime
         protected override void ReleaseEdges(){Values?.Release();Executions?.Release();Exits?.Release();}
         internal static NavigationTrafficAuthority Prepare(NavigationTrafficAuthority source,NavPreparedCrowdStep frame,NavigationInstalledExecutionOwner[] installed,bool[] detached,IDictionary<int,long> members,IPlayableTerrain terrain,INavStorageReservation reservation)
         {
+            using var phaseTiming=Spacewars.Simulation.PerformanceProfile.Measure(Spacewars.Simulation.ProfileStage.NavTraffic);
             int capacity=frame.After.Length,obstacles=0;long probeScratch=0;double radius=source?.Radius??0;NavClearanceProfile profile=null;
             for(int i=0;i<capacity;i++)if(installed[i]!=null&&frame.After[i].Moving&&!frame.After[i].Held&&!detached[i]&&members.ContainsKey(frame.After[i].Id)){
                 if(installed[i].Corridor.ProviderOwner.Provider is PartitionNavigationProvider partition)probeScratch=Math.Max(probeScratch,partition.TraceScratchBound);var clear=installed[i].Corridor.Recipe.Clearance;if(profile==null||clear.Radius>profile.Radius)profile=clear;radius=Math.Max(radius,clear.Radius);obstacles=Math.Max(obstacles,installed[i].Request.Request.Geometry.Obstacles.Count);
@@ -126,7 +127,8 @@ namespace Spacewars.Runtime
             }
             try{
                 if(profile==null)return false;
-                if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Projection,Generation,publication,out var scope))return null;
+                // Passage classification gates the live frame and uses its protected headroom.
+                if(!TryOpenMotionScope(publication,out var scope))return null;
                 using(scope){
                     if(!NavStorageScratch.TryReserve(scope.OwnedReservation(),checked(probe+2*32L+16L*obstacles),out var scratch))return null;
                     using(scratch){

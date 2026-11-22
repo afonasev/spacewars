@@ -13,6 +13,51 @@ public sealed class OrbitalHudArtworkTests
         var art=new RadialArtwork();art.Set("orbital:8");Assert.True(System.Linq.Enumerable.Any(art.Children(),e=>e.style.display.value==DisplayStyle.Flex&&e.style.backgroundImage.value.texture==icon));
         art.Set("orbital:1");Assert.False(System.Linq.Enumerable.Any(art.Children(),e=>e.style.display.value==DisplayStyle.Flex&&e.style.backgroundImage.value.texture==icon),"reused radial slot must not retain another ability's icon");
     }
+    [Test] public void AcceleratedProductionUsesTransparentSharedArtwork()
+    {
+        var icon = Resources.Load<Texture2D>("OrbitalIcons/accelerated-production");
+        Assert.NotNull(icon);
+        Assert.AreEqual(256, icon.width);
+        Assert.AreEqual(256, icon.height);
+        Assert.True(UnityEngine.Experimental.Rendering.GraphicsFormatUtility.HasAlphaChannel(icon.graphicsFormat));
+        var radial = new RadialArtwork();
+        radial.Set("orbital:" + Spacewars.Simulation.OrbitalAbilities.AcceleratedProduction);
+        Assert.True(System.Linq.Enumerable.Any(radial.Children(), child =>
+            child.style.display.value == DisplayStyle.Flex && child.style.backgroundImage.value.texture == icon));
+    }
+    [Test] public void RocketLauncherKeepsOneTripleMarkAcrossResearchArtwork()
+    {
+        var rocket=Spacewars.Simulation.PlayableResearchKind.ExplorerRocketLauncher;
+        var assault=Spacewars.Simulation.PlayableResearchKind.ExplorerAssaultGuns;
+        string key=RadialActionPresentation.ResearchArtwork(rocket);
+        Assert.AreEqual(key,OrbitalPrecision.ResearchGlyph(rocket));
+        Assert.AreEqual(key,OrbitalPrecision.Glyph("science:"+rocket));
+
+        void Check(VisualElement root,int count)
+        {
+            var visible=root.Query<PortraitUpgradeMark>().ToList()
+                .FindAll(mark=>mark.style.display.value==DisplayStyle.Flex);
+            Assert.AreEqual(1,visible.Count);
+            Assert.AreEqual(count,visible[0].ChevronCount);
+        }
+
+        var radial=new RadialArtwork();
+        radial.Set(RadialActionPresentation.ResearchArtwork(assault),upgraded:true);
+        Check(radial,2);
+        radial.Set(key,upgraded:true);
+        Check(radial,3);
+        radial.Set(RadialActionPresentation.ResearchArtwork(assault),upgraded:true);
+        Check(radial,2);
+
+        var button=new Button();
+        OrbitalPrecision.QueueCard(button,key,.4,true);
+        Check(button.Q<ModelPortrait>("order-artwork"),3);
+
+        var glyph=new OrbitalGlyph(key);
+        Check(glyph,3);
+        glyph.Kind=OrbitalPrecision.ResearchGlyph(assault);
+        Assert.AreEqual(DisplayStyle.None,glyph.Q<PortraitUpgradeMark>().style.display.value);
+    }
     [Test] public void HackCooldownGroupsWithThresholdAndSurvivesProfileJson()
     {
         var field=System.Linq.Enumerable.Single(Spacewars.Simulation.PlayableProfileMetadata.Fields,f=>f.FieldName=="orbitalHackSeconds");

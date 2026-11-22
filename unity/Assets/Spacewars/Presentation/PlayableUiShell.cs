@@ -124,7 +124,7 @@ namespace Spacewars.Presentation
                     responsiveEvidenceStage=2;return;
                 case 2:
                     if(factory==null||factory.Phase!=Spacewars.Simulation.ConstructionPhase.Ready)return;
-                    selection.Clear();selection.Add(factory.Id);selectedSite=selectedSlot=0;
+                    inspectionEntityId=0;selection.Clear();selection.Add(factory.Id);selectedSite=selectedSlot=0;
                     responsiveEvidenceStage=3;return;
                 case 3:
                     if(view.Credits<profile.ShkvalCreditCost+profile.ExplorerCreditCost+profile.TankCreditCost)return;
@@ -184,7 +184,7 @@ namespace Spacewars.Presentation
         {
             if(view==null||hudRow==null)return;
             buildRegion.style.display=commandRegion.style.display=DisplayStyle.None;
-            armyRegion.style.display=selection.Count>0||spectatorMode&&inspectionEntityId!=0?DisplayStyle.Flex:DisplayStyle.None;
+            armyRegion.style.display=selection.Count>0||inspectionEntityId!=0?DisplayStyle.Flex:DisplayStyle.None;
             armyRegion.style.flexGrow=0;
             if(armyRegion.parent!=hudRow)hudRow.Add(armyRegion);
         }

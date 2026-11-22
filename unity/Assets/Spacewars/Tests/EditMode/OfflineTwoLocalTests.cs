@@ -22,6 +22,27 @@ namespace Spacewars.Tests.EditMode
                 Assert.AreEqual(double.Parse(row[3],System.Globalization.CultureInfo.InvariantCulture),position.X);Assert.AreEqual(double.Parse(row[4],System.Globalization.CultureInfo.InvariantCulture),position.Z);
             }
         }
+        [Test] public void OldFrameAcknowledgesOnlyItsPublishedReceiptPrefix()
+        {
+            var runtime = new PlayableRuntime(Config(),71,true);
+            try {
+                using var local = new OfflineLocalSession(runtime,Seats());
+                Ready(local);
+                var initial = local.Frame;
+                foreach (var seat in local.Seats) {
+                    var view = initial.Views[seat.OwnerId];
+                    int unit = view.Entities.Single(e=>e.Owner==view.Owner).Id;
+                    Assert.True(local.Submit(seat.Id,PlayableCommandKind.Hold,new[]{unit}).Accepted);
+                }
+                Assert.True(SpinWait.SpinUntil(()=>runtime.OfflineFrame.ReceiptOrdinal==initial.ReceiptOrdinal+2,5000));
+                var complete = runtime.OfflineFrame;
+                runtime.AcknowledgeOfflineReceipts(initial.ReceiptOrdinal);
+                runtime.AcknowledgeOfflineReceipts(complete.Receipts[0].Ordinal);
+                var remaining = runtime.DrainReceipts();
+                Assert.AreEqual(1,remaining.Count);
+                Assert.AreSame(complete.Receipts[1].Receipt,remaining[0]);
+            } finally { Stop(runtime); }
+        }
         [Test] public void DuplicateDevicesAndOwnersFailClosed()
         {
             var r=new PlayableRuntime(Config(),71,true);try{Assert.Throws<ArgumentException>(()=>new OfflineLocalSession(r,Seats("keyboard+mouse:1:2")));Assert.Throws<ArgumentException>(()=>new OfflineLocalSession(r,Seats("invented-device")));Assert.Throws<ArgumentException>(()=>new OfflineLocalSession(r,new[]{Seats()[0],OfflineLocalSession.Bind("other","owner-11","gamepad:1")}));}finally{Stop(r);}

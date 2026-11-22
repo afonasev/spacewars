@@ -120,10 +120,62 @@ namespace Spacewars.Runtime
             if(wreckScanRemaining==0&&wreckActiveId==0)wreckScanSince=Tick;
             wreckScanRemaining=Math.Max(wreckScanRemaining,units.SlotCount);
         }
-        private void RevisitWreckFailure(int id)
+        private sealed class WreckConnectorFailure
         {
-            if(wrecks.Count==0||!units.TryGetValue(id,out var u))return;
-            u.WreckObservedRevision=-1;u.WreckFailureGeometry=Geometry.Revision;ScheduleWreckScan();
+            internal readonly long Request,Mobility;
+            internal readonly int GeometryRevision,ProfileRevision;
+            internal readonly NavLocation Origin;
+            internal readonly string HoldBinding;
+
+            internal WreckConnectorFailure(long request,long mobility,int geometryRevision,int profileRevision,NavLocation origin,string holdBinding)
+            {
+                Request=request;Mobility=mobility;GeometryRevision=geometryRevision;ProfileRevision=profileRevision;
+                Origin=origin;HoldBinding=holdBinding;
+            }
+        }
+
+        private void RevisitWreckFailure(NavigationRequest request,QueueExecution active)
+        {
+            if(!units.TryGetValue(request.Entity,out var unit))return;
+            if(active!=null&&WaitingForWreck(unit.Id)&&!active.Interrupted&&active.Assigned.HasValue&&active.Assigned.Equals(request.GoalLocation)&&
+                request.BaseGeometry.Revision==Geometry.Revision&&request.ProfileRevision==profile.Navigation.Revision&&
+                navigation.TechnicalFailureFor(unit.Id)==NavSolveStatus.BlockedConnector&&TryActor(unit.Id,out var actor)&&
+                FailureMatches(actor,active)&&request.StartLocation.HasValue&&request.StartLocation.Value.Equals(actor.Location)&&
+                request.MemberIdentity.MobilityRevision==actor.MobilityRevision)
+            {
+                // The wreck scan's flat reachability can be open while the
+                // authoritative connector still rejects this exact input.
+                unit.WreckConnector=new WreckConnectorFailure(request.Request,actor.MobilityRevision,Geometry.Revision,
+                    request.ProfileRevision,DomainLocation(request.StartLocation).Value,request.HeldIdentity);
+                unit.WreckObservedRevision=Geometry.Revision;
+                return;
+            }
+            if(wrecks.Count==0)return;
+            unit.WreckObservedRevision=-1;unit.WreckFailureGeometry=Geometry.Revision;ScheduleWreckScan();
+        }
+
+        private void ObserveWreckConnectorInputs(Unit unit,NavUnit actor)
+        {
+            var failed=unit.WreckConnector;
+            if(failed==null)return;
+            bool waiting=WaitingForWreck(unit.Id);
+            if(waiting&&failed.Request==actor.FailedRequest&&navigation.TechnicalFailureFor(unit.Id)==NavSolveStatus.BlockedConnector&&
+                failed.Mobility==actor.MobilityRevision&&
+                failed.GeometryRevision==Geometry.Revision&&failed.ProfileRevision==profile.Navigation.Revision&&
+                failed.Origin.Equals(actor.Location)&&navigation.CurrentHeldBinding(failed.HoldBinding,unit.Id))return;
+            unit.WreckConnector=null;
+            if(!waiting)return;
+            unit.WreckObservedRevision=-1;
+            ScheduleWreckScan();
+        }
+        private bool NeedsWreckRouteCheck(Unit unit,NavUnit actor,QueueExecution execution)
+        {
+            if(execution==null||!execution.Assigned.HasValue||execution.Interrupted||execution.Stamp.Revision!=unit.LastOrder?.Revision||
+                (execution.Issuance.Command.Kind!=PlayableCommandKind.Move&&execution.Issuance.Command.Kind!=PlayableCommandKind.AttackMove))return false;
+            if(WaitingForWreck(unit.Id))return true;
+            // A settled formation member may keep AttackMove active while the
+            // squad fights. A wreck at the click point cannot undo its arrival.
+            return !actor.Moving&&wrecks.Count>0&&!AtAssignedTacticalEndpoint(execution,actor);
         }
         private void ServiceWreckRoutes()
         {
@@ -137,22 +189,23 @@ namespace Spacewars.Runtime
                         if(!units.TryReadSlot(wreckScanCursor++,out int id,out var u))continue;
                         if(u.WreckObservedRevision==Geometry.Revision||u.Air!=null||!TryActor(id,out var actor)||actor.Held||navigation.IsPending(id)||!tacticalQueues.TryGetValue(id,out var q))continue;
                         var e=q.Pending??q.Active;
-                        if(e==null||e.Stamp.Revision!=u.LastOrder?.Revision||(e.Issuance.Command.Kind!=PlayableCommandKind.Move&&e.Issuance.Command.Kind!=PlayableCommandKind.AttackMove))continue;
-                        if(actor.Moving&&!WaitingForWreck(id)){u.WreckObservedRevision=Geometry.Revision;continue;}
-                        if(wrecks.Count==0&&!WaitingForWreck(id)){u.WreckObservedRevision=Geometry.Revision;continue;}
-                        wreckActiveId=id;wreckActiveOrder=e.Stamp.Revision;wreckActiveSince=wreckScanSince;wreckActiveGeometry=Geometry.Revision;wreckActivePermanent=u.WreckFailureGeometry==Geometry.Revision&&e.TerminalFailure?.Outcome==NavigationOutcome.Unreachable&&actor.FailedRequest==e.AttemptRequest;break;
+                        if(!NeedsWreckRouteCheck(u,actor,e)){u.WreckObservedRevision=Geometry.Revision;continue;}
+                        wreckActiveId=id;wreckActiveOrder=e.Stamp.Revision;wreckActiveSince=wreckScanSince;wreckActiveGeometry=Geometry.Revision;wreckActivePermanent=u.WreckFailureGeometry==Geometry.Revision&&e.TerminalFailure?.Outcome==NavigationOutcome.Unreachable&&actor.FailedRequest==e.AttemptRequest&&e.Assigned.Equals(e.AttemptLocation);break;
                     }
                     if(wreckActiveId==0)break;
                 }
                 if(!units.TryGetValue(wreckActiveId,out var unit)||unit.Air!=null||unit.LastOrder?.Revision!=wreckActiveOrder||!TryActor(wreckActiveId,out var current)||current.Held||!tacticalQueues.TryGetValue(wreckActiveId,out var queue)){wreckActiveId=0;continue;}
                 var execution=queue.Pending??queue.Active;
-                if(execution==null||execution.Stamp.Revision!=wreckActiveOrder){wreckActiveId=0;continue;}
+                if(execution==null||execution.Stamp.Revision!=wreckActiveOrder||navigation.IsPending(unit.Id)||!NeedsWreckRouteCheck(unit,current,execution)){
+                    wreckActiveId=0;continue;
+                }
                 if(wreckActiveGeometry!=Geometry.Revision){wreckActiveGeometry=Geometry.Revision;wreckActivePermanent=false;}
                 queries--;PerformanceProfile.Add(ProfileWork.WreckQueries,1);
                 PerformanceProfile.Maximum(ProfileWork.WreckMaxQueueAge,Tick-wreckActiveSince);
                 var query=QueriesForCurrentWrecks();bool closed=false;
+                var assigned=execution.Assigned.Value;
                 int before=credits;bool done;
-                using(PerformanceProfile.Measure(ProfileStage.WreckReachability))done=query==null||query.TryClosed(current,execution.Issuance.Command.Target,ref credits,ref wreckActivePermanent,out closed);
+                using(PerformanceProfile.Measure(ProfileStage.WreckReachability))done=query==null||query.TryClosed(current,assigned.Position,ref credits,ref wreckActivePermanent,out closed);
                 PerformanceProfile.Add(ProfileWork.WreckSearchCredits,before-credits);
                 if(!done){
                     // An unstable/large query cannot own every subsequent tick.
@@ -161,25 +214,48 @@ namespace Spacewars.Runtime
                     break;
                 }
                 bool waiting=WaitingForWreck(unit.Id),committed=true;
-                if(closed&&!waiting)committed=CommitInternalTactical(execution.Issuance,new[]{unit.Id},InternalTacticalKind.WreckWait,activationRevision:execution.Stamp.Revision);
-                else if(waiting&&!closed)committed=CommitInternalTactical(execution.Issuance,new[]{unit.Id},InternalTacticalKind.Combat,execution.Issuance.Command.Target,execution.Stamp.Revision);
+                if(closed&&!waiting)committed=CommitInternalTactical(execution.Issuance,new[]{unit.Id},InternalTacticalKind.WreckWait,activationRevision:execution.Stamp.Revision,wreckSlot:assigned);
+                else if(waiting&&!closed)committed=CommitInternalTactical(execution.Issuance,new[]{unit.Id},InternalTacticalKind.WreckResume,assigned.Position,execution.Stamp.Revision);
                 if(!committed){ScheduleWreckScan();wreckActiveId=0;break;}
                 unit.WreckObservedRevision=Geometry.Revision;wreckActiveId=0;
             }
         }
         private void WriteWreckScheduling(BinaryWriter w)
         {
-            w.Write(0x57515331);w.Write(2);w.Write(wreckScanSince);w.Write(wreckRouteRevision);w.Write(wreckScanCursor);w.Write(wreckScanRemaining);w.Write(wreckActiveId);w.Write(wreckActiveGeometry);w.Write(wreckActiveOrder);w.Write(wreckActiveSince);w.Write(wreckServiceTick);
-            WorldWire.Array(w,units.Values.ToArray(),u=>{w.Write(u.Id);w.Write(u.WreckObservedRevision);w.Write(u.WreckFailureGeometry);});
+            w.Write(0x57515331);w.Write(3);w.Write(wreckScanSince);w.Write(wreckRouteRevision);w.Write(wreckScanCursor);w.Write(wreckScanRemaining);w.Write(wreckActiveId);w.Write(wreckActiveGeometry);w.Write(wreckActiveOrder);w.Write(wreckActiveSince);w.Write(wreckServiceTick);
+            WorldWire.Array(w,units.Values.ToArray(),u=>{
+                w.Write(u.Id);w.Write(u.WreckObservedRevision);w.Write(u.WreckFailureGeometry);
+                var rejected=u.WreckConnector;
+                w.Write(rejected!=null);
+                if(rejected==null)return;
+                w.Write(rejected.Request);w.Write(rejected.Mobility);w.Write(rejected.GeometryRevision);w.Write(rejected.ProfileRevision);
+                GroupOrderWire.WriteLocation(w,rejected.Origin);WorldWire.String(w,rejected.HoldBinding);
+            });
         }
         private void ReadWreckScheduling(BinaryReader r)
         {
-            if(r.ReadInt32()!=0x57515331||r.ReadInt32()!=2)throw new ArgumentException("Invalid wreck scheduling version.");
+            if(r.ReadInt32()!=0x57515331)throw new ArgumentException("Invalid wreck scheduling tag.");
+            int version=r.ReadInt32();
+            if(version!=2&&version!=3)throw new ArgumentException("Invalid wreck scheduling version.");
             wreckScanSince=r.ReadInt64();wreckRouteRevision=r.ReadInt32();wreckScanCursor=r.ReadInt32();wreckScanRemaining=r.ReadInt32();wreckActiveId=r.ReadInt32();wreckActiveGeometry=r.ReadInt32();wreckActiveOrder=r.ReadInt64();wreckActiveSince=r.ReadInt64();wreckServiceTick=r.ReadInt64();
             if(wreckScanSince<0||wreckScanSince>Tick||wreckRouteRevision< -1||wreckRouteRevision>Geometry.Revision||wreckScanCursor<0||wreckScanCursor>units.SlotCount||wreckScanRemaining<0||wreckScanRemaining>units.SlotCount||wreckActiveId<0||wreckActiveGeometry<0||wreckActiveGeometry>Geometry.Revision||wreckActiveSince<0||wreckActiveSince>Tick||wreckServiceTick< -1||wreckServiceTick>Tick)throw new ArgumentException("Invalid wreck scheduling state.");
-            var seen=new HashSet<int>();foreach(var row in WorldWire.Array(r,()=>new[]{r.ReadInt32(),r.ReadInt32(),r.ReadInt32()})){
-                if(!seen.Add(row[0])||!units.TryGetValue(row[0],out var u)||row[1]< -1||row[1]>Geometry.Revision||row[2]< -1||row[2]>Geometry.Revision)throw new ArgumentException("Invalid wreck scheduling member.");u.WreckObservedRevision=row[1];u.WreckFailureGeometry=row[2];
-            }
+            var seen=new HashSet<int>();
+            WorldWire.Array(r,()=>{
+                int id=r.ReadInt32(),observed=r.ReadInt32(),failureGeometry=r.ReadInt32();
+                if(!seen.Add(id)||!units.TryGetValue(id,out var unit)||observed< -1||observed>Geometry.Revision||
+                    failureGeometry< -1||failureGeometry>Geometry.Revision)throw new ArgumentException("Invalid wreck scheduling member.");
+                unit.WreckObservedRevision=observed;unit.WreckFailureGeometry=failureGeometry;
+                if(version>=3&&WorldWire.Boolean(r)){
+                    long request=r.ReadInt64(),mobility=r.ReadInt64();
+                    int geometry=r.ReadInt32(),routingProfile=r.ReadInt32();
+                    var origin=GroupOrderWire.ReadLocation(r);string hold=WorldWire.String(r);
+                    if(request<=0||request>navigation.Admission.PublishedThroughRequestSequence||mobility<0||
+                        geometry<0||geometry>Geometry.Revision||routingProfile<0||!origin.HasValue||hold==null)
+                        throw new ArgumentException("Invalid wreck connector observation.");
+                    unit.WreckConnector=new WreckConnectorFailure(request,mobility,geometry,routingProfile,origin.Value,hold);
+                }
+                return id;
+            });
             if(seen.Count!=units.Count)throw new ArgumentException("Missing wreck scheduling members.");
             // Solver scratch restarts; queue position and first-service age are authority.
             wreckActivePermanent=false;

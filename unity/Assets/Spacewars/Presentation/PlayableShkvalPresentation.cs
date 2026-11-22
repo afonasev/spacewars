@@ -18,9 +18,10 @@ namespace Spacewars.Presentation
     actor.Turret.localRotation=Quaternion.Euler(0,(float)(e.HullHeading-e.TurretHeading)*Mathf.Rad2Deg,0);
     world.AimExplorer(actor,e);
     var carriage=actor.Launcher.Find("launchCarriage");if(!carriage)continue;
+    double interval=PlayableUnitRules.ShkvalFireInterval(profile,e.Upgraded);
     double age=double.PositiveInfinity;
     // Cell timers survive immediate impacts and save/restore, and stop with simulation pause.
-    if(e.ShkvalCells!=null){double remaining=0;for(int c=0;c<4;c++)remaining=Math.Max(remaining,e.ShkvalCells.Remaining(c));if(remaining>0)age=2*profile.ShkvalFireIntervalMs/1000d-remaining;}
+    if(e.ShkvalCells!=null){double remaining=0;for(int c=0;c<4;c++)remaining=Math.Max(remaining,e.ShkvalCells.Remaining(c));if(remaining>0)age=2*interval-remaining;}
     else foreach(var shot in view.Projectiles)if(shot.Visible&&shot.Kind==PlayableEntityKind.Shkval&&shot.OwnerId==e.Id)age=Math.Min(age,shot.Age);
     float recoil=ShkvalHullRecoil(age);
     var back=actor.Root.InverseTransformDirection(actor.Turret.forward);back.y=0;
@@ -38,7 +39,6 @@ namespace Spacewars.Presentation
      var rocket=actor.LoadedRockets[cell];var muzzle=carriage.Find("muzzle"+cell);
      if(!muzzle)throw new InvalidOperationException("Missing Shkval muzzle");
      double remaining=e.ShkvalCells?.Remaining(cell)??0;
-     double interval=profile.ShkvalFireIntervalMs/1000d;
      rocket.gameObject.SetActive(remaining<=interval);
      float progress=Mathf.SmoothStep(0,1,1-Mathf.Clamp01((float)(remaining/interval)));
      var direction=muzzle.forward;
@@ -54,7 +54,7 @@ namespace Spacewars.Presentation
    if(launch!=null&&world.Actors.TryGetValue(shot.OwnerId,out var actor)&&actor.LoadedRockets!=null)
    {
     var source=view.Entities.FirstOrDefault(e=>e.Id==shot.OwnerId);int cell=launch.Barrel;
-    double interval=profile.ShkvalFireIntervalMs/1000d;double remaining=source?.ShkvalCells?.Remaining(cell)??0;
+    double interval=PlayableUnitRules.ShkvalFireInterval(profile,source?.Upgraded??launch.Upgraded);double remaining=source?.ShkvalCells?.Remaining(cell)??0;
     // Match the saved launch clock, not merely the barrel: a late/fog-restored old shot
     // must not steal the new rocket now feeding or ready in that same channel.
     // Runtime fires before advancing projectiles in its fixed 30 Hz step; therefore

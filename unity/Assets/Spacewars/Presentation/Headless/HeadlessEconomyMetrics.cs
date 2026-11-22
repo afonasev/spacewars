@@ -48,6 +48,7 @@ namespace Spacewars.Headless
             internal readonly Dictionary<int,long> Membership=new Dictionary<int,long>();
             internal readonly Dictionary<long,string> Objectives=new Dictionary<long,string>();
             internal long LastAppliedAction;
+            internal readonly Dictionary<int,double> MineReserves=new Dictionary<int,double>();
             internal readonly AiProductionDemand Demand=new AiProductionDemand();
         }
         private readonly SortedDictionary<string,State> owners=new SortedDictionary<string,State>(StringComparer.Ordinal);
@@ -58,10 +59,19 @@ namespace Spacewars.Headless
             foreach(var ledger in authority.CaptureDiagnosticBudgets())
             {
                 var v=authority.ParticipantView(ledger.OwnerId);
-                owners.Add(ledger.OwnerId,new State{Report=new OwnerReport{OwnerId=ledger.OwnerId,ExcessBankDeadlineTicks=AiProfile.SecondsToTicks(ai.Value("economy.excessBankDeadlineSeconds"),30),IdleLineDeadlineTicks=AiProfile.SecondsToTicks(ai.Value("economy.idleLineDeadlineSeconds"),30)},Income=v.SettledIncome,Tick=v.Tick,
-                    Centers=new HashSet<int>(v.Buildings.Where(b=>b.Owner==v.Owner&&TerritoryRules.Center(b.Kind)).Select(b=>b.SiteId)),Factories=new HashSet<int>(v.Buildings.Where(b=>b.Owner==v.Owner&&b.Kind==PlayableBuildingKind.Factory).Select(b=>b.Id)),Units=new HashSet<int>(v.Entities.Where(e=>e.Owner==v.Owner).Select(e=>e.Id))});
+                var state=new State{Report=new OwnerReport{OwnerId=ledger.OwnerId,ExcessBankDeadlineTicks=AiProfile.SecondsToTicks(ai.Value("economy.excessBankDeadlineSeconds"),30),IdleLineDeadlineTicks=AiProfile.SecondsToTicks(ai.Value("economy.idleLineDeadlineSeconds"),30)},Income=v.SettledIncome,Tick=v.Tick,
+                    Centers=new HashSet<int>(v.Buildings.Where(b=>b.Owner==v.Owner&&TerritoryRules.Center(b.Kind)).Select(b=>b.SiteId)),Factories=new HashSet<int>(v.Buildings.Where(b=>b.Owner==v.Owner&&b.Kind==PlayableBuildingKind.Factory).Select(b=>b.Id)),Units=new HashSet<int>(v.Entities.Where(e=>e.Owner==v.Owner).Select(e=>e.Id))};
+                ReadMineReserves(state,v);
+                owners.Add(ledger.OwnerId,state);
             }
         }
+        private static void ReadMineReserves(State state,PlayableSnapshot view)
+        {
+            state.MineReserves.Clear();
+            foreach(var site in view.Sites)
+                if(site.MineReserve.HasValue)state.MineReserves[site.Site.Id]=site.MineReserve.Value;
+        }
+
         public OwnerReport[] Reports=>owners.Values.Select(s=>s.Report).ToArray();
         public void Observe(PlayableAuthorityTick authority)
         {
@@ -121,13 +131,25 @@ namespace Spacewars.Headless
                 double delta=v.SettledIncome-s.Income;
                 if(delta>0)
                 {
-                    var ready=v.Buildings.Where(b=>b.Owner==v.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true).ToArray();
-                    double Rate(PlayableBuildingSnapshot b)=>(b.RefineryUpgraded?p.RefineryUpgradedIncome:TerritoryRules.Income(p,b.Kind))/p.IncomePeriodSeconds;
-                    double total=ready.Sum(Rate)*p.IncomeSettlementSeconds;
+                    var ready=v.Buildings.Where(b=>b.Owner==v.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&!b.SystemsDisabled&&b.PrivateState?.Lifecycle?.Selling!=true).ToArray();
+                    double Yield(PlayableBuildingSnapshot b)
+                    {
+                        if(b.Kind==PlayableBuildingKind.Mine)
+                        {
+                            var observed=v.Sites.FirstOrDefault(site=>site.Site.Id==b.SiteId);
+                            double? reserve=observed?.MineReserve;
+                            if(s.MineReserves.TryGetValue(b.SiteId,out double previous))reserve=previous;
+                            return TerritoryRules.MineIncome(p,reserve,p.IncomeSettlementSeconds);
+                        }
+                        return (b.RefineryUpgraded?p.RefineryUpgradedIncome:TerritoryRules.Income(p,b.Kind))*
+                            p.IncomeSettlementSeconds/p.IncomePeriodSeconds;
+                    }
+                    double total=ready.Sum(Yield)+v.Sites.Count(site=>site.Site.Kind==PlayableBuildingKind.RelayTower&&site.Owner==v.Owner)*
+                        p.RelayIncomePerPeriod*p.IncomeSettlementSeconds/p.IncomePeriodSeconds;
                     if(Math.Abs(delta-total)>1e-7)throw new InvalidOperationException("Actual settled income/source attribution mismatch.");
                     foreach(var site in ready.Where(b=>!s.Centers.Contains(b.SiteId)).GroupBy(b=>b.SiteId))
                     {
-                        double amount=site.Sum(Rate)*p.IncomeSettlementSeconds;r.RealizedExpansionIncome+=amount;
+                        double amount=site.Sum(Yield);r.RealizedExpansionIncome+=amount;
                         if(amount>0&&r.ExpansionSettlementExamples.Count<32)r.ExpansionSettlementExamples.Add(new Settlement{Tick=v.Tick,SiteId=site.Key,Amount=amount,OwnerSettledDelta=delta});
                     }
                 }
@@ -136,6 +158,7 @@ namespace Spacewars.Headless
                 r.SampledTicks++;r.SettledIncome=v.SettledIncome;r.PeakBank=Math.Max(r.PeakBank,v.Credits);r.PeakSpendableBank=Math.Max(r.PeakSpendableBank,spendable);r.PeakUnpaid=Math.Max(r.PeakUnpaid,unpaid);r.PeakReserved=Math.Max(r.PeakReserved,reserved);
                 r.AdditionalFactories=Math.Max(r.AdditionalFactories,v.Buildings.Count(b=>b.Owner==v.Owner&&b.Kind==PlayableBuildingKind.Factory&&!s.Factories.Contains(b.Id)));
                 r.ProducedUnits=Math.Max(r.ProducedUnits,v.Entities.Count(e=>e.Owner==v.Owner&&!s.Units.Contains(e.Id)));
+                ReadMineReserves(s,v);
                 s.Income=v.SettledIncome;s.Tick=v.Tick;
             }
         }

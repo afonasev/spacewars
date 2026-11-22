@@ -17,6 +17,8 @@ namespace Spacewars.Simulation
         internal readonly int[] InitialRows;internal readonly bool[] TerminalSeeds;
         internal readonly double[] Preferred,RecastReceiver;
         internal readonly NavFormationFrameHint[] Formation;
+        private int stationaryReceiver,additionalStationaryCount;
+        private int[] additionalStationaryReceivers;
         internal bool AllowRepairCertificateReuse; // derived unhooked owner-frame capability, never saved
         internal readonly NavTypedRoute[] RecastRoutes;internal readonly NavRecastStepState[] RecastStates;internal readonly NavRecastSweepReceipt[] RecastReceipts;
         // Final destination disposition, not an event history. At commit a
@@ -76,8 +78,13 @@ namespace Spacewars.Simulation
             Motion=new NavMotionBody[count];Proposals=new NavMotionProposal[count];Neighbors=new int[checked(count*NavCrowdMotion.NeighborCapacity)];NeighborCounts=new int[count];ComponentLabels=new int[count];OriginalSpeeds=new double[count];YieldLabels=new int[count];YieldQueue=new int[count];
             Working=new NavCrowd(this,crowd);Retain();
         }
+        internal static long StorageBytesForFrame(int count)
+            =>checked(NavStorageLayout.Charge(Layout(count))+
+                (count==0?0:NavStorageLayout.Charge(NavCrowdSpatialStorage.Layout(count))));
+
         internal static NavPreparedCrowdStep Create(NavCrowd crowd,int count,INavStorageReservation r)
         {
+            using var phaseTiming=Spacewars.Simulation.PerformanceProfile.Measure(Spacewars.Simulation.ProfileStage.NavFrameCreate);
             crowd.ValidatePreparationLedger(r);
             using(var a=new NavStorageAllocation(r.TryReserve)){a.Reserve(Layout(count));var result=a.Register(new NavPreparedCrowdStep(crowd,count,r));
                 try{result.NextSpatial=count==0?null:NavCrowdSpatialStorage.Create(count,r.TryReserve);return result;}catch{result.Release();throw;}}
@@ -100,7 +107,19 @@ namespace Spacewars.Simulation
         internal void ReplacedRoute(NavUnit unit){int row=Find(unit.Id);Cleared[row]=false;NewLocals[row]?.Release();NewLocals[row]=null;}
         internal void Observe()=>SourceCrowd.ObservePreparedStep(this);
         internal bool SourceCurrent()=>SourceCrowd.PreparedStepSourceCurrent(this);
-        internal void Compute(double dt)=>Working.Step(dt);
+        internal bool IsStationaryReceiver(int entity)=>stationaryReceiver!=0&&entity==stationaryReceiver||
+            additionalStationaryCount!=0&&Array.BinarySearch(additionalStationaryReceivers,0,additionalStationaryCount,entity)>=0;
+        internal void Compute(double dt,int stationary=0,int[] additional=null,int additionalCount=0)
+        {
+            stationaryReceiver=stationary;
+            additionalStationaryReceivers=additional;
+            additionalStationaryCount=additionalCount;
+            try{Working.Step(dt);}
+            finally{
+                stationaryReceiver=additionalStationaryCount=0;
+                additionalStationaryReceivers=null;
+            }
+        }
         internal void ApplyNoThrow()
         {
             for(int i=0;i<Source.Length;i++){
@@ -120,7 +139,13 @@ namespace Spacewars.Simulation
     public sealed partial class NavCrowd
     {
         internal NavCrowd(NavPreparedCrowdStep frame,NavCrowd source)
-        {preparedStep=frame;ProductionEscape=source.ProductionEscape;terrain=source.terrain;unitView=frame.After;}
+        {
+            preparedStep=frame;ProductionEscape=source.ProductionEscape;IsUnitImmobile=source.IsUnitImmobile;AllowsMovingTurn=source.AllowsMovingTurn;AllowsExplorerYield=source.AllowsExplorerYield;
+            // Capture the owner input for synchronous motion-body construction.
+            // Parallel steering reads only the populated bodies.
+            OwnedShortReverseDistance=source.OwnedShortReverseDistance;
+            terrain=source.terrain;unitView=frame.After;
+        }
         internal void ValidatePreparationLedger(INavStorageReservation reservation)
         {
             NavStorageAdmission.RequireOwned(reservation,geometry.StorageRoot);NavStorageAdmission.RequireOwned(reservation,profile.StorageRoot);
@@ -135,6 +160,7 @@ namespace Spacewars.Simulation
         }
         internal void ObservePreparedStep(NavPreparedCrowdStep c)
         {
+            using var phaseTiming=Spacewars.Simulation.PerformanceProfile.Measure(Spacewars.Simulation.ProfileStage.NavFrameObserve);
             ValidatePreparationLedger(c.Reservation);
             if(unitView.Count!=c.Source.Length)throw new InvalidOperationException("Crowd membership changed.");
             c.Geometry=geometry;c.Profile=profile;c.NextIncarnation=nextIncarnation;c.MaximumRadius=maximumRadius;

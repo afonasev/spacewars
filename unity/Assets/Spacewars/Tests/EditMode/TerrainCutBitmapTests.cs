@@ -23,11 +23,36 @@ namespace Spacewars.Tests.EditMode
             for(int i=0;i<600;i++){NavPoint Point()=>new NavPoint((random.NextDouble()*2-1)*map.HalfExtent*1.2,(random.NextDouble()*2-1)*map.HalfExtent*1.2);pairs.Add(Tuple.Create(Point(),Point()));}
             int nontrivial=0;
             foreach(var pair in pairs){
-                TerrainLocations.DisableCutBitmapForTests=true;var before=((List<double>)method.Invoke(locations,new object[]{pair.Item1,pair.Item2})).Select(BitConverter.DoubleToInt64Bits).ToArray();
-                TerrainLocations.DisableCutBitmapForTests=false;var after=((List<double>)method.Invoke(locations,new object[]{pair.Item1,pair.Item2})).Select(BitConverter.DoubleToInt64Bits).ToArray();
+                TerrainLocations.DisableCutBitmapForTests=true;var before=((IReadOnlyList<double>)method.Invoke(locations,new object[]{pair.Item1,pair.Item2})).Select(BitConverter.DoubleToInt64Bits).ToArray();
+                TerrainLocations.DisableCutBitmapForTests=false;var after=((IReadOnlyList<double>)method.Invoke(locations,new object[]{pair.Item1,pair.Item2})).Select(BitConverter.DoubleToInt64Bits).ToArray();
                 CollectionAssert.AreEqual(before,after);if(before.Length>2)nontrivial++;
             }
             Assert.Greater(nontrivial,20);TestContext.WriteLine("CUT_BITMAP_BITS map="+map.Id+" queries="+pairs.Count+" nontrivial="+nontrivial);
+        }
+        [Test] public void NullDockEmitsTheCertifiedIntervalsForStationaryStepsAndRampCrossings()
+        {
+            var map=new NullDockMap();
+            var terrain=((INavArrivalPointTerrain)map).ArrivalLocations;
+            var original=typeof(TerrainLocations).GetMethod("TryTraceSegments",BindingFlags.Instance|BindingFlags.NonPublic);
+            bool sawPortal=false,sawStationary=false,sawSurfaceStep=false;
+            foreach(int y in Enumerable.Range(48,24))
+            foreach(int advance in new[]{0,1,4,-4}){
+                var start=map.Point(30,y);var target=map.Point(30,y+advance);
+                if(!map.TryLocate(start,.72,out var from)||!terrain.TryTrace(from,target,.72,out var end,out var trace))continue;
+                var expected=new List<NavTypedLeg>();
+                Action<NavLocation,NavLocation,double,NavTypedLegKind,string> collect=(a,b,c,k,id)=>expected.Add(new NavTypedLeg(a,b,c,k,id));
+                Assert.True((bool)original.Invoke(terrain,new object[]{from,target,end,collect,null}));
+                Assert.AreEqual(expected.Count,trace.Count);
+                for(int i=0;i<expected.Count;i++){
+                    Assert.AreEqual(expected[i].From,trace[i].From);Assert.AreEqual(expected[i].To,trace[i].To);
+                    Assert.AreEqual(expected[i].Kind,trace[i].Kind);Assert.AreEqual(expected[i].PortalId,trace[i].PortalId);
+                    Assert.AreEqual(BitConverter.DoubleToInt64Bits(expected[i].Cost),BitConverter.DoubleToInt64Bits(trace[i].Cost));
+                }
+                sawStationary|=advance==0&&trace.Count==1;
+                sawSurfaceStep|=advance!=0&&trace.Count==1;
+                sawPortal|=trace.Any(leg=>leg.Kind==NavTypedLegKind.Portal);
+            }
+            Assert.True(sawStationary&&sawSurfaceStep&&sawPortal);
         }
         private static byte[] Trace(TerrainLocations locations,NavLocation from,NavPoint to,double radius)
         {

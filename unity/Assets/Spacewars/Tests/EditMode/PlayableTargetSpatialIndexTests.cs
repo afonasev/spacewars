@@ -191,6 +191,88 @@ namespace Spacewars.Tests.EditMode
                 TestContext.WriteLine("ordinary target witness: motion="+motionTick+" acquire="+acquireTick+" shot="+shotTick+" resume="+resumeTick);
             }
         }
+        [TestCase(0)][TestCase(2)][TestCase(3)][Timeout(120000)]
+        public void ThreadedExplorerAttackMoveClosesOnVisibleHawkAndResumes(int tier)
+        {
+            var profile=Spacewars.Presentation.NativeBalanceStore.ForApplication(
+                (PlayableProfile)typeof(Spacewars.Presentation.PlayableBootstrap).GetMethod("LoadNormalProfile",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,null),
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(),Guid.NewGuid()+".json")).Active;
+            var terms=profile.CopyData();
+            // Keep the stationary target from firing during this order witness.
+            terms.hawkPreparationSeconds=10;
+            terms.hawkDamage=1;
+            var setup=new ProvingGroundSetup(PlayableProfile.Create(terms,profile.AuthoredMap,profile.DisplayName));
+            bool rockets=tier==3;
+            double range=rockets?profile.ExplorerRocketAirRange:profile.ExplorerRange;
+            var origin=new NavPoint(-range*1.05,0);
+            var enemyStart=new NavPoint(range*.15,0);
+            var destination=new NavPoint(origin.X,-18);
+            Assert.IsNull(setup.PlaceUnit(0,PlayableEntityKind.Explorer,origin));
+            Assert.IsNull(setup.PlaceUnit(1,PlayableEntityKind.Hawk,enemyStart));
+            if(tier!=0)setup.SetResearch(0,rockets?PlayableResearchKind.ExplorerRocketLauncher:PlayableResearchKind.ExplorerAssaultGuns,true);
+            using var host=new Spacewars.Presentation.UnityHostRouteService();
+            using var runtime=new PlayableRuntime(setup.Configuration(),81,startPaused:true);
+            PlayableSnapshot View()=>runtime.ParticipantView("player-1");
+            void Wait(Func<bool> ready,double limit,string contract)
+            {
+                var since=System.Diagnostics.Stopwatch.StartNew();
+                while(since.Elapsed.TotalSeconds<limit)
+                {
+                    host.Service(runtime,profile.NavigationRequestsPerFrame);
+                    Assert.IsNull(runtime.Latest.Failure);Assert.IsNull(host.CertifiedPublication?.Failure);
+                    if(ready())return;
+                    System.Threading.Thread.Sleep(1);
+                }
+                Assert.Fail(contract);
+            }
+            Wait(()=>runtime.IsPrepared,30,"Proving Ground prepared");
+            int explorer=View().Entities.Single(e=>e.Kind==PlayableEntityKind.Explorer&&e.Owner==PlayableOwner.Player).Id;
+            int hawk=runtime.ParticipantView("enemy-1").Entities.Single(e=>e.Kind==PlayableEntityKind.Hawk&&e.Owner==PlayableOwner.Enemy).Id;
+            runtime.RequestPause(false);
+            Wait(()=>!runtime.Latest.Paused,5,"Runtime ready for command ingress");
+            Assert.True(runtime.TrySubmit(new PlayableCommand(81,1,"player-1",PlayableCommandKind.AttackMove,new[]{explorer},destination).AsHuman()).Accepted);
+            PlayableEntitySnapshot Scout(PlayableSnapshot view)=>view.Entities.Single(e=>e.Id==explorer);
+            void AssertOriginalOrder(PlayableEntitySnapshot scout)
+            {
+                Assert.NotNull(scout.CurrentOrder,
+                    $"Explorer tier {tier} lost its order at ({scout.Position.X}, {scout.Position.Z}), navigation {scout.NavigationOutcome}, target {scout.TargetId}");
+                Assert.AreEqual(destination,scout.CurrentOrder.Destination);
+            }
+            PlayableEntitySnapshot approaching=null;
+            Wait(()=>{
+                approaching=Scout(View());
+                return approaching.Position.X>origin.X+.15;
+            },12,"Explorer closes on the visible Hawk instead of following its original southbound route");
+            AssertOriginalOrder(approaching);
+            if(tier==0)
+            {
+                runtime.RequestPause(true);
+                Wait(()=>runtime.Latest.Paused,5,"Pause during the temporary approach");
+                var capture=runtime.RequestCaptureBytes();
+                Wait(()=>capture.IsCompleted,10,"Capture an active approach");
+                using var restored=PlayableRuntime.RestoreBytes(capture.GetAwaiter().GetResult(),setup.Configuration());
+                var restoredScout=restored.ParticipantView("player-1").Entities.Single(e=>e.Id==explorer);
+                AssertOriginalOrder(restoredScout);
+                runtime.RequestPause(false);
+            }
+            PlayableEntitySnapshot firing=null;
+            Wait(()=>{
+                var view=View();
+                firing=Scout(view);
+                return firing.TargetId==hawk&&!firing.Moving&&view.Sounds.Any(e=>e.UnitId==explorer&&e.Kind==PlayableSoundKind.Shot);
+            },15,"Explorer stops and fires once the Hawk is in weapon range");
+            var firingPosition=firing.Position;
+            TestContext.WriteLine($"Explorer tier={tier} source={profile.DisplayName} seed=7 firing={firingPosition}");
+            Assert.LessOrEqual(Distance(firingPosition,enemyStart),range);
+            PlayableEntitySnapshot resumed=null;
+            Wait(()=>{
+                var view=View();
+                resumed=Scout(view);
+                return !view.Entities.Any(e=>e.Id==hawk)&&resumed.Moving&&resumed.Position.Z<firingPosition.Z-.25;
+            },45,"Explorer resumes the original route after destroying the Hawk");
+            AssertOriginalOrder(resumed);
+        }
+
         [Test] public void CurrentCaptureAndContinuationIgnoreHotOrColdTargetBuckets()
         {
             const int seed=19261019;const string source="native-spatial-target-cache-v1";
@@ -209,7 +291,9 @@ namespace Spacewars.Tests.EditMode
             var kernels=new[]{new CertifiedRouteKernel(),new CertifiedRouteKernel()};
             var worlds=new[]{domain,restored};
             try{
-                Assert.AreEqual(PlayableWorldRestoreTests.Facts(domain,true),PlayableWorldRestoreTests.Facts(restored,true));
+                byte[] sourceFacts=PlayableWorldRestoreTests.FactBytes(domain,true);
+                byte[] restoredFacts=PlayableWorldRestoreTests.FactBytes(restored,true);
+                CollectionAssert.AreEqual(sourceFacts,restoredFacts,"Exact authority immediately after cold restore");
                 foreach(var world in worlds)Assert.AreEqual(PlayableCommandStatus.Applied,world.Apply(new PlayableCommand(71,2,"player-1",PlayableCommandKind.Move,new[]{actor},new NavPoint(-10,-5)),out _));
                 bool moved=false,lostVisibility=false;int born=0;
                 for(int tick=0;tick<150;tick++){
@@ -242,21 +326,32 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void LiveArrivalRecordOracleKeepsExactOwnersAliasesAndMutablePayload()
         {
+            // This oracle checks certified arrival owners, which Recast does not create.
+            domain.DestroyOwnedNavigation();
+            var terms=PlayableProfile.Default.CopyData();
+            terms.groundRouteBackend=0;
+            var profile=PlayableProfile.Create(terms);
+            domain=new PlayableDomain(profile,71,false);
             int actor=Spawn(PlayableOwner.Player,new NavPoint(-10,-20));
             Assert.AreEqual(PlayableCommandStatus.Applied,domain.Apply(new PlayableCommand(71,1,"player-1",PlayableCommandKind.Move,new[]{actor},new NavPoint(-10,-5)),out _));
             var nav=domain.Navigation;var kernel=new CertifiedRouteKernel();
             try{
                 kernel.PauseAtPhysicalBoundary=()=>nav.ArrivalPhases.Length!=0;
-                try{kernel.Pump(new PlayableRouteBinding(domain.Geometry,PlayableProfile.Default,nav.Admission,nav.RoutePort),1);}finally{kernel.PauseAtPhysicalBoundary=null;}
+                try{kernel.Pump(new PlayableRouteBinding(domain.Geometry,profile,nav.Admission,nav.RoutePort),1);}finally{kernel.PauseAtPhysicalBoundary=null;}
                 var attempts=(System.Collections.Generic.IDictionary<long,NavigationSession.ArrivalAttempt>)typeof(NavigationSession).GetField("arrivalAttempts",Hidden).GetValue(nav);
                 var attempt=attempts.Values.Single();Assert.NotNull(attempt.StorageOwner);
                 var budget=nav.PhysicalHostBudget;Assert.True(budget.TryOpenScope(NavigationPreparationKind.Arrival,71,1,out var scope));
                 NavigationSession.NavigationLiveArrivalProvider one=null,two=null;NavigationSession.NavigationLiveArrivalLease lease=null;
                 try{
-                    var r=scope.OwnedReservation();var provider=attempt.OwnedProviders[0];
-                    one=NavigationSession.NavigationLiveArrivalProvider.CreateOwned(1,1,provider,r);two=NavigationSession.NavigationLiveArrivalProvider.CreateOwned(1,1,provider,r);
-                    var request=attempt.Intents[0];var data=new NavigationArrivalLeaseValues(1,1,0,nav.Generation,attempt.Id,request.Request,request.Entity,request.MemberIdentity.Incarnation,request.Order,1,false);
-                    lease=NavigationSession.NavigationLiveArrivalLease.CreateOwned(data,nav,provider,r);
+                    using(scope)
+                    {
+                        var r=scope.OwnedReservation();var provider=attempt.OwnedProviders[0];
+                        one=NavigationSession.NavigationLiveArrivalProvider.CreateOwned(1,1,provider,r);two=NavigationSession.NavigationLiveArrivalProvider.CreateOwned(1,1,provider,r);
+                        var request=attempt.Intents[0];var data=new NavigationArrivalLeaseValues(1,1,0,nav.Generation,attempt.Id,request.Request,request.Entity,request.MemberIdentity.Incarnation,request.Order,1,false);
+                        lease=NavigationSession.NavigationLiveArrivalLease.CreateOwned(data,nav,provider,r);
+                        scope.Attach(lease);
+                        scope.Commit(lease,_=>{});
+                    }
                     byte[] Facts(object value){var cached=PlayableWorldRestoreTests.FactBytes(value,true,true);CollectionAssert.AreEqual(cached,PlayableWorldRestoreTests.FactBytes(value,true,false));return cached;}
                     foreach(var record in new object[]{attempt,one.Record,lease.Record}){
                         Facts(record);var clone=typeof(object).GetMethod("MemberwiseClone",Hidden).Invoke(record,null);
@@ -269,7 +364,7 @@ namespace Spacewars.Tests.EditMode
                     before=Facts(one.Record);int count=one.Record.References;try{one.Record.References++;CollectionAssert.AreNotEqual(before,Facts(one.Record));}finally{one.Record.References=count;}
                     before=Facts(lease.Record);long retirement=lease.Record.Retirement;try{lease.Record.Retirement++;CollectionAssert.AreNotEqual(before,Facts(lease.Record));}finally{lease.Record.Retirement=retirement;}
                     before=Facts(one);int revision=one.Revision;try{one.Revision++;CollectionAssert.AreNotEqual(before,Facts(one));}finally{one.Revision=revision;}
-                }finally{lease?.ReleaseStorage();one?.ReleaseStorage();two?.ReleaseStorage();scope.Discard();}
+                }finally{lease?.ReleaseStorage();one?.ReleaseStorage();two?.ReleaseStorage();}
                 Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
             }finally{kernel.Clear();}
         }

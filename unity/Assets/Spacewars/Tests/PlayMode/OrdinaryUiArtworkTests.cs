@@ -34,9 +34,10 @@ namespace Spacewars.Input.Tests
             {
                 foreach(var seat in Seats)
                 {
-                    var list=Get<VisualElement>(seat,"armyComposition");Assert.AreEqual(DisplayStyle.Flex,list.style.display.value);
-                    var icons=list.Query<OrbitalGlyph>().ToList();Assert.AreEqual(4,icons.Count);
-                    foreach(var icon in icons){Assert.AreSame(DockArtwork.TextureFor(icon.Kind),icon.Q<Image>("glyph-portrait").image);if(icon.parent.resolvedStyle.display==DisplayStyle.Flex)Inside(list.worldBound,icon.worldBound,"TAB unit portrait");Assert.AreEqual(OrbitalTheme.Ink,icon.Q<Image>("portrait-outline").tintColor);}
+                    AssertTacticalScreen(seat);
+                    var list=Get<VisualElement>(seat,"tacticalTeam");
+                    var row=list.Q<ScrollView>("tactical-team-rows").contentContainer.Children().First();
+                    AssertTacticalUnitCounts(row,Get<PlayableSnapshot>(seat,"view"));
                     Assert.AreEqual(DisplayStyle.None,Get<VisualElement>(seat,"armyRegion").style.display.value);
                 }
             });

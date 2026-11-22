@@ -53,6 +53,41 @@ namespace Spacewars.Tests.EditMode
             d.Commit(o,action,r);Assert.AreEqual(id,d.ArmyId);Assert.AreEqual(AiDefensePlanner.Policy,r.Capture().Armies.Single().TacticalOwner);
         }
         [Test]
+        public void LastHeadquarters_ArbiterRejectsFreeDefendersWhenAllMajorSlotsWereTaken()
+        {
+            var o=Observation(own:12);var r=Registry();var d=new AiDefensePlanner(o.OwnerId,71);
+            var action=d.Propose(Observation(own:3),P,AiProfile.Initial,r);
+            Assert.NotNull(action);
+            var reserves=o.Entities.Where(e=>e.Owner==o.Owner&&!action.EntityIds.Contains(e.Id)).Select(e=>e.Id).ToArray();
+            for(int index=0;index<r.MajorCap;index++)
+                Assert.True(r.TryCreate(o,AiArmyRole.Attack,AiArmyPlanner.Policy,reserves.Skip(index*3).Take(3),out _));
+            Assert.IsFalse(r.CanAdmitDefense(action.EntityIds));
+            var intent=new AiIntent("survival",AiDefensePlanner.Policy,action,100,0,0,null,2);
+            Assert.IsEmpty(new AiDecisionArbiter(AiProfile.Initial).Select(new[]{intent},o.Tick,1000,0,1,armies:r));
+        }
+        [Test]
+        public void LastHeadquarters_LocalGuardJoinsOutmatchedFrontBeforeDamage()
+        {
+            var initial=Observation();
+            var registry=Registry();
+            var defense=new AiDefensePlanner(initial.OwnerId,71);
+            var first=defense.Propose(initial,P,AiProfile.Initial,registry);
+            defense.Commit(initial,first,registry);
+            defense.ObserveReceipt(new PlayableAiTraceRecord(initial.Identity,first.ActionId,10,1,10,
+                PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"applied",initial.OwnerId,
+                first.SourceIdentity,new AiReceiptIdentity(71,initial.OwnerId,1,1)));
+            var attack=Observation(own:4,damage:false);
+            Assert.True(registry.TryCreate(attack,AiArmyRole.MobileDefense,AiArmyPlanner.Policy,new[]{2,3,4},out var guard));
+            registry.UpdateMission(guard,AiArmyPlanner.Policy,AiArmyPhase.Staging,attack.Tick,
+                ((int)PlayableRouteTargetKind.FriendlyAnchor)+":60",rally:new NavPoint(0,0));
+            var response=defense.Propose(attack,P,AiProfile.Initial,registry);
+            Assert.NotNull(response);
+            CollectionAssert.AreEqual(new[]{1,2,3,4},response.EntityIds);
+            defense.Commit(attack,response,registry);
+            Assert.True(response.EntityIds.All(id=>registry.ArmyFor(id)==defense.ArmyId));
+            registry.AssertInvariants();
+        }
+        [Test]
         public void LastHeadquarters_ActiveDefenseRetainsHumanOrders()
         {
             var o=Observation();var r=Registry();var d=new AiDefensePlanner(o.OwnerId,71);var first=d.Propose(o,P,AiProfile.Initial,r);d.Commit(o,first,r);

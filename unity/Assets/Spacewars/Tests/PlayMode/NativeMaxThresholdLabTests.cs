@@ -24,7 +24,7 @@ public sealed class NativeMaxThresholdLabTests
     [TestCase(4000,2,8000)][TestCase(3000,3,9000)][TestCase(41,1.1,45.1)][TestCase(100000,10,1000000)]
     public void LegacyRowsRetainEffectiveThresholdAndNewSavesAreIndependent(double previous,double multiplier,double expected)
     {
-        var store=Store();var row=LegacyRow(store,previous,multiplier);string original=row.ToString();
+        var store=Store();store.Select(NativeBalanceStore.DefaultId,17);var row=LegacyRow(store,previous,multiplier);string original=row.ToString();
         var data=store.Compile(row).CopyData();Assert.AreEqual(expected,data.orbitalThresholdMax,1e-8);Assert.AreEqual(original,row.ToString(),"Compiling must not rewrite historical balance rows");
         // Saving an unchanged default is correctly rejected; represent a later designer edit.
         data.orbitalThreshold1+=1;
@@ -33,14 +33,14 @@ public sealed class NativeMaxThresholdLabTests
     }
     [Test] public void ExplicitAbsoluteAmountWinsAndInvalidLegacyMultipliersFail()
     {
-        var store=Store();var row=LegacyRow(store,41,1.1);row["data"]["orbitalThresholdMax"]=12345.6;
+        var store=Store();store.Select(NativeBalanceStore.DefaultId,17);var row=LegacyRow(store,41,1.1);row["data"]["orbitalThresholdMax"]=12345.6;
         Assert.AreEqual(12345.6,store.Compile(row).CopyData().orbitalThresholdMax);
         foreach(double invalid in new[]{0d,11,1.15,double.NaN,double.PositiveInfinity}){
             row=LegacyRow(store,4000,invalid);Assert.That(()=>store.Compile(row),Throws.Exception);
         }
         row=LegacyRow(store,4000,2);row["data"]["orbitalMaxThresholdMultiplier"]="invalid";Assert.Throws<FormatException>(()=>store.Compile(row));
     }
-    [UnityTest] public IEnumerator NumericMaxControlSavesReloadsAndDoesNotFollowV()
+    [UnityTest] public IEnumerator NumericMaxControlSavesReloadsAndDoesNotFollowIV()
     {
         var host=new GameObject("independent MAX threshold lab QA");var panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");
         var doc=host.AddComponent<UIDocument>();doc.panelSettings=panel;var root=doc.rootVisualElement;OrbitalTheme.Install(root);root.style.width=1280;root.style.height=800;
@@ -50,13 +50,13 @@ public sealed class NativeMaxThresholdLabTests
             var store=Store();var view=new NativeBalanceView(root,navigation,store,()=>{});yield return null;
             navigation.ActivateElement(view.Page.Q<Button>("lab-section-Эскалация"));navigation.ActivateElement(view.Page.Q<Button>("lab-object-Пороги-уровней"));
             for(int i=0;i<5;i++)yield return null;
-            var max=view.Page.Q<TextField>("lab-field-orbitalThresholdMax");Assert.NotNull(max);Assert.AreEqual("8000",max.value);Assert.IsNull(view.Page.Q("lab-field-orbitalMaxThresholdMultiplier"));
+            var max=view.Page.Q<TextField>("lab-field-orbitalThresholdMax");Assert.NotNull(max);Assert.AreEqual("8000",max.value);Assert.AreEqual("Урон от IV до MAX",max.label);Assert.IsNull(view.Page.Q("lab-field-orbitalThreshold5"));Assert.IsNull(view.Page.Q("lab-field-orbitalMaxThresholdMultiplier"));
             Assert.Greater(max.worldBound.width,100);Assert.LessOrEqual(max.worldBound.xMax,1280);Assert.LessOrEqual(max.worldBound.yMax,800);Capture(texture,"max-threshold-hp.png");
-            max.value="12345.6";view.Page.Q<TextField>("lab-field-orbitalThreshold5").value="4321";
+            max.value="12345.6";view.Page.Q<TextField>("lab-field-orbitalThreshold4").value="4321";
             navigation.ActivateElement(view.Page.Q<Button>("lab-save"));yield return null;
-            var saved=Store().Resolve(store.SelectedVersion).CopyData();Assert.AreEqual(12345.6,saved.orbitalThresholdMax);Assert.AreEqual(4321,saved.orbitalThreshold5);
-            view.Page.Q<TextField>("lab-field-orbitalThreshold5").value="7654";navigation.ActivateElement(view.Page.Q<Button>("lab-save"));yield return null;
-            saved=Store().Resolve(store.SelectedVersion).CopyData();Assert.AreEqual(12345.6,OrbitalAbilities.Threshold(5,saved));Assert.AreEqual(7654,saved.orbitalThreshold5);
+            var saved=Store().Resolve(store.SelectedVersion).CopyData();Assert.AreEqual(12345.6,saved.orbitalThresholdMax);Assert.AreEqual(4321,saved.orbitalThreshold4);
+            view.Page.Q<TextField>("lab-field-orbitalThreshold4").value="7654";navigation.ActivateElement(view.Page.Q<Button>("lab-save"));yield return null;
+            saved=Store().Resolve(store.SelectedVersion).CopyData();Assert.AreEqual(12345.6,OrbitalAbilities.Threshold(4,saved));Assert.AreEqual(7654,saved.orbitalThreshold4);
             for(int i=0;i<5;i++)yield return null;Capture(texture,"max-threshold-independent.png");
         }
         finally{navigation.Dispose();panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);}

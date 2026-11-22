@@ -53,15 +53,18 @@ namespace Spacewars.Presentation
                 var block=new MaterialPropertyBlock();block.SetFloat("_SurfaceRole",part.Role);block.SetFloat("_Dressing",part.Role==3?3:part.Role==5?2:1);block.SetColor("_BaseColor",Color.white);renderer.SetPropertyBlock(block);
             }
             var details=ThreeCrossingsDetails.Plan(map,profile,surfaceMaterials);
-            var serviceMesh=ServiceEquipmentKit.Build();FinalProceduralMesh.IndexOwned(serviceMesh);terrainMeshes.Add(serviceMesh);
-            var servicePlacements=ThreeCrossingsServiceScenery.Plan(map,profile,surfaceMaterials,details.FindAll(p=>p.Kind!="Boulder"),serviceMesh.bounds);
-            details=ThreeCrossingsServiceScenery.ReserveServicePockets(details,servicePlacements,serviceMesh.bounds,profile,surfaceMaterials);
-            foreach(var placement in servicePlacements)
+            // Keep the approved layout and its open service pockets. Replace the
+            // rendered scenery only after the existing reservation solver has run.
+            var parkedEquipment=ServiceEquipmentKit.Build();
+            var parkedBounds=parkedEquipment.bounds;ReleaseWorldObject(parkedEquipment);
+            var servicePockets=ThreeCrossingsServiceScenery.Plan(map,profile,surfaceMaterials,details.FindAll(p=>p.Kind!="Boulder"),parkedBounds);
+            details=ThreeCrossingsServiceScenery.ReserveServicePockets(details,servicePockets,parkedBounds,profile,surfaceMaterials);
+            details.RemoveAll(p=>p.Kind=="VentilationBlock"||p.Kind=="CableCabinet"||p.Kind=="ExtractionSkid");
+            for(int i=0;i<details.Count;i++)
             {
-                if(budget.Expired){yield return null;budget.Restart();}
-                var obj=new GameObject("Detail — parked service equipment");obj.transform.SetParent(root,false);obj.transform.localPosition=placement.Position;obj.transform.localRotation=Quaternion.Euler(0,placement.Rotation,0);obj.transform.localScale=Vector3.one*placement.Scale;
-                obj.AddComponent<MeshFilter>().sharedMesh=serviceMesh;var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
-                var block=new MaterialPropertyBlock();block.SetFloat("_SurfaceRole",3);block.SetFloat("_Dressing",2);block.SetColor("_BaseColor",Color.white);renderer.SetPropertyBlock(block);
+                var p=details[i];
+                if(p.Kind=="CargoModule")details[i]=new ThreeCrossingsDetails.Placement(p.Position,p.Radius,"MineWorkModule",p.Rotation,p.SiteId,p.Scale);
+                if(p.Kind=="PumpNode")details[i]=new ThreeCrossingsDetails.Placement(p.Position,p.Radius,"BankPump",p.Rotation,p.SiteId,surfaceMaterials.Art.serviceScale);
             }
             yield return surfaceMaterials.PrepareHangarAccesses(map,material);
             yield return surfaceMaterials.PrepareWeathering(map,details,material);
@@ -81,7 +84,7 @@ namespace Spacewars.Presentation
                 }
                 var obj=new GameObject("Yard — "+placement.Kind);obj.transform.SetParent(root,false);
                 obj.transform.localPosition=placement.Position;obj.transform.localRotation=Quaternion.Euler(0,placement.Rotation,0);
-                float scale=CrossingIndustrialFleet.IsVehicle(placement.Kind)?placement.Scale:placement.Kind.StartsWith("Perimeter")?placement.Scale:CorporateOutpostModules.IsModule(placement.Kind)?surfaceMaterials.Profile.industrialScale:surfaceMaterials.Art.serviceScale;
+                float scale=placement.Scale;
                 obj.transform.localScale=Vector3.one*scale;
                 obj.AddComponent<MeshFilter>().sharedMesh=tiers[0];var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
                 var properties=new MaterialPropertyBlock();properties.SetFloat("_SurfaceRole",3);properties.SetFloat("_Dressing",3);if(CrossingIndustrialFleet.IsVehicle(placement.Kind))properties.SetFloat("_YardObject",3);properties.SetColor("_BaseColor",Color.white);renderer.SetPropertyBlock(properties);
@@ -188,10 +191,12 @@ namespace Spacewars.Presentation
                 foreach(var slot in site.Slots){var pad=Part("Reserved slot",root,Point(slot.Position)+Vector3.up*(profile.AuthoredMap is FoundryMap?.14f:.02f),new Vector3((float)profile.OrdinaryPadRadius*2,.04f,(float)profile.OrdinaryPadRadius*2),color);pad.transform.rotation=Quaternion.Euler(0,-(float)slot.Heading*Mathf.Rad2Deg,0);}
             }
         }
-        public void InspectionHide(){if(dockMaterial)dockMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);if(groveMaterial)groveMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);material.SetTexture("_FogMask",Texture2D.whiteTexture);if(meridianMaterial)meridianMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);}
+        public void InspectionHide(){if(relayGroundMaterial)relayGroundMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);if(cityMaterial)cityMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);if(dockMaterial)dockMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);if(groveMaterial)groveMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);material.SetTexture("_FogMask",Texture2D.whiteTexture);if(meridianMaterial)meridianMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);}
         public void InspectionReveal()
         {
+            if(relayGroundMaterial)relayGroundMaterial.SetTexture("_FogMask",Texture2D.blackTexture);
             // Explicit diagnostic material override; gameplay fog/domain are unchanged.
+            if(cityMaterial)cityMaterial.SetTexture("_FogMask",Texture2D.blackTexture);
             if(dockMaterial)dockMaterial.SetTexture("_FogMask",Texture2D.blackTexture);
             material.SetTexture("_FogMask",Texture2D.blackTexture);
             if(groveMaterial)groveMaterial.SetTexture("_FogMask",Texture2D.blackTexture);

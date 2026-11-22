@@ -13,6 +13,7 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Маркеры приказов","Радиус","Радиус контурного маркера в игровом поле; миникарта использует тот же относительный масштаб.","px",4,16,.5f)] public float orderMarkerRadius=8;
         [SurfaceSetting("Маркеры приказов","Толщина контура","Толщина красного/зелёного кольца без заливки.","px",.5f,3,.25f)] public float orderMarkerWidth=1.25f;
         [SurfaceSetting("Маркеры приказов","Размер номера","Размер цифры внутри контурного маркера.","px",8,18,.5f)] public float orderMarkerFontSize=11;
+        public float orderInputPulseDuration=.18f;
         [SurfaceSetting("Подтверждение приказа","Длительность","Время от подтверждения принятого приказа до полного исчезновения.","s",0.2f,1f,0.05f)] public float orderConfirmationDuration=0.65f;
         [SurfaceSetting("Подтверждение приказа","Объединение кликов","Близкие новые подтверждения на одной поверхности заменяют предыдущую вспышку.","m",0,3,.05f)] public float orderConfirmationMergeRadius=.75f;
         [SurfaceSetting("Подтверждение приказа","Радиус шевронов","Размер подтверждения в поле в экранных пикселях.","px",10f,40f,1f)] public float orderConfirmationRadius=16f;
@@ -85,6 +86,7 @@ namespace Spacewars.Presentation
         public void Validate()
         {
             if(orderConfirmationFadeStart<=orderConfirmationConverge)throw new ArgumentException("Confirmation fade must follow convergence");
+            if(!(orderInputPulseDuration>0)||float.IsInfinity(orderInputPulseDuration))throw new ArgumentException("Invalid order input pulse duration.");
             if(id!="natural-frontier-v1"||revision<1)throw new ArgumentException("Invalid environment art identity");
             foreach(var p in Parameters())if(float.IsNaN(p.Read())||float.IsInfinity(p.Read())||p.Read()<p.Minimum||p.Read()>p.Maximum)throw new ArgumentException("Invalid environment setting: "+p.Path);
         }

@@ -88,6 +88,10 @@ namespace Spacewars.Runtime
     }
     internal sealed partial class PlayableAiOwnerLoop
     {
+        // Test-only isolation keeps the real scheduler, authority and threaded motion.
+        internal static bool IsolatedRotationForTests;
+        internal static Action<PlayableAiAction,AiCombatMicroPhase,long> IsolatedRotationAppliedForTests;
+        internal static string IsolatedRotationOwnerForTests;
         internal static Action<CurrentExpansionDecisionReadback> CurrentExpansionDecisionReadbackForTests;
         internal static string CurrentExpansionDecisionOwnerFilterForTests;
         internal static Action<PlayableAiProposalAdmissionReadback> ProposalAdmissionReadbackForTests;
@@ -163,7 +167,7 @@ namespace Spacewars.Runtime
             public AiIntent Intent;public AiReceiptIdentity Identity;public long LocalActionId;
         }
         private PlayableProfile profile;
-        internal void Rebind(PlayableProfile next){if(WorldWire.Binding(profile).SequenceEqual(WorldWire.Binding(next)))return;while(pending!=null)Cancel(PlayableAiDeliveryStatus.Cancelled,"Balance revision changed.");var previousFinancial=expansionFinancial.Detach(budget);profile=next;arbiter.ClearPositionSaving();armyPlanner.Rebind(next);flankPlanner.Rebind(next);foreach(var witness in budget.Capture().Reserved.Where(AiEconomicInvestmentPlanner.IsDemand))budget.Release(witness.Id);budget.RepriceReservations(e=>launches.IsStartup(e)?launches.Reprice(e,next):infrastructure.IsConversion(e)?infrastructure.Reprice(e,next):AiTechnologyFunding.IsFunding(e)?technologyFunding.Reprice(e,next):AiEconomicInvestmentPlanner.IsDemand(e)?0:BudgetCost(e.Action),BudgetTerms);infrastructure.Rebind(next,budget,authorityTick);technologyFunding.Rebind(next,nativeProfile,budget,arbiter);launches.ReconcileFunding(budget,next,authorityTick);expansion.ReconcileFunding(budget,next,authorityTick,pendingItems.Select(x=>x.Intent));expansionFinancial.Rebind(next,nativeProfile,authorityTick,budget,arbiter,previousFinancial);production.Rebind(next);mission.Rebind(next);midgame.Rebind(next);artillery.Rebind(next);Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);}
+        internal void Rebind(PlayableProfile next){if(WorldWire.Binding(profile).SequenceEqual(WorldWire.Binding(next)))return;victory.Bids=Array.Empty<AiVictoryBid>();while(pending!=null)Cancel(PlayableAiDeliveryStatus.Cancelled,"Balance revision changed.");var previousFinancial=expansionFinancial.Detach(budget);profile=next;arbiter.ClearPositionSaving();armyPlanner.Rebind(next);flankPlanner.Rebind(next);foreach(var witness in budget.Capture().Reserved.Where(AiEconomicInvestmentPlanner.IsDemand))budget.Release(witness.Id);budget.RepriceReservations(e=>launches.IsStartup(e)?launches.Reprice(e,next):infrastructure.IsConversion(e)?infrastructure.Reprice(e,next):AiTechnologyFunding.IsFunding(e)?technologyFunding.Reprice(e,next):AiEconomicInvestmentPlanner.IsDemand(e)?0:BudgetCost(e.Action),BudgetTerms);infrastructure.Rebind(next,budget,authorityTick);technologyFunding.Rebind(next,nativeProfile,budget,arbiter);launches.ReconcileFunding(budget,next,authorityTick);expansion.ReconcileFunding(budget,next,authorityTick,pendingItems.Select(x=>x.Intent));expansionFinancial.Rebind(next,nativeProfile,authorityTick,budget,arbiter,previousFinancial);production.Rebind(next);mission.Rebind(next);midgame.Rebind(next);artillery.Rebind(next);Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);}
         private AiKnowledgeTracker knowledge;
         private AiProfile nativeProfile;
         private readonly AiRosterCatalog roster=AiRosterCatalog.Initial;
@@ -171,7 +175,6 @@ namespace Spacewars.Runtime
         private readonly PlayableAiOpeningCompositionState opening;
         private readonly AiOpeningExecutor openingExecutor;
         private readonly AiDoctrinePolicy doctrine;
-        internal int ProtectedCapturerId=>openingExecutor.ProtectedUnit;
         private PlayableAiEconomicLivenessPolicy economy;
         internal AiEconomyPlan EconomyPlan{get;private set;}
         private AiEconomyDecision economyDecision;
@@ -183,7 +186,7 @@ namespace Spacewars.Runtime
         private PlayableAiScoutLivenessPolicy scout;
         private readonly AiScoutPlanner scoutPlanner=new AiScoutPlanner();
         private bool relayMap; // Derived from public map geography on every review; no additional save state.
-        private int ScoutBudget=>!relayMap&&!openingExecutor.Air&&openingExecutor.Capture().Phase==PlayableAiOpeningPhase.Active?0:scoutPlanner.Budget(nativeProfile,nativeConfig.Difficulty,nativeConfig.PersonalitySeed,openingExecutor.ScoutPlan);
+        private int ScoutBudget=>!relayMap&&!openingExecutor.Air&&!openingExecutor.EarlyGroundPending&&openingExecutor.Capture().Phase==PlayableAiOpeningPhase.Active?0:scoutPlanner.Budget(nativeProfile,nativeConfig.Difficulty,nativeConfig.PersonalitySeed,openingExecutor.ScoutPlan);
         private PlayableAiMissionDefensePolicy mission;
         private readonly PlayableAiMidgameStrategyPolicy midgame;
         private PlayableAiArtillerySupportPolicy artillery;
@@ -235,39 +238,52 @@ namespace Spacewars.Runtime
             AiCombatMicroSafety.PrepareExecutionAssets(this.profile);
             OwnerId=opening.OwnerId;doctrine=new AiDoctrinePolicy(opening,generation);composition=new AiPhaseCompositionPlanner(OwnerId,generation,roster){Doctrine=doctrine};openingExecutor=new AiOpeningExecutor(opening,generation){PlayableProfileForObservation=profile};knowledge=new AiKnowledgeTracker(OwnerId,generation);
             nativeConfig=new AiOwnerConfig(OwnerId,aiDifficulty,opening.MatchSeed,nativeProfile);
-            arbiter=new AiDecisionArbiter(nativeProfile);actionLimit=(int)nativeProfile.DifficultyValue(aiDifficulty,"actionsPerDecision");
-            repeatTicks=AiProfile.SecondsToTicks(nativeProfile.Value("decision.repeatOrderSeconds"),30);
+            arbiter=new AiDecisionArbiter(nativeProfile,aiDifficulty);actionLimit=(int)nativeProfile.DifficultyValue(aiDifficulty,"actionsPerDecision");
+            repeatTicks=AiProfile.SecondsToTicks(nativeProfile.DifficultyValue(aiDifficulty,"decision.repeatOrderSeconds"),30);
             Generation=generation;mission=new PlayableAiMissionDefensePolicy(profile,ownerId:OwnerId);midgame=new PlayableAiMidgameStrategyPolicy(profile,OwnerId);artillery=new PlayableAiArtillerySupportPolicy(profile,ownerId:OwnerId);
             budget=new AiBudgetLedger(OwnerId,generation,AiProfile.SecondsToTicks(nativeProfile.Value("economy.reservationExpirySeconds"),30));
             armies=new AiArmyRegistry(OwnerId,generation,nativeProfile,aiDifficulty);
-            armyPlanner=new AiArmyPlanner(OwnerId,generation);flankPlanner=new AiArmyPlanner(OwnerId,generation,AiArmyPlanner.FlankPolicy);flankPlanner.Rebind(profile);armyPlanner.Rebind(profile);doctrine.CombatCountable=id=>!utilityReserved.Contains(id)&&!expansion.ClaimsActor(id)&&!armies.IsScoutMember(id);doctrine.UtilityAvailable=id=>armies.ArmyFor(id)==0||armies.IsScoutMember(id);defense=new AiDefensePlanner(OwnerId,generation);technologyFunding=new AiTechnologyFunding(OwnerId,generation);expansionFinancial=new AiExpansionFinancial(OwnerId,generation);
+            armyPlanner=new AiArmyPlanner(OwnerId,generation);flankPlanner=new AiArmyPlanner(OwnerId,generation,AiArmyPlanner.FlankPolicy);flankPlanner.Rebind(profile);armyPlanner.Rebind(profile);flankPlanner.Bypass=armyPlanner.Bypass;flankPlanner.OwnsBypassWire=false;doctrine.CombatCountable=id=>!utilityReserved.Contains(id)&&!expansion.ClaimsActor(id)&&!armies.IsScoutMember(id);doctrine.UtilityAvailable=id=>armies.ArmyFor(id)==0||armies.IsScoutMember(id);defense=new AiDefensePlanner(OwnerId,generation);technologyFunding=new AiTechnologyFunding(OwnerId,generation);expansionFinancial=new AiExpansionFinancial(OwnerId,generation);
             expansion=new AiExpansionPlanner(OwnerId);infrastructure=new AiInfrastructurePlanner(OwnerId);
             if(!restoring)expansionFinancial.InitializeNewMatch(profile,nativeProfile,arbiter);
             economy=new PlayableAiEconomicLivenessPolicy(ownerId:OwnerId);research=new PlayableAiResearchLivenessPolicy(ownerId:OwnerId);scout=new PlayableAiScoutLivenessPolicy(ownerId:OwnerId);
             production=new PlayableAiProductionLivenessPolicy(profile:profile,ownerId:OwnerId,catalog:roster);
-            Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);
+            if(!restoring)Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);
         }
         internal long Generation{get;}
-        internal PlayableAiOwnerCheckpoint Checkpoint{get;private set;}
+        internal AiKnowledgeState CaptureKnowledge()=>knowledge.Capture();
+        // Stable publication survives replacement of a detached review owner.
+        // Existing subscribers retain this cell, never a chain of former owners.
+        private sealed class CheckpointPublication {internal PlayableAiOwnerCheckpoint Value;}
+        private CheckpointPublication checkpointPublication=new CheckpointPublication();
+        internal PlayableAiOwnerCheckpoint Checkpoint
+        {get=>System.Threading.Volatile.Read(ref checkpointPublication.Value);private set=>System.Threading.Volatile.Write(ref checkpointPublication.Value,value);}
+        internal void AdoptCheckpointPublication(PlayableAiOwnerLoop original)
+        {
+            if(original==null||original.OwnerId!=OwnerId||original.Generation!=Generation)throw new ArgumentException("Checkpoint publication owner/generation mismatch.");
+            var prepared=Checkpoint;checkpointPublication=original.checkpointPublication;Checkpoint=prepared;
+        }
         internal void Deliver(PlayableDomain domain,long humanSequence,bool paused)
         {
-            ReconcileBudget(domain);
-            // One bounded scan of the current pending set. A rate/fairness/path
-            // wait at the front must not hide a ready opposite-category order.
-            foreach(var item in pendingItems.ToArray())
-                if(pendingItems.Contains(item))DeliverSelected(domain,humanSequence,paused,item,true);
+            if(!DeliverReady(domain,humanSequence,paused,true))
+                domain.Navigation.RoutePort.CancelCommandPreparation(scheduledAi:true);
         }
-        internal void DeliverReady(PlayableDomain domain,long humanSequence,bool paused,bool coverageReady)
+        internal bool DeliverReady(PlayableDomain domain,long humanSequence,bool paused,bool coverageReady)
         {
-            if(coverageReady){Deliver(domain,humanSequence,paused);return;}
             ReconcileBudget(domain);
-            // A waiting offensive proof must not block defense or lifecycle work.
-            foreach(var item in pendingItems.ToArray())
-                if(pendingItems.Contains(item))DeliverSelected(domain,humanSequence,paused,item,false);
+            bool awaitingRouteBoundary=false;
+            // A path/host wait must not hide ready defense or economy work.
+            foreach(var item in DeliveryOrder(domain.Tick))
+                if(pendingItems.Contains(item))DeliverSelected(domain,humanSequence,paused,item,coverageReady,ref awaitingRouteBoundary);
+            return awaitingRouteBoundary;
         }
         private void DeliverOne(PlayableDomain domain,long humanSequence,bool paused)
-            =>DeliverSelected(domain,humanSequence,paused,pending,true);
-        private void DeliverSelected(PlayableDomain domain,long humanSequence,bool paused,Pending pending,bool coverageReady)
+        {
+            bool awaitingRouteBoundary=false;
+            DeliverSelected(domain,humanSequence,paused,pending,true,ref awaitingRouteBoundary);
+            if(!awaitingRouteBoundary)domain.Navigation.RoutePort.CancelCommandPreparation(scheduledAi:true);
+        }
+        private void DeliverSelected(PlayableDomain domain,long humanSequence,bool paused,Pending pending,bool coverageReady,ref bool awaitingRouteBoundary)
         {
             authorityTick=domain.Tick;
             if(!domain.Authorizes(OwnerId)){Stop(domain.Tick);return;}
@@ -289,12 +305,20 @@ namespace Spacewars.Runtime
                 Finish(item,0,0,PlayableAiDeliveryStatus.Stale,PlayableCommandStatus.StaleGeneration,"Observation binding changed.");return;
             }
             if(item.PolicyName==AiCombatMicroPolicy.Policy)BindCombatMicro(PlayableAiObservation.From(domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,opening.MatchSeed,domain.OwnerFor(OwnerId))));
-            bool preemptMicro=item.PolicyName!=AiCombatMicroPolicy.Policy&&MicroReserved(action)&&item.Intent.Priority>=2;
-            if(item.PolicyName!=AiCombatMicroPolicy.Policy&&MicroReserved(action)&&!preemptMicro)
+            bool ownsRecipients=item.PolicyName!=AiCombatMicroPolicy.Policy&&
+                (MicroReserved(action)||ProtectsCombatReturn(action,domain.CombatExecutionActor,domain.Tick));
+            bool preemptMicro=ownsRecipients&&item.Intent.Priority>=2;
+            if(ownsRecipients&&!preemptMicro)
             {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Current local micro still owns the recipients.");return;}
+            if(item.PolicyName==AiRelayObjectives.DominationPolicy&&!domain.ActiveDominationMission(OwnerId,action.SiteId))
+            {
+                Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Domination lead changed.");
+                return;
+            }
             string ownership=armies.Reject(item.Intent);
             if(ownership!=null){Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Rejected,ownership);return;}
             if(!coverageReady&&(Offensive(item)||Technology(item))){pendingItems.Insert(itemIndex,item);return;}
+            NavLocation? reinforcementEndpoint=null;
             PlayableAiObservation repairDelivery=null;
             try{
             var deliveryPlanner=item.PolicyName==AiArmyPlanner.FlankPolicy?flankPlanner:armyPlanner;
@@ -304,14 +328,34 @@ namespace Spacewars.Runtime
                 armies.CaptureArmy(deliveryMission.ArmyId).Any(a=>action.EntityIds.Any(a.Reinforcements.Contains))))
             {
                 var reinforcementView=PlayableAiObservation.From(domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,opening.MatchSeed,domain.OwnerFor(OwnerId)));
+                if (action.Kind is (PlayableCommandKind.Attack or PlayableCommandKind.AttackMove) &&
+                    action.SlotId != AiArmyPlanner.DirectReinforcement)
+                {
+                    var army = armies.CaptureArmy(deliveryMission.ArmyId).Single();
+                    var requests = AiTacticalExecutor.ArrivalRouteRequests(reinforcementView, army, profile, action);
+                    if (requests.Length > 0)
+                        reinforcementView = PlayableAiObservation.From(domain.PlayerSnapshotForDelivery(0, RuntimeStatus.Running,
+                            false, new PlayableRuntimeMetrics(0,0,0,0,0), null, opening.MatchSeed, domain.OwnerFor(OwnerId), requests));
+                }
                 if(!deliveryPlanner.CanDeliverReinforcement(reinforcementView,profile,nativeProfile,armies,action))
                 {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Receiving core changed before reinforcement delivery.");return;}
             }
-            if((AiArmyPlanner.IsArmyPolicy(item.PolicyName)||item.PolicyName==AiDefensePlanner.Policy)&&(action.Kind==PlayableCommandKind.Move||action.Kind==PlayableCommandKind.Follow))
+            if(AiArmyPlanner.IsArmyPolicy(item.PolicyName)&&deliveryPlanner.IsPassageFire(action))
             {
+                var firingView=PlayableAiObservation.From(domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,opening.MatchSeed,domain.OwnerFor(OwnerId)));
+                if(!deliveryPlanner.PassageFireSafe(firingView,profile,action))
+                {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Uncovered firing position changed before delivery.");return;}
+            }
+            if((AiArmyPlanner.IsArmyPolicy(item.PolicyName)||item.PolicyName==AiDefensePlanner.Policy)&&(action.Kind==PlayableCommandKind.Move||action.Kind==PlayableCommandKind.Follow||AiArmyPlanner.IsGuardDeployment(action)))
+            {
+                if(AiArmyPlanner.IsArmyPolicy(item.PolicyName)&&action.Kind==PlayableCommandKind.Move&&action.TargetId>0&&!deliveryPlanner.OwnsPassage(action))
+                {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Turret passage mission changed before delivery.");return;}
                 bool foreignLeader=action.Kind==PlayableCommandKind.Follow&&(armies.ArmyFor(action.TargetId)==0||action.EntityIds.Any(id=>armies.ArmyFor(id)!=armies.ArmyFor(action.TargetId))||armies.Capture().Armies.Single(a=>a.Id==armies.ArmyFor(action.TargetId)).Reinforcements.Contains(action.TargetId));
                 bool withdrawal=action.Kind==PlayableCommandKind.Move&&deliveryMission.Phase==AiArmyPhase.Retreating&&deliveryMission.Reason=="withdrawal"&&action.EntityIds.All(id=>armies.ArmyFor(id)==deliveryMission.ArmyId&&!armies.Capture().Armies.Single(a=>a.Id==deliveryMission.ArmyId).Reinforcements.Contains(id));
-                withdrawal|=action.Kind==PlayableCommandKind.Move&&deliveryMission.Reason==AiReinforcementPolicy.RegroupReason;
+                bool homeRedirect=AiArmyPlanner.IsArmyPolicy(item.PolicyName)&&action.Kind==PlayableCommandKind.Move&&action.ParentId>0&&
+                    deliveryMission.Reason=="withdrawal"&&deliveryMission.Phase is (AiArmyPhase.Regrouping or AiArmyPhase.Retreating)&&
+                    armies.CaptureArmy(deliveryMission.ArmyId).Any(a=>action.EntityIds.All(a.Reinforcements.Contains));
+                withdrawal|=homeRedirect||action.Kind==PlayableCommandKind.Move&&deliveryMission.Reason==AiReinforcementPolicy.RegroupReason;
                 if(AiArmyPlanner.IsArmyPolicy(item.PolicyName)&&deliveryPlanner.OwnsPendingRepairReturn(action,item.LocalActionId))
                 {
                     repairDelivery=PlayableAiObservation.From(domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,opening.MatchSeed,domain.OwnerFor(OwnerId)));
@@ -319,9 +363,47 @@ namespace Spacewars.Runtime
                     {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Repair return certificate changed before delivery.");return;}
                     withdrawal=true;
                 }
-                string rejection=foreignLeader?"leader registry changed":domain.ArmyMoveRejection(action,withdrawal);
-                if(rejection!=null){Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Current observed army path rejected: "+rejection+".");return;}
+                string rejection=foreignLeader?"leader registry changed":deliveryPlanner.OwnsPassage(action)?domain.TurretPassageRejection(action,nativeProfile,nativeConfig.Difficulty,knowledge.Capture(),deliveryPlanner.Bypass.For(deliveryMission.ArmyId),deliveryPlanner.ReadyTowerMemo):homeRedirect?domain.WithdrawingReinforcementMoveRejection(action,knowledge.Capture()):domain.ArmyMoveRejection(action,withdrawal);
+                if(rejection!=null){Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,rejection==AiArmyPlanner.InvalidApproach?rejection:"Current observed army path rejected: "+rejection+".");return;}
             }
+            if (item.PolicyName == ProducerRallyPolicy && action.SlotId != PlayableDomain.ClearAiRallySlot)
+            {
+                var live = PlayableAiObservation.From(domain.PlayerSnapshot(0, RuntimeStatus.Running, false,
+                    new PlayableRuntimeMetrics(0, 0, 0, 0, 0), null, opening.MatchSeed, domain.OwnerFor(OwnerId)));
+                var currentMission = armyPlanner.Capture();
+                bool valid;
+                if(action.TargetId==0)
+                {
+                    bool dispatch=action.Kind==PlayableCommandKind.AttackMove;
+                    var factoryId=dispatch?action.ParentId:action.EntityIds.Single();
+                    var factory=live.Buildings.FirstOrDefault(b=>b.Id==factoryId);
+                    var point=AiPositionDevelopmentPlanner.DefensiveFactoryRally(live,profile,nativeProfile,
+                        knowledge.Capture(),factory,AiTacticalExecutor.ObservedGroundGeometry(live,profile));
+                    valid=point.HasValue&&point.Value.Equals(action.Target)&&(!dispatch||
+                        factory.PrivateState?.HasRally==true&&factory.Rally.Equals(action.Target)&&
+                        !factory.PrivateState.PendingRally.HasValue&&action.EntityIds.All(id=>
+                            live.Entities.Any(u=>u.Id==id&&CanStageAtFactory(live,u,factory,action.Target))));
+                }
+                else valid=AiDefensePlanner.Threats(live,profile).Length==0&&live.Vision?.IsVisible(action.Target)==true&&
+                    armyPlanner.Active&&currentMission.TargetId==action.TargetId&&
+                    currentMission.Phase is (AiArmyPhase.Advancing or AiArmyPhase.Engaging or AiArmyPhase.Staging);
+                if (!valid)
+                {
+                    Finish(item, 0, domain.Tick, PlayableAiDeliveryStatus.Cancelled, PlayableCommandStatus.Cancelled,
+                        "Producer rally no longer supports a live mission.");
+                    return;
+                }
+            }
+            if (AiArmyPlanner.IsArmyPolicy(item.PolicyName) && action.Kind == PlayableCommandKind.AttackMove &&
+                action.SlotId == AiArmyPlanner.DirectReinforcement && !(reinforcementEndpoint = domain.ReinforcementEndpoint(action, knowledge.Capture())).HasValue)
+            {
+                Finish(item, 0, domain.Tick, PlayableAiDeliveryStatus.Rejected, PlayableCommandStatus.Rejected,
+                    "The direct reinforcement path changed.");
+                return;
+            }
+            if(AiArmyPlanner.IsArmyPolicy(item.PolicyName)&&action.Kind==PlayableCommandKind.AttackMove&&
+                !domain.ArmyDestinationObservedFree(action))
+            {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,AiArmyPlanner.InvalidApproach);return;}
             if(item.PolicyName==AiCombatMicroPolicy.Policy)
             {
                 string rejection=domain.CombatMicroRejection(action,combatMicro.PendingPhase,knowledge.Capture(),nativeProfile,nativeConfig.Difficulty,combatMicro);
@@ -335,6 +417,9 @@ namespace Spacewars.Runtime
             {
                 var delivery=repairDelivery??PlayableAiObservation.From(domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,opening.MatchSeed,domain.OwnerFor(OwnerId)));
                 var recipients=delivery.Entities.Where(u=>u.Owner==delivery.Owner&&u.Health>0&&action.EntityIds.Contains(u.Id)).ToArray();
+                if(item.Scout&&action.Kind==PlayableCommandKind.Attack&&
+                    !scoutPlanner.CanDeliverAttack(delivery,profile,nativeProfile,armies,action))
+                {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Scout contact no longer fits its health budget.");return;}
                 if(item.PolicyName==AiDefensePlanner.Policy&&action.Kind==PlayableCommandKind.Stop&&
                     (recipients.Length!=1||!AiTacticalExecutor.IsCurrentAppliedDefenseAssemblyOrder(delivery,recipients[0],records)))
                 {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Defense assembly order changed before its safety Stop was due.");return;}
@@ -348,12 +433,62 @@ namespace Spacewars.Runtime
                 if(!AiOrbitalPolicy.CanDeliver(live,profile,nativeProfile,knowledge.Capture(),action,point=>arbiter.LastOrbitalScan(point,AiOrbitalPolicy.ScanRadius(profile))))
                 {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Orbital opportunity changed before delivery.");return;}
             }
-            long sequence=domain.AllocateAiSequence();lastCommandSequence=sequence;
-            var command=new PlayableCommand(action.Generation,sequence,action.PlayerId,action.Kind,action.CopyEntityIds(),action.Target,
-                siteId:action.SiteId,slotId:action.SlotId,buildingKind:action.BuildingKind,parentId:action.ParentId,targetId:action.TargetId,
-                productionOrderId:action.ProductionOrderId,unitKind:action.UnitKind,researchKind:action.ResearchKind,origin:PlayableOrderOrigin.Ai,source:action.SourceIdentity,jobId:action.ActionId,actionId:action.ActionId);
+            if(action.Kind==PlayableCommandKind.BuildAt&&AiEconomicInvestmentPlanner.MixAction(action.BuildingKind))
+            {
+                var live=PlayableAiObservation.From(domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,opening.MatchSeed,domain.OwnerFor(OwnerId)),Difficulty);
+                var rejection=action.UnitKind==PlayableEntityKind.Skat&&action.BuildingKind==PlayableBuildingKind.Hangar
+                    ? (SkatHangarOpportunity(live)?null:"Repair support prerequisites changed.")
+                    : AiEconomicInvestmentPlanner.MixRejection(live,profile,nativeProfile,action.BuildingKind,action.SiteId,groundKind:action.UnitKind);
+                if(rejection!=null){Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,rejection);return;}
+            }
+            if(item.PolicyName=="infrastructure"&&action.Kind==PlayableCommandKind.SellBuilding&&
+                infrastructure.Capture().SourceKind==PlayableBuildingKind.Refinery)
+            {
+                var live=PlayableAiObservation.From(domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,opening.MatchSeed,domain.OwnerFor(OwnerId)),Difficulty);
+                if(!AiInfrastructurePlanner.CanSellRefinery(live,profile,nativeProfile,action,budget.Available))
+                {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Refinery replacement no longer supports the live economy.");return;}
+            }
+            if(action.Kind==PlayableCommandKind.BuildAt&&action.BuildingKind==PlayableBuildingKind.GaussTower||
+                item.PolicyName=="infrastructure"&&action.Kind==PlayableCommandKind.SellBuilding&&TerritoryRules.ArmedDefense(infrastructure.Capture().SourceKind))
+            {
+                var live=PlayableAiObservation.From(domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,opening.MatchSeed,domain.OwnerFor(OwnerId)));
+                bool rejected=action.Kind==PlayableCommandKind.BuildAt?
+                    AiPositionDevelopmentPlanner.PreferSentry(live,profile,nativeProfile,knowledge.Capture(),action.SiteId):
+                    AiPositionDevelopmentPlanner.Retrofit(live,profile,nativeProfile,knowledge.Capture(),nativeConfig.Difficulty,budget.Available)?.EntityIds.SingleOrDefault()!=action.EntityIds.Single();
+                if(rejected)
+                {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Defensive composition or coverage changed before delivery.");return;}
+            }
+            NavLocation? repairOrigin=item.PolicyName==AiCombatMicroPolicy.Policy&&combatMicro.PendingPhase==AiCombatMicroPhase.Repair
+                ?domain.CombatExecutionActor(action.EntityIds[0])?.Location:null;
+            IDisposable movementBoundary=null;
+            if(domain.NonblockingNavigationPreparation&&domain.Navigation.HasCertifiedHost&&
+                (action.Kind==PlayableCommandKind.Move||action.Kind==PlayableCommandKind.AttackMove))
+            {
+                try{movementBoundary=domain.Navigation.RoutePort.TryAcquireCommandPreparation(
+                    domain.NavigationResultPreparationCancelled,scheduledAi:true);}
+                catch{pendingItems.Insert(itemIndex,item);throw;}
+                if(movementBoundary==null){
+                    pendingItems.Insert(itemIndex,item);
+                    awaitingRouteBoundary=true;
+                    return;
+                }
+            }
+            long sequence=0;
+            PlayableCommand command;
             PlayableCommandStatus status;string message;
-            try{status=domain.Apply(command,out message);}
+            try{
+                using(movementBoundary){
+                    sequence=domain.AllocateAiSequence();lastCommandSequence=sequence;
+                    command=new PlayableCommand(action.Generation,sequence,action.PlayerId,action.Kind,action.CopyEntityIds(),action.Target,
+                        siteId:action.SiteId,slotId:action.SlotId,buildingKind:action.BuildingKind,parentId:action.ParentId,targetId:action.TargetId,
+                        productionOrderId:action.ProductionOrderId,unitKind:action.UnitKind,researchKind:action.ResearchKind,origin:PlayableOrderOrigin.Ai,source:action.SourceIdentity,jobId:action.ActionId,actionId:action.ActionId);
+                    bool localCombatMove = item.PolicyName == AiCombatMicroPolicy.Policy &&
+                        (combatMicro.PendingPhase is AiCombatMicroPhase.Withdraw or AiCombatMicroPhase.Resume ||
+                            AiCombatMicroPolicy.CerberusManeuver(combatMicro.PendingPhase));
+                    if (reinforcementEndpoint.HasValue) command = command.WithMoveDestination(reinforcementEndpoint.Value);
+                    status=localCombatMove||reinforcementEndpoint.HasValue?domain.ApplyLocalCombatMove(command,out message):domain.Apply(command,out message);
+                }
+            }
             catch(Exception ex){
                 if(ex is PlayableDomain.TacticalCommitFailure committed&&committed.Phase==PlayableDomain.TacticalCommitPhase.Committed){
                     // The accepted replacement survives a failed postcommit observer.
@@ -363,14 +498,28 @@ namespace Spacewars.Runtime
                 }else Finish(item,sequence,domain.Tick,PlayableAiDeliveryStatus.Rejected,PlayableCommandStatus.Rejected,ex.ToString());
                 throw;
             }
+            if (item.PolicyName == ProducerRallyPolicy && action.Kind == PlayableCommandKind.SetRally && status == PlayableCommandStatus.Accepted)
+            {
+                combatAttention.Charge(domain.Tick, nativeProfile, nativeConfig.Difficulty, false);
+                // The owner applied the placement intent. Native rally admission
+                // owns the subsequent route result and publishes its own receipt.
+                Finish(item, sequence, domain.Tick, PlayableAiDeliveryStatus.Applied, status, message);
+                return;
+            }
             if(status==PlayableCommandStatus.Applied)
             {
                 Exception failure=preemptMicro?PreemptCombatMicro(action):null;
                 void Attempt(Action operation){try{operation();}catch(Exception error){if(failure==null)failure=error;else PlayableDomain.PreserveTacticalSecondary(failure,error);}}
                 Attempt(()=>combatAttention.Charge(domain.Tick,nativeProfile,nativeConfig.Difficulty,item.PolicyName==AiCombatMicroPolicy.Policy));
-                if(item.PolicyName==AiCombatMicroPolicy.Policy)Attempt(()=>combatMicro.Applied(action,sequence,domain.Tick,item.Identity));
+                #if UNITY_INCLUDE_TESTS
+                if(item.PolicyName==AiCombatMicroPolicy.Policy)IsolatedRotationAppliedForTests?.Invoke(action,combatMicro.PendingPhase,domain.Tick);
+#endif
+                if(item.PolicyName==AiCombatMicroPolicy.Policy)Attempt(()=>combatMicro.Applied(action,sequence,domain.Tick,item.Identity,repairOrigin));
                 Attempt(()=>domain.BindAiRepairPayment(action,item.Identity));
                 Attempt(()=>domain.RecordBotCameraActivity(command));
+                if(EconomyContinuity&&item.PolicyName=="production"&&
+                    action.Kind is not (PlayableCommandKind.QueueSkat or PlayableCommandKind.QueueCerberus or PlayableCommandKind.QueueIgla)&&AiRosterCatalog.IsProduction(action.Kind))
+                    Attempt(()=>EnableRepeatProduction(domain,item));
                 // Preserve command cadence as a separate receipt clock, never intel success.
                 if(item.Scout&&item.Action.Kind==PlayableCommandKind.Move)lastScoutOrderTick=domain.Tick;
                 Attempt(()=>budget.ObserveBank(domain.AiLiquidCredits(OwnerId)));
@@ -384,13 +533,13 @@ namespace Spacewars.Runtime
         }
         internal sealed class ReviewCloneInput
         {
-            private readonly byte[] bytes;private readonly PlayableProfile profile;private readonly AiProfile native;
+            private readonly ArraySegment<byte> bytes;private readonly PlayableProfile profile;private readonly AiProfile native;
             private readonly long generation,tick;private readonly int seed;private readonly AiTeamAssignment assignment;
-            internal ReviewCloneInput(byte[] bytes,PlayableProfile profile,AiProfile native,long generation,int seed,long tick,AiTeamAssignment assignment)
+            internal ReviewCloneInput(ArraySegment<byte> bytes,PlayableProfile profile,AiProfile native,long generation,int seed,long tick,AiTeamAssignment assignment)
             {this.bytes=bytes;this.profile=profile;this.native=native;this.generation=generation;this.seed=seed;this.tick=tick;this.assignment=assignment;}
             internal PlayableAiOwnerLoop Restore()
             {
-                using(var stream=new System.IO.MemoryStream(bytes,false))
+                using(var stream=new System.IO.MemoryStream(bytes.Array,bytes.Offset,bytes.Count,false,true))
                 using(var reader=new System.IO.BinaryReader(stream)){
                     var clone=ReadState(reader,profile,native,generation,seed,tick,reviewClone:true);
                     if(stream.Position!=stream.Length)throw new InvalidOperationException("Trailing owner review state.");
@@ -399,20 +548,21 @@ namespace Spacewars.Runtime
             }
         }
         private static AiTeamAssignment CopyReviewAssignment(AiTeamAssignment value)=>value==null?null:new AiTeamAssignment{
-            TargetId=value.TargetId,SecondaryTargetId=value.SecondaryTargetId,Helping=value.Helping,WaitUntilTick=value.WaitUntilTick,Reason=value.Reason,
+            TargetId=value.TargetId,SecondaryTargetId=value.SecondaryTargetId,Helping=value.Helping,WaitUntilTick=value.WaitUntilTick,Reason=value.Reason,Victory=value.Victory,VictoryDraws=value.VictoryDraws,
+            RelaySite=value.RelaySite,RelayDeparture=value.RelayDeparture,
             GreedyAllies=new HashSet<string>(value.GreedyAllies,StringComparer.Ordinal),DeniedSites=new HashSet<int>(value.DeniedSites)};
-        internal ReviewCloneInput CaptureReviewInput(long tick)=>new ReviewCloneInput(WorldWire.Pack(WriteState),profile,nativeProfile,Generation,opening.MatchSeed,tick,CopyReviewAssignment(teamAssignment));
+        internal ReviewCloneInput CaptureReviewInput(long tick)=>new ReviewCloneInput(WorldWire.PackReviewBuffer(WriteState),profile,nativeProfile,Generation,opening.MatchSeed,tick,CopyReviewAssignment(teamAssignment));
         internal PlayableAiOwnerLoop CreateReviewClone(long tick)=>CaptureReviewInput(tick).Restore();
         // Only current own-unit membership crosses back from the world. Decisions
         // remain bound to their original fog-safe observation and normal delivery guards.
-        internal void ReconcileReviewMembership(PlayableSnapshot current)
+        internal void ReconcileReviewMembership(PlayableDomain current,PlayableOwner owner)
         {
+            var live=current.LivingReviewRecipients(owner);
             authorityTick=current.Tick;
-            var view=PlayableAiObservation.From(current);
-            var live=new HashSet<int>(view.Entities.Where(u=>u.Owner==view.Owner&&u.Health>0).Select(u=>u.Id));
             foreach(var item in pendingItems.Where(p=>p.Action.EntityIds.Any(id=>!live.Contains(id))&&Tactical(p.Action)).ToArray())
             {pendingItems.Remove(item);Finish(item,0,current.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Observed recipients are no longer alive.");}
-            armies.Observe(view);armyPlanner.ReconcileRegistry(armies,current.Tick);flankPlanner.ReconcileRegistry(armies,current.Tick);defense.ReconcileRegistry(armies);
+            armies.ObserveMembership(current.FinancialOwnerId(owner),current.Navigation.Generation,live);
+            armyPlanner.ReconcileRegistry(armies,current.Tick);flankPlanner.ReconcileRegistry(armies,current.Tick);defense.ReconcileRegistry(armies);
             Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);
         }
         internal bool MergeReviewBudget(AiBudgetState initial,AiBudgetState current,long tick)
@@ -421,27 +571,57 @@ namespace Spacewars.Runtime
             if(!AiBudgetLedger.TryMergeReview(initial,budget.Capture(),current,tick,out var merged))return false;
             budget=merged;Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);return true;
         }
+        internal bool NewReviewIntentsExpired(long observationTick,long deliveryTick)
+        {
+            bool expired=false;
+            foreach(var item in pendingItems)
+            {
+                if(item.ObservationTick!=observationTick)continue;
+                if(item.Intent.ExpiresTick>=deliveryTick)return false;
+                expired=true;
+            }
+            return expired;
+        }
         internal void ReconcileReviewClocks(long tick)=>expansionFinancial.ReconcileReviewClocks(budget,arbiter,tick);
         internal long StartupReviewTick=>DecisionIntervalTicks;
+        internal AiDifficulty Difficulty=>nativeConfig.Difficulty;
+        internal double IncomeMultiplier=>nativeProfile.IncomeMultiplier(Difficulty);
+        internal bool RelayShareDue(long tick)=>tick%DecisionIntervalTicks==0;
         internal PlayableAiOwnerLoop CreateStartupWarmup()=>new PlayableAiOwnerLoop(profile,
-            PlayableAiOpeningComposition.Initialize(opening.MatchSeed,OwnerId,aiProfile:nativeProfile),
+            PlayableAiOpeningComposition.Initialize(opening.MatchSeed,OwnerId,aiProfile:nativeProfile,difficulty:nativeConfig.Difficulty),
             Generation,null,nativeProfile,nativeConfig.Difficulty);
         internal AiArmyRegistryState ArmyState=>armies.Capture();
         internal AiProfile TeamProfile=>nativeProfile;
         private AiTeamAssignment teamAssignment;
+        private readonly AiVictoryEpisode victory=new AiVictoryEpisode();
+        internal bool NeedsVictorySearch=>victory.Ready>=0;
+        internal NavPoint[] KnownVictoryOutposts=>NeedsVictorySearch?Array.Empty<NavPoint>():knowledge.Capture().Contacts
+            .Where(c=>c.Building&&(PlayableBuildingKind)c.Kind==PlayableBuildingKind.Outpost).Select(c=>c.Position).ToArray();
         internal void BindTeamAssignment(AiTeamAssignment assignment){teamAssignment=assignment;openingExecutor.KnownGreedyAllies=assignment?.GreedyAllies;armyPlanner.TeamAssignment=assignment;flankPlanner.TeamAssignment=assignment==null?null:new AiTeamAssignment{TargetId=assignment.SecondaryTargetId,Helping=assignment.SecondaryTargetId>0,Reason=assignment.SecondaryTargetId>0?"allied secondary defense":"independent second direction"};expansion.TeamDeniedSites=assignment?.DeniedSites;}
         internal AiTeamPublication PublishTeam(PlayableAiObservation o)
         {
             using var measured=PerformanceProfile.Measure(ProfileStage.TeamPublish);
-            var active=expansion.Capture();
             var homeThreats=AiDefensePlanner.Threats(o,profile);
             bool homeThreatened=homeThreats.Length>0;
             bool canExpand=!expansionFinancial.BootstrapActive(arbiter)&&!homeThreatened;
             var intel=knowledge.Capture();
             // Publish only voluntary objectives, never the private balance/queues.
             var sites=RequestedTeamSites(o,intel,canExpand);
-            return new AiTeamPublication{Owner=OwnerId,Opening=opening.InitialOpening,Team=o.Participants.Count==0?(int)o.Owner:o.Team,Tick=o.Tick,Mission=armyPlanner.Capture(),Targets=AiOpponentSelector.Assess(o,profile,nativeProfile,armyPlanner.Capture().TargetId),
-                ExpansionSite=active.SiteId,ExpansionExpires=active.ExpiresTick,RequestedSites=sites,ThreatTargets=homeThreats.Select(t=>t.Id).OrderBy(id=>id).ToArray(),HomeThreatened=homeThreatened};
+            return TeamPublication(o.Participants.Count==0?(int)o.Owner:o.Team,o.Tick,AiOpponentSelector.Assess(o,profile,nativeProfile,armyPlanner.Capture().TargetId),sites,homeThreats.Select(t=>t.Id).OrderBy(id=>id).ToArray(),o.Domination);
+        }
+        internal AiTeamPublication PublishTeam(AiTeamPublicationObservation observation)
+        {
+            using var measured=PerformanceProfile.Measure(ProfileStage.TeamPublish);
+            var o=PlayableAiObservation.From(observation.DefenseSnapshot);
+            return TeamPublication(o.Participants.Count==0?(int)o.Owner:o.Team,o.Tick,Array.Empty<AiOpponentAssessment>(),Array.Empty<int>(),AiDefensePlanner.Threats(o,profile).Select(t=>t.Id).OrderBy(id=>id).ToArray(),o.Domination);
+        }
+        private AiTeamPublication TeamPublication(int team,long tick,AiOpponentAssessment[] targets,int[] sites,int[] threats,PlayableDominationSnapshot? domination)
+        {
+            var active=expansion.Capture();
+            return new AiTeamPublication{Owner=OwnerId,Opening=opening.InitialOpening,Team=team,Tick=tick,Mission=armyPlanner.Capture(),Targets=targets,
+                RelayBids=arbiter.RelayAssault(tick).Bids,RelaySeconds=domination is PlayableDominationSnapshot d&&d.Rising&&d.LeadingTeam!=team?d.SecondsToVictory:0,
+                ExpansionSite=active.SiteId,ExpansionExpires=active.ExpiresTick,RequestedSites=sites,Victory=victory,
+                MinimumVictoryForce=AiVictoryBid.TankForce(profile,nativeProfile)*nativeProfile.Value("victoryConversion.minimumTankEquivalent"),ThreatTargets=threats,HomeThreatened=threats.Length>0};
         }
 
         private int[] RequestedTeamSites(PlayableAiObservation o,AiKnowledgeState intel,bool canExpand)
@@ -450,17 +630,97 @@ namespace Spacewars.Runtime
             // before the full nearest-safe-site/remote-territory calculation; retain
             // the same filters, actor checks and final ordering.
             return o.Sites.Where(s=>canExpand&&s.CenterId==0&&!s.Contested&&AiIncomeSiteSelection.Available(s,o)&&
-                (s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost||s.Site.Kind==PlayableBuildingKind.RelayTower)&&TerritoryRules.Income(profile,s.Site.Kind)>0&&o.Credits>=TerritoryRules.Cost(profile,s.Site.Kind)&&
+                (s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost||s.Site.Kind==PlayableBuildingKind.RelayTower&&!o.Domination.HasValue)&&TerritoryRules.Income(profile,s.Site.Kind)>0&&o.Credits>=TerritoryRules.Cost(profile,s.Site.Kind)&&
                 AiIncomeSiteSelection.TerritoryAllowed(o,profile,nativeProfile,intel,s)&&AiIncomeSiteSelection.SiteSafe(o,profile,intel,s))
                 .Where(s=>o.Entities.Any(u=>u.Owner==o.Owner&&u.Kind==PlayableEntityKind.Explorer&&u.Health>0&&!u.Moving&&u.CurrentOrder==null&&armies.ArmyFor(u.Id)==0&&!pendingItems.Any(i=>i.Action.EntityIds.Contains(u.Id))&&
                     o.RouteProofs.Any(r=>r.UnitId==u.Id&&r.TargetId==s.Site.Id&&r.Kind==PlayableRouteTargetKind.PublicObjective)))
                 .OrderBy(s=>o.Entities.Where(u=>u.Owner==o.Owner&&u.Kind==PlayableEntityKind.Explorer&&u.Health>0).Select(u=>AiOpponentSelector.Distance(u.Position,s.Site.Position)).DefaultIfEmpty(double.MaxValue).Min()).ThenBy(s=>s.Site.Id).Select(s=>s.Site.Id).ToArray();
         }
 
+        internal Func<int,NavPoint,bool> RejectedDominationApproaches(long tick)=>arbiter.RejectedDominationApproaches(tick);
         internal bool NeedsArmyRoutes(long tick)=>(pendingItems.Any(Technology))||defense.Active&&(pendingItems.Any(Offensive)||technologyFunding.HasHold(budget))||tick-lastDecisionTick>=DecisionIntervalTicks||
             armies.HasReinforcements&&records.Any(r=>AiArmyPlanner.IsArmyPolicy(r.Policy)&&r.Status==PlayableAiDeliveryStatus.Applied&&
                 (r.Kind==PlayableCommandKind.Attack||r.Kind==PlayableCommandKind.AttackMove)&&r.ApplicationTick==tick-1);
+        internal bool NeedsTerritorialRoutes=>openingExecutor.EarlyGroundPending&&openingExecutor.AllowsPressure||armyPlanner.TerritorialGuard||composition.Capture().Phase!=AiGamePhase.Early&&
+            (!openingExecutor.InitialAttackPending||openingExecutor.Capture().Phase!=PlayableAiOpeningPhase.Active);
         internal bool NeedsDefenseRoutes(PlayableSnapshot snapshot)=>(!defense.EmergencyObserved||technologyFunding.HasHold(budget)||pendingItems.Any(Offensive))&&AiDefensePlanner.Threats(PlayableAiObservation.From(snapshot),profile).Length>0;
+        private const string ProducerRallyPolicy = "producer-rally";
+
+        private bool CanStageAtFactory(PlayableAiObservation o,PlayableEntitySnapshot unit,PlayableBuildingSnapshot factory,NavPoint point)
+        {
+            return unit.Owner==o.Owner&&!PlayableUnitRules.Aircraft(unit.Kind)&&AiReinforcementPolicy.Available(unit)&&
+                unit.OrderStamp==null&&unit.TargetId==0&&AiReinforcementPolicy.Settled(unit)&&armies.ArmyFor(unit.Id)==0&&
+                unit.Id!=openingExecutor.ProtectedUnit&&unit.Id!=openingExecutor.GroundScout&&
+                !utilityReserved.Contains(unit.Id)&&!expansion.ClaimsActor(unit.Id)&&
+                AiOpponentSelector.Distance(unit.Position,FactoryReleaseRules.Exit(profile,factory.Position,factory.Heading,unit.Kind))<=profile.DefaultRallyDistance&&
+                AiOpponentSelector.Distance(unit.Position,point)>profile.Navigation.ArrivalSlotSpacing&&
+                AiTacticalExecutor.SafePath(o,unit.Position,new[]{point},PlayableUnitRules.Radius(profile,unit.Kind),profile);
+        }
+
+        private PlayableAiAction PlanProducerRally(PlayableAiObservation observation)
+        {
+            var producers = observation.Buildings.Where(b => b.Owner == observation.Owner && b.Health > 0 &&
+                b.Phase == ConstructionPhase.Ready && b.PrivateState != null &&
+                b.Kind is (PlayableBuildingKind.Factory or PlayableBuildingKind.Hangar)).ToArray();
+            var threatened = AiDefensePlanner.Threats(observation, profile).Length > 0;
+            var groundRally = threatened ? null : armyPlanner.ReinforcementRally(observation, profile, nativeProfile, armies, aircraft: false);
+            var airRally = threatened ? null : armyPlanner.ReinforcementRally(observation, profile, nativeProfile, armies, aircraft: true);
+            var chosenGround = RallyProducer(PlayableBuildingKind.Factory, groundRally);
+            var chosenAir = RallyProducer(PlayableBuildingKind.Hangar, airRally);
+
+            PlayableAiAction dispatch=null;
+            NavGeometry geometry=null;
+            AiKnowledgeState intel=null;
+            foreach (var b in producers.OrderByDescending(b=>b.Id==chosenGround||b.Id==chosenAir).ThenBy(b=>b.Id))
+            {
+                bool mission=b.Id==chosenGround||b.Id==chosenAir;
+                NavPoint? desired=b.Id==chosenGround?groundRally:b.Id==chosenAir?airRally:null;
+                if(!mission&&b.Kind==PlayableBuildingKind.Factory&&!b.BoostSelling)
+                    desired=AiPositionDevelopmentPlanner.DefensiveFactoryRally(observation,profile,nativeProfile,
+                        intel??=knowledge.Capture(),b,geometry??=AiTacticalExecutor.ObservedGroundGeometry(observation,profile));
+                if(!desired.HasValue)
+                {
+                    if(b.PrivateState.HasRally||b.PrivateState.PendingRally.HasValue)return Action(b,null,0);
+                    continue;
+                }
+                if(Nullable.Equals(b.PrivateState.PendingRally,desired)||
+                    b.PrivateState.HasRally&&b.Rally.Equals(desired.Value)&&!b.PrivateState.PendingRally.HasValue)
+                {
+                    if(!mission&&dispatch==null&&b.PrivateState.HasRally&&!b.PrivateState.PendingRally.HasValue)
+                    {
+                        var recruits=observation.Entities.Where(u=>CanStageAtFactory(observation,u,b,desired.Value))
+                            .Select(u=>u.Id).OrderBy(id=>id).ToArray();
+                        if(recruits.Length>0)
+                            dispatch=new PlayableAiAction(1,OwnerId,observation.ProfileId,observation.ProfileRevision,Generation,
+                                observation.SnapshotSequence,PlayableCommandKind.AttackMove,recruits,desired.Value,
+                                parentId:b.Id,seed:observation.Seed,sourceIdentity:opening.SourceIdentity);
+                    }
+                    continue;
+                }
+                return Action(b,desired,mission?armyPlanner.Capture().TargetId:0);
+            }
+            return dispatch;
+
+            int RallyProducer(PlayableBuildingKind kind, NavPoint? point)
+            {
+                if (!point.HasValue) return 0;
+                return producers.Where(b => b.Kind == kind && !b.BoostSelling &&
+                    (kind != PlayableBuildingKind.Hangar ||
+                        (b.PrivateState.Orders.FirstOrDefault()?.Kind == PlayableEntityKind.Hawk ||
+                         b.QueueCount == 0 && b.PrivateState.Repeat && b.PrivateState.RepeatKind == PlayableEntityKind.Hawk) &&
+                         AiTacticalExecutor.SafePathForUnit(observation, b.Position, new[] { point.Value }, profile.HawkRadius, profile, true)))
+                    .OrderByDescending(b => b.QueueCount > 0 || b.PrivateState.Repeat)
+                    .ThenBy(b => AiOpponentSelector.Distance(b.Position, point.Value)).ThenBy(b => b.Id)
+                    .Select(b => b.Id).FirstOrDefault();
+            }
+
+            PlayableAiAction Action(PlayableBuildingSnapshot b, NavPoint? point,int missionTarget) => new PlayableAiAction(
+                1, OwnerId, observation.ProfileId, observation.ProfileRevision, Generation, observation.SnapshotSequence,
+                PlayableCommandKind.SetRally, new[] { b.Id }, point.GetValueOrDefault(),
+                slotId: point.HasValue ? 0 : PlayableDomain.ClearAiRallySlot, targetId: missionTarget,
+                seed: observation.Seed, sourceIdentity: opening.SourceIdentity);
+        }
+
         private static bool Offensive(Pending p)=>AiArmyPlanner.IsArmyPolicy(p.PolicyName)||p.PolicyName=="artillery"||p.PolicyName=="expansion";
         private static bool Technology(Pending p)=>p.PolicyName=="research"||p.Action.Kind==PlayableCommandKind.BuildAt&&p.Action.BuildingKind==PlayableBuildingKind.ScientificCenter;
         internal bool CanFundTechnology(PlayableAiObservation o,bool urgentRepair,bool essentialScale)
@@ -521,6 +781,7 @@ namespace Spacewars.Runtime
             {pendingItems.Remove(item);Finish(item,0,0,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Observed center threat changed tactical priority.");}
         }
         internal void GuardDefenseDelivery(PlayableDomain domain)=>GuardDefenseReadiness(domain);
+        internal bool NeedsDeliveryCheck(long tick)=>pendingItems.Any(item=>item.DueTick<=tick);
         internal bool GuardDefenseReadiness(PlayableDomain domain)
         {
             if(!technologyFunding.HasHold(budget)&&!pendingItems.Any(p=>Offensive(p)||Technology(p)||p.PolicyName==AiDefensePlanner.Policy)||!domain.Authorizes(OwnerId)||domain.Outcome!=PlayableMatchOutcome.Playing)return true;
@@ -547,6 +808,7 @@ namespace Spacewars.Runtime
         private void BindUtilityReservations(PlayableAiObservation o,int preparationSite=0,bool considerProspectiveScout=false)
         {
             utilityReserved.Clear();
+            utilityReserved.UnionWith(AiRelayObjectives.CaptureGuards(o,profile));
             foreach(var id in armies.Capture().Armies.Where(a=>a.Role==AiArmyRole.Scout&&a.Phase!=AiArmyPhase.Disbanded).SelectMany(a=>a.Members))utilityReserved.Add(id);
             foreach(var id in pendingItems.Where(p=>p.Scout).SelectMany(p=>p.Action.EntityIds))utilityReserved.Add(id);
             // A spare scout slot is not an assignment. Protect only the actor of a
@@ -554,7 +816,8 @@ namespace Spacewars.Runtime
             // available to army reinforcement between ordinary decisions.
             if(considerProspectiveScout&&pendingItems.Count<actionLimit&&!scout.HasPendingObligation&&!pendingItems.Any(p=>p.Scout))
             {
-                var candidate=scoutPlanner.Plan(o,knowledge.Capture(),armies,profile,nativeProfile,ScoutBudget,preparationSite);
+                var candidate=scoutPlanner.Plan(o,knowledge.Capture(),armies,profile,nativeProfile,ScoutBudget,preparationSite,
+                    reservedActors:AiRelayObjectives.CommittedRecipients(o,arbiter));
                 if(candidate!=null&&candidate.EntityIds.All(id=>o.Entities.Any(u=>u.Id==id&&!u.Held&&!(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human))&&!pendingItems.Any(p=>p.Action.EntityIds.Contains(id))&&(!expansion.ClaimsActor(id)||expansion.AllowsScoutReuse(id))))
                     foreach(var id in candidate.EntityIds)utilityReserved.Add(id);
             }
@@ -577,7 +840,7 @@ namespace Spacewars.Runtime
             authorityTick=snapshot.Tick;
             if(snapshot.OwnerEliminated||snapshot.Generation!=Generation||snapshot.Status==RuntimeStatus.Stopped||snapshot.Status==RuntimeStatus.Failed||snapshot.Outcome!=PlayableMatchOutcome.Playing){while(pending!=null)Cancel(PlayableAiDeliveryStatus.Stopped,"Match ended.");armies.DisbandAll();armyPlanner.Stop();flankPlanner.Stop();defense.Stop();Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);return;}
             if(snapshot.Paused)return;
-            var current=PlayableAiObservation.From(snapshot);
+            var current=PlayableAiObservation.From(snapshot,Difficulty);
             foreach(var scan in current.OrbitalScans)arbiter.RememberOrbitalScan(scan.Point,current.Tick);
             BindCombatMicro(current);
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -596,12 +859,17 @@ namespace Spacewars.Runtime
             armyPlanner.HarassAllowed=flankPlanner.HarassAllowed=doctrine.HarassAllowed(nativeConfig.Difficulty);
             armyPlanner.SplitLargeArmies=flankPlanner.SplitLargeArmies=nativeConfig.Difficulty!=AiDifficulty.Recruit;
             scoutPlanner.RevisitScale=doctrine.Personality==AiPersonality.Harassing?nativeProfile.Value("openingsMidgame.personality.harassingScoutScale"):1;
-            armyPlanner.OpeningMinimum=openingExecutor.Capture().Phase==PlayableAiOpeningPhase.Active?openingExecutor.RequiredForce:0;
+            armyPlanner.DeployTerritorially=flankPlanner.DeployTerritorially=NeedsTerritorialRoutes;
+            armyPlanner.EarlyGroundOpening=openingExecutor.EarlyGroundPending;
+            scoutPlanner.OpeningScout=openingExecutor.EarlyGroundPending?openingExecutor.GroundScout:0;
+            armyPlanner.OpeningMinimum=openingExecutor.InitialAttackPending?openingExecutor.RequiredForce:0;
             armyPlanner.OpeningMembers=openingExecutor.InitialMembers(current,nativeProfile);
-            armyPlanner.ProtectedUnit=openingExecutor.ProtectedUnit;
+            armyPlanner.ProtectedUnit=openingExecutor.GroundScout>0?openingExecutor.GroundScout:openingExecutor.ProtectedUnit;
             scoutPlanner.ProtectedUnit=openingExecutor.ProtectedUnit;
             defense.ProtectedUnit=openingExecutor.ProtectedUnit;
-            expansion.AllowOutposts=openingExecutor.AllowsOutposts;
+            expansion.AllowOutposts=openingExecutor.AllowsOutposts(current,nativeProfile);
+            scoutPlanner.SurveyOutposts=expansion.AllowOutposts&&
+                !current.Sites.Any(s=>s.Site.Kind==PlayableBuildingKind.Outpost&&s.Owner==current.Owner&&s.Ready);
             IReadOnlyList<int> newCoverage;
             using(PerformanceProfile.Measure(ProfileStage.Knowledge))newCoverage=knowledge.Observe(current,nativeProfile);
             var reviewSection=PerformanceProfile.Measure(ProfileStage.AiReviewGuard);
@@ -620,8 +888,17 @@ namespace Spacewars.Runtime
                 if(heldExpansion.SiteId>0&&scoutPlanner.IsPreparationActor(armies,heldExpansion.SiteId,heldExpansion.ActorId))preparationSite=heldExpansion.SiteId;
             }
             reviewSection.Dispose();reviewSection=PerformanceProfile.Measure(ProfileStage.AiReviewArmies);
+#if UNITY_INCLUDE_TESTS
+            if(IsolatedRotationForTests&&armies.Capture().Armies.Length==0)
+            {
+                var members=current.Entities.Where(u=>u.Owner==current.Owner&&u.Health>0).Select(u=>u.Id).ToArray();
+                if(members.Length>0&&armies.TryCreate(current,AiArmyRole.Attack,AiArmyPlanner.Policy,members,out var isolatedArmy,requiredMinimum:1))
+                    armies.UpdateMission(isolatedArmy,AiArmyPlanner.Policy,AiArmyPhase.Engaging,current.Tick,"isolated-rotation");
+            }
+#endif
             armies.Observe(current);
-            scoutPlanner.Observe(current,knowledge.Capture(),armies,nativeProfile,ScoutBudget,preparationSite,profile);
+            scoutPlanner.Observe(current,knowledge.Capture(),armies,nativeProfile,ScoutBudget,preparationSite,profile,
+                pendingItems.FirstOrDefault(i=>i.Scout)?.Action.EntityIds.SingleOrDefault()??0);
             foreach(var item in pendingItems.Where(x=>x.Scout&&x.Action.EntityIds.Any(id=>armies.ArmyFor(id)==0)).ToArray())
             {pendingItems.Remove(item);Finish(item,0,0,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Scout assignment released.");}
             BindUtilityReservations(current,preparationSite,current.Tick-lastDecisionTick>=DecisionIntervalTicks);
@@ -633,14 +910,14 @@ namespace Spacewars.Runtime
             // this threat. Spare production must remain available for pressure.
             bool defenseCovered=defense.Active&&defense.CoversTechnologyThreats(current,profile,nativeProfile,armies,records);
             var flankReserve=FlankReservations(current);
-            var unavailableTacticalActors=pendingItems.SelectMany(x=>x.Action.EntityIds).Concat(current.Entities.Where(u=>expansion.ClaimsActor(u.Id)).Select(u=>u.Id)).Concat(flankReserve).Concat(utilityReserved).Concat(openingExecutor.ProtectedUnit>0?new[]{openingExecutor.ProtectedUnit}:Array.Empty<int>()).ToArray();
+            var unavailableTacticalActors=pendingItems.SelectMany(x=>x.Action.EntityIds).Concat(current.Entities.Where(u=>expansion.ClaimsActor(u.Id)).Select(u=>u.Id)).Concat(flankReserve).Concat(utilityReserved).Concat(new[]{openingExecutor.ProtectedUnit,openingExecutor.GroundScout}.Where(id=>id>0)).ToArray();
             if(defense.Active)AiTacticalExecutor.Observe(current,armies,defense.ArmyId,profile,
                 defenseCovered?unavailableTacticalActors.Concat(current.Entities.Where(u=>u.Owner==current.Owner&&armies.ArmyFor(u.Id)==0).Select(u=>u.Id)):unavailableTacticalActors,AiDefensePlanner.Policy,records,nativeProfile,knowledge.Capture());
             else if(armyPlanner.Active)AiTacticalExecutor.Observe(current,armies,armyPlanner.Capture().ArmyId,profile,
-                unavailableTacticalActors.Concat(current.Entities.Where(u=>u.Held||u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human).Select(u=>u.Id)),AiArmyPlanner.Policy,records,nativeProfile,knowledge.Capture());
+                unavailableTacticalActors.Concat(current.Entities.Where(u=>u.Held||u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human).Select(u=>u.Id)),AiArmyPlanner.Policy,records,nativeProfile,knowledge.Capture(),armyPlanner.AllowAutomaticReinforcement);
             foreach(var item in pendingItems.Where(x=>x.PolicyName==AiDefensePlanner.Policy&&!defense.Active).ToArray())
             {pendingItems.Remove(item);Finish(item,0,0,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Defense army released.");}
-            if(!defense.Active&&flankPlanner.Active)AiTacticalExecutor.Observe(current,armies,flankPlanner.Capture().ArmyId,profile,unavailableTacticalActors,AiArmyPlanner.FlankPolicy,records,nativeProfile,knowledge.Capture());
+            if(!defense.Active&&flankPlanner.Active)AiTacticalExecutor.Observe(current,armies,flankPlanner.Capture().ArmyId,profile,unavailableTacticalActors,AiArmyPlanner.FlankPolicy,records,nativeProfile,knowledge.Capture(),flankPlanner.AllowAutomaticReinforcement);
             foreach(var item in pendingItems.Where(x=>x.PolicyName==AiArmyPlanner.FlankPolicy&&!flankPlanner.Active).ToArray())
             {pendingItems.Remove(item);Finish(item,0,0,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Rejected,"Flank mission released.");}
             foreach(var item in pendingItems.Where(x=>x.PolicyName==AiArmyPlanner.Policy&&!armyPlanner.Active).ToArray())
@@ -659,18 +936,31 @@ namespace Spacewars.Runtime
             expansion.ReconcileFunding(budget,profile,authorityTick,pendingItems.Select(x=>x.Intent));
             foreach(var item in pendingItems.Where(x=>x.PolicyName=="expansion"&&!expansion.ClaimsSite(x.Action.SiteId)).ToArray())
             {pendingItems.Remove(item);Finish(item,0,0,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Rejected,"Expansion claim released.");}
+            infrastructure.RetargetDefenseConversion(current,profile,budget,nativeProfile,knowledge.Capture());
             infrastructure.Observe(current,profile,budget);
             foreach(var item in pendingItems.Where(x=>x.PolicyName=="infrastructure"&&(x.Action.Kind==PlayableCommandKind.SellBuilding||x.Action.Kind==PlayableCommandKind.BuildAt)&&!infrastructure.ClaimsSlot(x.Action.SiteId,x.Action.SlotId)).ToArray())
             {pendingItems.Remove(item);Finish(item,0,0,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Rejected,"Conversion released.");}
             reviewSection.Dispose();reviewSection=PerformanceProfile.Measure(ProfileStage.AiReviewOpening);
-            openingExecutor.Observe(current,knowledge.Capture(),armyPlanner.Deployment(current,armies),nativeProfile);
+            openingExecutor.Observe(current,knowledge.Capture(),armyPlanner.Deployment(current,armies,includeFieldGuard:openingExecutor.EarlyGroundPending,records:records),nativeProfile);
             demand.Observe(current,nativeProfile);composition.Observe(current,profile,nativeProfile);
             var actualThreats=AiDefensePlanner.Threats(current,profile);bool threatened=actualThreats.Length>0;
             var earlyDefense=newEmergency?defense.Propose(current,profile,nativeProfile,armies):null;
             // A non-admissible threat must not open an early macro/scout decision.
             // Only actual survival admission can override ordinary decision cadence.
             reviewSection.Dispose();
-            if(snapshot.Tick-lastDecisionTick<DecisionIntervalTicks&&earlyDefense==null)return;
+            combatMicro.Observe(current,profile,nativeProfile,nativeConfig.Difficulty,armies);
+            // Observation can retire a pending recipient before the reaction
+            // delay ends. Cancel its whole intent in the same owner review.
+            if(combatMicro.PendingId!=0&&!combatMicro.HasPendingRecipients)
+            {
+                var item=pendingItems.Single(x=>x.PolicyName==AiCombatMicroPolicy.Policy&&x.LocalActionId==combatMicro.PendingId);
+                CancelItem(item,PlayableAiDeliveryStatus.Cancelled,"Combat micro recipient no longer eligible.");
+            }
+            if(snapshot.Tick-lastDecisionTick<DecisionIntervalTicks&&earlyDefense==null)
+            {
+                TryEarlyCombatMicro(current,humanSequence);
+                return;
+            }
             using var decisionMeasured=PerformanceProfile.Measure(ProfileStage.AiReviewDecision);
             lastDecisionTick=snapshot.Tick;
 #if UNITY_INCLUDE_TESTS
@@ -687,17 +977,21 @@ namespace Spacewars.Runtime
 #endif
             budget.ObserveBank(observation.Credits);
             budget.Expire(snapshot.Tick,entry=>BudgetReservationValid(entry,observation));technologyFunding.Reconcile(observation,budget,arbiter);
-            var strategy=midgame.Review(observation,opening.WithPhase(openingExecutor.Capture().Phase),mission.Mission,nativeDeployment:armyPlanner.Deployment(observation,armies),personality:doctrine.Personality);
-            combatMicro.Observe(observation,profile,nativeProfile,nativeConfig.Difficulty,armies);
+            var strategy=midgame.Review(observation,opening.WithPhase(openingExecutor.Capture().Phase),mission.Mission,nativeDeployment:armyPlanner.Deployment(observation,armies,records:records),personality:doctrine.Personality);
             BindCombatMicro(observation);
             var proposals=new List<AiIntent>();
-            bool Available(string name)=>!pendingItems.Any(p=>p.PolicyName==name);
-            AiIntent Propose(string name,PlayableAiAction candidate,Action commit,Action<PlayableAiTraceRecord> feedback,int priority=0,int? requireFullyFundableAfterProtection=null)
+            bool Available(string name)=>(name!="economy"||!economy.HasPendingObligation)&&
+                !pendingItems.Any(p=>p.PolicyName==name);
+            AiIntent Propose(string name,PlayableAiAction candidate,Action commit,Action<PlayableAiTraceRecord> feedback,int priority=0,int? requireFullyFundableAfterProtection=null,bool openingIncomeAlternative=false)
             {
+#if UNITY_INCLUDE_TESTS
+                if(IsolatedRotationForTests&&name!=AiCombatMicroPolicy.Policy)return null;
+#endif
                 bool repairHandoff=candidate!=null&&combatMicro.CanYieldPendingRepair(observation,profile,nativeProfile,nativeConfig.Difficulty,armies,name,candidate)&&
                     observation.RouteProofs.Any(r=>r.UnitId==candidate.EntityIds[0]&&r.Kind==PlayableRouteTargetKind.FriendlyAnchor&&r.TargetId==candidate.ParentId&&r.Goal.Equals(candidate.Target)&&AiTacticalExecutor.WithdrawalRoute(observation,r,profile));
                 if(repairHandoff)priority=2; // Existing survival band; no extra attention, actions or reaction time.
-                if(candidate!=null&&name!=AiCombatMicroPolicy.Policy&&MicroReserved(candidate)&&priority<2)return null;
+                if(candidate!=null&&name!=AiCombatMicroPolicy.Policy&&priority<2&&
+                    (MicroReserved(candidate)||ProtectsCombatReturn(candidate,id=>observation.Entities.FirstOrDefault(u=>u.Id==id&&u.Owner==observation.Owner),observation.Tick)))return null;
                 if(candidate==null||!Available(name))
                 {
 #if UNITY_INCLUDE_TESTS
@@ -709,7 +1003,7 @@ namespace Spacewars.Runtime
                 if(name!="expansion"&&candidate.EntityIds.Any(id=>expansion.ClaimsActor(id)&&!(name=="scout"&&candidate.Kind==PlayableCommandKind.Move&&expansion.AllowsScoutReuse(id)))&&priority<2)return null;
                 if(candidate.PlayerId!=OwnerId||candidate.Generation!=Generation||candidate.Seed!=observation.Seed||candidate.SourceIdentity!=opening.SourceIdentity||candidate.ProfileId!=observation.ProfileId||candidate.ProfileRevision!=observation.ProfileRevision||candidate.SnapshotSequence!=observation.SnapshotSequence)
                     throw new InvalidOperationException("AI policy returned an action outside its owner observation.");
-                var intent=Proposal(name,candidate,observation,priority,repairHandoff);
+                var intent=Proposal(name,candidate,observation,priority,repairHandoff,openingIncomeAlternative);
                 if(intent==null)return null;
                 if(requireFullyFundableAfterProtection.HasValue&&!AiExpansionFinancial.FullyFundable(budget,requireFullyFundableAfterProtection.Value,intent))
                 {
@@ -721,37 +1015,113 @@ namespace Spacewars.Runtime
                 }
                 intent.Commit=commit;intent.Feedback=feedback;proposals.Add(intent);return intent;
             }
-            var orbitalAction=AiOrbitalPolicy.Plan(observation,profile,nativeProfile,knowledge.Capture(),doctrine.Personality,records,opening.SourceIdentity,point=>arbiter.LastOrbitalScan(point,AiOrbitalPolicy.ScanRadius(profile)));
-            Propose(AiOrbitalPolicy.Policy,orbitalAction,()=>{},_=>{},orbitalAction?.Kind==PlayableCommandKind.UseOrbital&&orbitalAction.TargetId==OrbitalAbilities.ControlHack?2:1);
+            var orbitalAction=AiOrbitalPolicy.Plan(observation,profile,nativeProfile,knowledge.Capture(),doctrine.Personality,records,opening.SourceIdentity,
+                point=>arbiter.LastOrbitalScan(point,AiOrbitalPolicy.ScanRadius(profile)),
+                reactionSeconds:nativeProfile.DifficultyValue(nativeConfig.Difficulty,"control.reactionMaxSeconds"));
+            bool reinforcement=orbitalAction?.Kind==PlayableCommandKind.UseOrbital&&orbitalAction.TargetId==OrbitalAbilities.Reinforcement;
+            if(!reinforcement)Propose(AiOrbitalPolicy.Policy,orbitalAction,()=>{},_=>{},
+                orbitalAction?.Kind==PlayableCommandKind.UseOrbital&&orbitalAction.TargetId==OrbitalAbilities.ControlHack?2:1);
             // TryPlan is a legacy stateful API. Each candidate runs on a transaction fork;
             // only selected forks become live policies. Unselected RNG/pending/mission changes disappear.
-            var da=earlyDefense??defense.Propose(observation,profile,nativeProfile,armies);
-            var defenseAssembly=earlyDefense==null&&AiDefensePlanner.LastHeadquartersAttackers(observation).Length==0?defense.ProposeAssembly(observation,profile,armies,records,nativeProfile,knowledge.Capture()):null;
+            AssignSkatSupport(observation);
+            var da=earlyDefense!=null&&armies.CanAdmitDefense(earlyDefense.EntityIds)?
+                earlyDefense:defense.Propose(observation,profile,nativeProfile,armies);
+            var defenseAssembly=da==null&&AiDefensePlanner.LastHeadquartersAttackers(observation).Length==0?defense.ProposeAssembly(observation,profile,armies,records,nativeProfile,knowledge.Capture()):null;
             var defenseAction=defenseAssembly??da;
             Propose(AiDefensePlanner.Policy,defenseAction,()=>
             {
                 if(defenseAssembly!=null)defense.CommitAssembly(observation,defenseAssembly,armies,profile,records);
                 else {defense.Commit(observation,da,armies,profile);armyPlanner.ReconcileRegistry(armies,authorityTick,"defense preempted offensive ownership");flankPlanner.ReconcileRegistry(armies,authorityTick,"defense preempted flank ownership");}
             },defense.ObserveReceipt,2);
-            if(!threatened||defenseCovered)
+            bool mayFinish=openingExecutor.Capture().Phase!=PlayableAiOpeningPhase.Active&&(!threatened||defenseCovered);
+            var victoryBids=mayFinish?armyPlanner.VictoryBids(observation,profile,nativeProfile,armies,victory.Ready>=0?victory.Team:-1,flankPlanner):Array.Empty<AiVictoryBid>();
+            bool hasAlliedBot=observation.Participants.Any(p=>p.Id!=OwnerId&&p.Control==OfflineControl.Ai&&p.Team==observation.Team);
+            var finish=victory.Review(observation,profile,nativeProfile,doctrine.Personality,victoryBids,teamAssignment,hasAlliedBot,mayFinish);
+            bool launching=finish!=null&&victory.Pursuing&&observation.Tick>=victory.Departure;
+            bool waitingForFinish=victory.WaitingToDepart(finish,observation.Tick);
+            bool finishHeadquarters=launching&&finish.KnownHeadquarters||
+                mayFinish&&victory.Pursuing&&finish==null&&!victoryBids.Any(b=>b.KnownHeadquarters)&&
+                (armyPlanner.AwaitingHeadquartersRoute(observation,nativeProfile)||flankPlanner.AwaitingHeadquartersRoute(observation,nativeProfile));
+            if(finishHeadquarters)
+                foreach(var pending in pendingItems.Where(item=>item.PolicyName==AiRelayObjectives.DominationPolicy).ToArray())
+                    CancelItem(pending,PlayableAiDeliveryStatus.Cancelled,"Committed headquarters assault.");
+            bool canAddressDomination=!finishHeadquarters&&observation.Domination?.Rising==true&&AiDefensePlanner.LastHeadquartersAttackers(observation).Length==0;
+            var domination=canAddressDomination?AiRelayObjectives.PlanDomination(observation,profile,armies,
+                RejectedDominationApproaches(observation.Tick),nativeProfile,arbiter,teamAssignment):null;
+            var committedRelayActors=canAddressDomination?AiRelayObjectives.CommittedRecipients(observation,arbiter):new HashSet<int>();
+            bool urgentDomination=canAddressDomination&&(domination!=null||teamAssignment?.RelaySite>0||
+                committedRelayActors.Count>0||pendingItems.Any(item=>item.PolicyName==AiRelayObjectives.DominationPolicy));
+            bool preserveRaid=urgentDomination&&observation.Domination.Value.LeadingTeam==observation.Team&&
+                AiProfile.BehaviorDifficulty(observation.Difficulty)>=AiDifficulty.Veteran;
+            if(urgentDomination)
+            {
+                foreach(var pending in pendingItems.Where(item=>item.PolicyName==AiArmyPlanner.Policy||
+                    item.PolicyName==AiArmyPlanner.FlankPolicy&&!preserveRaid).ToArray())
+                    CancelItem(pending,PlayableAiDeliveryStatus.Cancelled,"Domination superseded the offensive order.");
+                if(domination!=null)
+                {
+                    committedRelayActors.UnionWith(domination.EntityIds);
+                    foreach(var pending in pendingItems.Where(item=>item.Scout&&item.Action.EntityIds.Any(committedRelayActors.Contains)).ToArray())
+                        CancelItem(pending,PlayableAiDeliveryStatus.Cancelled,"Domination superseded this scout order.");
+                }
+                foreach(var pending in pendingItems.Where(item=>item.PolicyName==AiRelayObjectives.DominationPolicy))
+                    committedRelayActors.UnionWith(pending.Action.EntityIds);
+                Propose(AiRelayObjectives.DominationPolicy,domination,()=>{
+                    foreach(var group in armies.Capture().Armies.Where(army=>army.Members.Any(domination.EntityIds.Contains)))
+                        armies.ReleaseMembers(group.Id,group.TacticalOwner,domination.EntityIds);
+                    armyPlanner.ReconcileRegistry(armies,authorityTick,"domination redeployment");
+                    flankPlanner.ReconcileRegistry(armies,authorityTick,"domination redeployment");
+                },_=>{},2);
+            }
+            if (Available(ProducerRallyPolicy))
+                Propose(ProducerRallyPolicy, PlanProducerRally(observation), () => {}, _ => {});
+            int relayProductionSite=domination?.SiteId??teamAssignment?.RelaySite??0;
+            if(relayProductionSite<=0&&committedRelayActors.Count>0)
+                relayProductionSite=arbiter.RelayAssault(observation.Tick).Site;
+            if((!urgentDomination||preserveRaid)&&(!threatened||defenseCovered))
             {
                 armyPlanner.OtherTargetId=flankPlanner.Active?flankPlanner.Capture().TargetId:0;
-                var armyAction=armyPlanner.Active||openingExecutor.AllowsPressure?armyPlanner.ProposeWithRecords(observation,opening.WithPhase(openingExecutor.Capture().Phase),profile,nativeProfile,armies,records):armyPlanner.ProposePositioning(observation,profile,nativeProfile,armies);
-                Propose(AiArmyPlanner.Policy,armyAction,()=>armyPlanner.Commit(observation,armyAction,armies),armyPlanner.ObserveReceipt,armyPlanner.ReinforcementPriority(observation,armies,armyAction));
+                var passage=urgentDomination?null:armyPlanner.ProposePassage(observation,profile,nativeProfile,armies);
+                var victoryAction=passage==null&&launching?armyPlanner.ProposeVictory(observation,nativeProfile,armies,finish):null;
+                var recall=finish==null&&!waitingForFinish?armyPlanner.ProposeVictoryRecall(observation,nativeProfile,armies,victory.Bids):null;
+                var armyAction=urgentDomination?null:passage??victoryAction??recall??(waitingForFinish&&!armyPlanner.KeepRecoveryDuringVictory(observation,nativeProfile)?
+                    armyPlanner.ReinforceCurrentAssault(observation,profile,nativeProfile,armies,records):
+                    armyPlanner.Active||openingExecutor.AllowsPressure?armyPlanner.ProposeWithRecords(observation,opening.WithPhase(openingExecutor.Capture().Phase),profile,nativeProfile,armies,records):armyPlanner.ProposePositioning(observation,profile,nativeProfile,armies));
+                var mission=armyPlanner.Capture();
+                if(!urgentDomination)
+                    relayProductionSite=armyAction?.SiteId>0?armyAction.SiteId:
+                        mission.TargetKind==PlayableRouteTargetKind.PublicObjective&&
+                        mission.Phase is AiArmyPhase.Forming or AiArmyPhase.Advancing or AiArmyPhase.Engaging?mission.TargetId:0;
+                Propose(AiArmyPlanner.Policy,armyAction,()=>
+                {
+                    if(victoryAction!=null)armyPlanner.CommitVictory(observation,victoryAction,armies,finish,victory);
+                    else armyPlanner.Commit(observation,armyAction,armies);
+                },armyPlanner.ObserveReceipt,victoryAction!=null?1:armyPlanner.ReinforcementPriority(observation,armies,armyAction));
                 if(armyPlanner.Active&&nativeConfig.Difficulty!=AiDifficulty.Recruit&&openingExecutor.Capture().Phase==PlayableAiOpeningPhase.Complete&&current.Entities.Count(u=>u.Owner==current.Owner&&u.Health>0&&!utilityReserved.Contains(u.Id)&&roster.For(u.Kind).lineWeight>0)>=nativeProfile.Value("armies.minimumUnits")*2)
                 {
                     flankPlanner.OtherTargetId=armyPlanner.Capture().TargetId;
-                    var flankAction=flankPlanner.ProposeWithRecords(observation,opening.WithPhase(PlayableAiOpeningPhase.Complete),profile,nativeProfile,armies,records);
-                    Propose(AiArmyPlanner.FlankPolicy,flankAction,()=>flankPlanner.Commit(observation,flankAction,armies),flankPlanner.ObserveReceipt,flankPlanner.ReinforcementPriority(observation,armies,flankAction));
+                    var flankPassage=flankPlanner.ProposePassage(observation,profile,nativeProfile,armies);
+                    var flankFinish=flankPassage==null&&launching&&flankPlanner.Active?flankPlanner.ProposeVictory(observation,nativeProfile,armies,finish):null;
+                    var flankAction=flankPassage??flankFinish??((!launching&&!waitingForFinish)||flankPlanner.KeepRecoveryDuringVictory(observation,nativeProfile)?
+                        flankPlanner.ProposeVictoryRecall(observation,nativeProfile,armies,victory.Bids)??flankPlanner.ProposeWithRecords(observation,opening.WithPhase(PlayableAiOpeningPhase.Complete),profile,nativeProfile,armies,records):
+                        flankPlanner.ReinforceCurrentAssault(observation,profile,nativeProfile,armies,records));
+                    Propose(AiArmyPlanner.FlankPolicy,flankAction,()=>
+                    {
+                        if(flankFinish!=null)flankPlanner.CommitVictory(observation,flankFinish,armies,finish,victory);
+                        else flankPlanner.Commit(observation,flankAction,armies);
+                    },flankPlanner.ObserveReceipt,flankFinish!=null?1:flankPlanner.ReinforcementPriority(observation,armies,flankAction));
                 }
                 // Generic composition now owns artillery production; Army/TacticalExecutor retain combat ownership.
             }
             bool usefulScout=scoutPlanner.UsefulProductionDemand(observation,knowledge.Capture(),nativeProfile,ScoutBudget);
+            bool massAir=AiTechnologyPlanner.MassAirThreat(observation,nativeProfile,knowledge.Capture());
+            bool relayGroundSupport=relayProductionSite>0&&openingExecutor.Capture().Phase!=PlayableAiOpeningPhase.Active&&
+                AiRelayObjectives.NeedsGroundSupport(observation,profile,relayProductionSite);
             AiEconomyPlan normalEconomy=null;
             AiEconomyPlan ComposeEconomy()
             {
                 compositionAssessment=composition.Assess(observation,profile,nativeProfile,budget.Capture(),ScoutBudget,
-                    observation.Buildings.Where(b=>launches.ContainsProducer(b.Id)).Select(b=>b.Id),usefulScoutDemand:usefulScout);
+                    observation.Buildings.Where(b=>launches.ContainsProducer(b.Id)).Select(b=>b.Id),usefulScoutDemand:usefulScout,massAirThreat:massAir,relayGroundSupport:relayGroundSupport);
                 normalEconomy=new AiEconomyPlanner(roster).Plan(observation,profile,demand,nativeProfile,budget.Available,
                     productionKind:doctrine.Ready?doctrine.GroundProductionKind(observation,nativeProfile):compositionAssessment.Candidates.LastOrDefault()?.Action.UnitKind??PlayableEntityKind.Tank);
                 return new AiEconomyPlan(normalEconomy.Candidates.Where(c=>c.Policy!="production").Concat(compositionAssessment.Candidates).Concat(
@@ -761,7 +1131,7 @@ namespace Spacewars.Runtime
             EconomyPlan=ComposeEconomy();
             var armyResearchPolicy=AiArmyResearchPolicy.Observe(observation,profile,nativeConfig.Difficulty,composition.Capture().Phase,arbiter);
             bool technologyEmergency=TechnologyEmergency(observation);
-            TechnologyPlan=technology.Plan(observation,profile,nativeProfile,budget.Capture(),technologyEmergency,roster,technologyFunding.Preferred(arbiter),armyResearchPolicy,doctrine);
+            TechnologyPlan=technology.PlanWithProduction(observation,profile,nativeProfile,budget.Capture(),technologyEmergency,roster,technologyFunding.Preferred(arbiter),armyResearchPolicy,doctrine,usefulProductionPending:compositionAssessment.Candidates.Any(c=>c.Policy=="production"&&c.Legal),massAirThreat:massAir);
 #if UNITY_INCLUDE_TESTS
             if(FundingReadbacksEnabledFor("TechnologyPlanBeforeFunding"))FundingReadback("TechnologyPlanBeforeFunding",new{Emergency=technologyEmergency,Reason=TechnologyPlan.Reason,Action=TechnologyPlan.Action==null?null:new{TechnologyPlan.Action.Kind,TechnologyPlan.Action.ResearchKind,TechnologyPlan.Action.SiteId,TechnologyPlan.Action.SlotId},Goal=TechnologyPlan.FundingGoal==null?null:new{TechnologyPlan.FundingGoal.Research,TechnologyPlan.FundingGoal.Utility},Branches=TechnologyPlan.Branches.Select(b=>new{Research=b.Descriptor.Kind,Progress=b.Progress.ToString(),b.Utility,b.MissingCost,b.WaitingSeconds,b.AffectedValue}).ToArray()});
 #endif
@@ -779,17 +1149,38 @@ namespace Spacewars.Runtime
             int firstIncomeCost=expansionFinancial.BootstrapActive(arbiter)?
                 openingExecutor.HomeEconomyQuote(observation,profile,nativeProfile,normalEconomy.Candidates):
                 expansionFinancial.PriorityCost(observation,profile,nativeProfile,arbiter,expansion,previousFinancial,financialAllowed);
+            if(firstIncomeCost==0&&homeEconomyReady&&!initialGrowthCommitmentPending)
+                firstIncomeCost=expansionFinancial.FundedGrowthCost(observation,profile,nativeProfile,arbiter,expansion,previousFinancial,financialAllowed,budget.Available+(technologyFunding.HasAcceptedScience(budget,arbiter)?0:budget.Capture().Reserved.Where(AiTechnologyFunding.IsFunding).Sum(e=>(long)e.Amount)));
+            var doctrineCore=!initialGrowthCommitmentPending&&!missingScout&&!threatened&&!urgentRepair&&!TechnologyPlan.PriorityResearch?
+                doctrine.MissingCoreProduction(observation,profile,nativeProfile,budget.Capture()):null;
+            if(doctrineCore!=null&&!openingExecutor.AllowsNormalProductionFunding(observation,profile,nativeProfile,doctrineCore,initialGrowthCommitmentPending))doctrineCore=null;
+            int doctrineCoreProtection=doctrineCore==null?0:PlayableUnitRules.Cost(profile,doctrineCore.Action.UnitKind);
+            int continuationProtection=openingExecutor.HasContinuationCommitment(nativeProfile)?openingExecutor.HomeEconomyFundingProtection(observation,profile,nativeProfile,budget.Capture()):0;
+            var continuationActions=continuationProtection>0?new HashSet<string>(openingExecutor.MacroRequests(observation,profile,nativeProfile,Array.Empty<AiEconomyCandidate>())
+                .Where(c=>c.Policy=="economy"&&(c.Legal||c.Reason=="insufficient credits")).Select(c=>AiEconomyAdmission.IntentId(c.Policy,c.Action)),StringComparer.Ordinal):null;
+            bool outpostProspect=expansion.AllowOutposts&&expansionFinancial.HasOutpostProspect(observation,profile,nativeProfile,arbiter,expansion);
+            bool preferTwoProducers=openingExecutor.PrefersTwoProducers(nativeProfile,outpostProspect);
+            bool oneProducer=AiEconomicInvestmentPlanner.ProducerCount(observation)==1;
+            bool hasScience=AiEconomicInvestmentPlanner.HasScience(observation);
+            var doctrineProducers=doctrine.ProducerRequests(observation,profile).Where(candidate=>
+                !AiProfile.UsesExpertPolicy(Difficulty)||AiEconomicInvestmentPlanner.MixRejection(observation,profile,nativeProfile,
+                    candidate.Action.BuildingKind,candidate.Action.SiteId)==null).ToArray();
+            bool prioritizeSecond=preferTwoProducers&&oneProducer&&!hasScience&&!TechnologyPlan.PriorityResearch;
+            bool scienceBranch=!AiProfile.UsesExpertPolicy(Difficulty)&&!preferTwoProducers&&oneProducer&&!outpostProspect;
             var investment=AiEconomicInvestmentPlanner.Plan(observation,profile,nativeProfile,scaling,homeEconomyReady,threatened||urgentRepair,
-                AiEconomicInvestmentPlanner.Demand(budget),initialGrowthCommitmentPending,scoutProtection,budget.Available,doctrine.Ready?doctrine.GroundProductionKind(observation,nativeProfile):PlayableEntityKind.Tank);
+                AiEconomicInvestmentPlanner.Demand(budget),initialGrowthCommitmentPending,checked(scoutProtection+doctrineCoreProtection),budget.Available+(technologyFunding.HasAcceptedScience(budget,arbiter)?0:budget.Capture().Reserved.Where(AiTechnologyFunding.IsFunding).Sum(e=>(long)e.Amount)),doctrine.Ready?doctrine.GroundProductionKind(observation,nativeProfile):PlayableEntityKind.Tank,preferTwoProducers,outpostProspect);
             bool missingUsefulScience=TechnologyPlan.FundingGoal!=null&&!initialGrowthCommitmentPending&&
                 !observation.Buildings.Any(b=>b.Owner==observation.Owner&&b.Health>0&&b.Kind==PlayableBuildingKind.ScientificCenter);
             // The first safe income capture supplies growth without consuming home
             // slots. Useful missing science can precede another discretionary factory.
-            if(doctrine.ProducerRequests(observation,profile).Any(c=>c.Legal||c.Reason=="insufficient credits")||openingExecutor.HasContinuationCommitment(nativeProfile)||!openingExecutor.Capture().InitialForceFulfilled||openingExecutor.Air&& !observation.Buildings.Any(b=>b.Owner==observation.Owner&&b.Kind==PlayableBuildingKind.Factory)||firstIncomeCost>0||missingUsefulScience&&investment?.Candidate.Action.BuildingKind==PlayableBuildingKind.Factory)investment=null;
+            if(doctrineProducers.Any(c=>c.Legal||c.Reason=="insufficient credits")||openingExecutor.HasContinuationCommitment(nativeProfile)||!openingExecutor.Capture().InitialForceFulfilled||openingExecutor.Air&& !observation.Buildings.Any(b=>b.Owner==observation.Owner&&b.Kind==PlayableBuildingKind.Factory)||firstIncomeCost>0||
+                investment?.Candidate.Action.BuildingKind==PlayableBuildingKind.Factory&&(missingUsefulScience&&!prioritizeSecond||
+                    scienceBranch&&!observation.Buildings.Any(b=>b.Owner==observation.Owner&&b.ScientificCenterUpgraded&&b.Health>0&&b.Phase==ConstructionPhase.Ready)))investment=null;
             AiEconomicInvestmentPlanner.RememberDemand(observation,profile,budget,investment);
             bool preserveScience=technologyFunding.HasAcceptedScience(budget,arbiter);
             bool priorityResearch=TechnologyPlan.PriorityResearch;
-            bool deferTechnology=investment!=null&&!preserveScience&&!priorityResearch;
+            bool deferTechnology=!preserveScience&&!priorityResearch&&(prioritizeSecond||investment!=null&&
+                (investment.Candidate.Action.BuildingKind==PlayableBuildingKind.Factory||!missingUsefulScience));
             int protectedFunds=0;
 #if UNITY_INCLUDE_TESTS
             int productiveCycleReadback=0,initialForceProtectionReadback=0;
@@ -804,7 +1195,7 @@ namespace Spacewars.Runtime
                 var withoutOwnSavings=new AiBudgetState(held.OwnerId,held.Generation,held.Liquid,held.SafetyReserve,held.PaidTotal,
                     held.Reserved.Where(e=>!AiTechnologyFunding.IsFunding(e)),held.Unpaid,held.Paid,held.ReservationLifetimeTicks,held.AdmittedDecision,held.AdmittedAction,held.RepairPaidTotal);
                 var usefulCycle=composition.Assess(observation,profile,nativeProfile,withoutOwnSavings,ScoutBudget,
-                    observation.Buildings.Where(b=>launches.ContainsProducer(b.Id)).Select(b=>b.Id),usefulScoutDemand:usefulScout);
+                    observation.Buildings.Where(b=>launches.ContainsProducer(b.Id)).Select(b=>b.Id),usefulScoutDemand:usefulScout,massAirThreat:massAir);
                 int productiveCycle=usefulCycle.Candidates.Where(c=>c.Legal&&c.Policy=="production"&&PlayableUnitRules.ProductionKind(c.Action.Kind).HasValue).Select(c=>PlayableUnitRules.Cost(profile,c.Action.UnitKind)).DefaultIfEmpty(0).Min();
 #if UNITY_INCLUDE_TESTS
                 productiveCycleReadback=productiveCycle;
@@ -812,8 +1203,8 @@ namespace Spacewars.Runtime
                 protectedFunds=Math.Max(protectedFunds,productiveCycle);
             }
             int initialForceProtection=openingExecutor.InitialForceFundingProtection(observation,profile,nativeProfile,held);
-            protectedFunds=Math.Max(protectedFunds,checked(initialForceProtection+openingExecutor.HomeEconomyFundingProtection(observation,profile,nativeProfile,held)));
-            protectedFunds=Math.Max(protectedFunds,doctrine.ProducerRequests(observation,profile).Where(c=>c.Legal||c.Reason=="insufficient credits").Select(c=>TerritoryRules.Cost(profile,c.Action.BuildingKind)).DefaultIfEmpty(0).Min());
+            int openingProtection=openingExecutor.HomeEconomyFundingProtection(observation,profile,nativeProfile,held,out int refineryQuote);
+            protectedFunds=Math.Max(protectedFunds,doctrineProducers.Where(c=>c.Legal||c.Reason=="insufficient credits").Select(c=>TerritoryRules.Cost(profile,c.Action.BuildingKind)).DefaultIfEmpty(0).Min());
 #if UNITY_INCLUDE_TESTS
             initialForceProtectionReadback=initialForceProtection;
 #endif
@@ -822,10 +1213,22 @@ namespace Spacewars.Runtime
 #endif
             // Position development competes with discretionary growth quotes while
             // retaining opening, scout and existing paid/startup ledger protections.
+            protectedFunds=Math.Max(protectedFunds,doctrineCoreProtection);
+            int commonProtection=protectedFunds;
+            protectedFunds=Math.Max(commonProtection,checked(initialForceProtection+openingProtection));
             int positionProtectedFunds=checked(protectedFunds+scoutProtection);
-            if(!priorityResearch&&(scaling.CanScale||scaling.ScalingReason=="factory startup fund unavailable"))protectedFunds=checked(protectedFunds+(int)scaling.StartupFund);
-            if(investment!=null&&!preserveScience&&!priorityResearch)protectedFunds=Math.Max(protectedFunds,investment.Credits);
-            protectedFunds=checked(protectedFunds+scoutProtection);
+            int startupProtectionQuote=!priorityResearch&&(scaling.CanScale||scaling.ScalingReason=="factory startup fund unavailable")?(int)scaling.StartupFund:0;
+            int investmentProtection=investment!=null&&!preserveScience&&!priorityResearch?investment.Credits:0;
+            int ProtectGrowth(int openingQuote)
+            {
+                int openingAndArmy=checked(initialForceProtection+openingQuote);
+                int withStartup=checked(Math.Max(commonProtection,openingAndArmy)+startupProtectionQuote);
+                return checked(Math.Max(withStartup,investmentProtection)+scoutProtection);
+            }
+            protectedFunds=ProtectGrowth(openingProtection);
+            // These two options buy the same missing opening income. Release
+            // only the competing unaccepted Refinery quote for the Mine bid.
+            int earlyMineProtection=ProtectGrowth(openingProtection-refineryQuote);
             // A local growth proposal is not exclusive ownership of the entire
             // development budget. Safe capture keeps its ordinary ledger admission.
 #if UNITY_INCLUDE_TESTS
@@ -835,15 +1238,32 @@ namespace Spacewars.Runtime
                 ActorClaims=new{Army=armies.Capture().Armies.SelectMany(a=>a.Members).Distinct().OrderBy(id=>id).ToArray(),Pending=pendingItems.SelectMany(i=>i.Action.EntityIds).Distinct().OrderBy(id=>id).ToArray()},
                 Explorers=observation.Entities.Where(e=>e.Owner==observation.Owner&&e.Kind==PlayableEntityKind.Explorer).Select(e=>new{e.Id,e.Health,e.Moving,e.Position,e.CurrentOrder,e.NavigationOutcome}).ToArray()});
 #endif
-            var positionChoices=AiPositionDevelopmentPlanner.Plan(observation,profile,nativeProfile,opening.WithPhase(openingExecutor.Capture().Phase),knowledge.Capture(),true,openingExecutor.Air);
+            var positionKnowledge=knowledge.Capture();
+            var positionPhase=openingExecutor.Capture().Phase;
+            bool productiveConstruction=normalEconomy.Candidates.Any(c=>c.Policy=="economy"&&c.Action.Kind==PlayableCommandKind.BuildAt&&
+                (c.Action.BuildingKind==PlayableBuildingKind.Refinery||c.Action.BuildingKind==PlayableBuildingKind.Factory||c.Action.BuildingKind==PlayableBuildingKind.Hangar)&&
+                (c.Legal||c.Reason=="insufficient credits"));
+            bool discretionaryDefense=firstIncomeCost==0&&continuationProtection==0&&!urgentRepair&&!essentialScale&&
+                !priorityResearch&&investment==null&&!productiveConstruction&&!initialGrowthCommitmentPending&&
+                !openingExecutor.MissingEssentialEconomy(observation,nativeProfile);
+            var positionChoices=AiPositionDevelopmentPlanner.Plan(observation,profile,nativeProfile,opening.WithPhase(positionPhase),
+                positionKnowledge,true,openingExecutor.Air,pendingItems.Select(item=>item.Action).ToArray(),nativeConfig.Difficulty);
             var positionSaving=AiPositionDevelopmentFunding.Quote(observation,profile,nativeProfile,arbiter,
-                positionChoices,positionProtectedFunds,!urgentRepair&&!openingExecutor.MissingEssentialEconomy(observation,nativeProfile)&&
+                positionChoices.Where(c=>c.Action.Kind==PlayableCommandKind.UpgradeRefinery).ToArray(),positionProtectedFunds,
+                continuationProtection==0&&!urgentRepair&&!openingExecutor.MissingEssentialEconomy(observation,nativeProfile)&&
                 !pendingItems.Any(p=>p.PolicyName=="economy")&&!priorityResearch&&firstIncomeCost==0);
             int positionPrice=positionSaving?.Credits??0;
+            int discretionaryProtection=Math.Max(continuationProtection,Math.Max(doctrineCoreProtection,positionSaving!=null?checked(positionProtectedFunds+positionPrice):0));
+            int? discretionaryFundingGuard=discretionaryProtection>0?(int?)discretionaryProtection:null;
             // Reconcile only unaccepted discretionary research through its existing
             // allocator; accepted science, invoices and startup reservations stay owned.
             technologyFunding.Observe(observation,profile,nativeProfile,budget,arbiter,TechnologyPlan,CanFundTechnology(observation,urgentRepair,essentialScale&&!priorityResearch&&!missingUsefulScience)&&!deferTechnology,protectedFunds,Math.Max(firstIncomeCost,positionPrice));
-            if(positionSaving!=null)protectedFunds=Math.Max(protectedFunds,checked(positionProtectedFunds+positionPrice));
+            if(positionSaving!=null)
+            {
+                int positionProtection=checked(positionProtectedFunds+positionPrice);
+                protectedFunds=Math.Max(protectedFunds,positionProtection);
+                earlyMineProtection=Math.Max(earlyMineProtection,positionProtection);
+            }
 #if UNITY_INCLUDE_TESTS
             if(FundingReadbacksEnabledFor("TechnologyAllocation"))FundingReadback("TechnologyAllocation",new{ProtectedFunds=protectedFunds,MissingScout=missingScout,UrgentRepair=urgentRepair,EssentialScale=essentialScale,ScalingReason=scaling.ScalingReason,Startup=scaling.StartupFund,Ledger=budget.Capture().Reserved.Where(e=>AiTechnologyFunding.IsFunding(e)).Select(e=>new{e.Id,e.Amount,e.CreatedTick,e.ExpiresTick}).ToArray()});
 #endif
@@ -855,6 +1275,17 @@ namespace Spacewars.Runtime
             // funded. Existing goals keep their original clocks and tombstones.
             bool incomeFundingAllowed=financialAllowed&&(!initialGrowthCommitmentPending||budget.Available>protectedFunds);
             expansionFinancial.Observe(observation,profile,nativeProfile,openingExecutor,budget,arbiter,expansion,previousFinancial,protectedFunds,incomeFundingAllowed);
+            if(reinforcement)
+            {
+                var admitted=Propose(AiOrbitalPolicy.Policy,orbitalAction,()=>{},_=>{},1,protectedFunds);
+                if(admitted==null&&orbitalAction.EntityIds.Count>0)
+                {
+                    var fallback=AiOrbitalPolicy.Plan(observation,profile,nativeProfile,knowledge.Capture(),doctrine.Personality,records,
+                        opening.SourceIdentity,allowLinkedReinforcement:false);
+                    if(fallback?.TargetId==OrbitalAbilities.Reinforcement)
+                        Propose(AiOrbitalPolicy.Policy,fallback,()=>{},_=>{},1,protectedFunds);
+                }
+            }
             int financialSite=expansionFinancial.ActiveSite(arbiter);
             bool financialReady=expansionFinancial.Ready(profile,budget,arbiter,observation.Tick);
             int preparationScoutSite=financialAllowed&&financialSite!=0?
@@ -870,19 +1301,20 @@ namespace Spacewars.Runtime
                 PreviousFinancial=previousFinancial,BeforeFinanceDetach=beforeFinanceDetach,AfterTechnologyAllocation=afterTechnologyAllocation,AfterFinancialAllocation=budget.Capture()});
 #endif
             EconomyPlan=ComposeEconomy(); // Real ledger after allocation, never the preflight band.
-            TechnologyPlan=technology.Plan(observation,profile,nativeProfile,budget.Capture(),TechnologyEmergency(observation),roster,technologyFunding.Preferred(arbiter),armyResearchPolicy,doctrine);
+            TechnologyPlan=technology.PlanWithProduction(observation,profile,nativeProfile,budget.Capture(),TechnologyEmergency(observation),roster,technologyFunding.Preferred(arbiter),armyResearchPolicy,doctrine,usefulProductionPending:compositionAssessment.Candidates.Any(c=>c.Policy=="production"&&c.Legal),massAirThreat:massAir);
 #if UNITY_INCLUDE_TESTS
             if(FundingReadbacksEnabledFor("TechnologyPlanAfterFunding"))FundingReadback("TechnologyPlanAfterFunding",new{Reason=TechnologyPlan.Reason,Action=TechnologyPlan.Action==null?null:new{TechnologyPlan.Action.Kind,TechnologyPlan.Action.ResearchKind},Goal=TechnologyPlan.FundingGoal==null?null:new{TechnologyPlan.FundingGoal.Research,TechnologyPlan.FundingGoal.Utility},Branches=TechnologyPlan.Branches.Select(b=>new{Research=b.Descriptor.Kind,Progress=b.Progress.ToString(),b.Utility,b.MissingCost,b.WaitingSeconds,b.AffectedValue}).ToArray()});
 #endif
-            if(deferTechnology)TechnologyPlan=new AiTechnologyPlan(TechnologyPlan.Branches.ToArray(),null,null,investment.Reason);
-            EconomyPlan=new AiEconomyPlan(EconomyPlan.Candidates.Concat(new AiEconomyPlanner(roster).InfrastructureRequests(observation,profile,TechnologyPlan.Infrastructure)),EconomyPlan.ExpansionSiteIds,EconomyPlan.ExpansionReason,EconomyPlan.Capacity);
-            EconomyPlan=new AiEconomyPlan(openingExecutor.MacroRequests(observation,profile,nativeProfile,EconomyPlan.Candidates,initialGrowthCommitmentPending,doctrine.ProducerRequests(observation,profile)),EconomyPlan.ExpansionSiteIds,EconomyPlan.ExpansionReason,EconomyPlan.Capacity);
+            if(deferTechnology)TechnologyPlan=new AiTechnologyPlan(TechnologyPlan.Branches.ToArray(),null,null,
+                prioritizeSecond?"midgame production before new science":investment.Reason);
+            EconomyPlan=new AiEconomyPlan(EconomyPlan.Candidates.Concat(new AiEconomyPlanner(roster).InfrastructureRequests(observation,profile,TechnologyPlan.Infrastructure,nativeProfile)),EconomyPlan.ExpansionSiteIds,EconomyPlan.ExpansionReason,EconomyPlan.Capacity);
+            EconomyPlan=new AiEconomyPlan(openingExecutor.MacroRequests(observation,profile,nativeProfile,EconomyPlan.Candidates,initialGrowthCommitmentPending,doctrineProducers),EconomyPlan.ExpansionSiteIds,EconomyPlan.ExpansionReason,EconomyPlan.Capacity);
             if(investment!=null)
             {
                 var investCandidate=investment.Candidate;
                 EconomyPlan=new AiEconomyPlan(new[]{investCandidate}.Concat(EconomyPlan.Candidates.Where(c=>AiEconomyAdmission.IntentId(c.Policy,c.Action)!=AiEconomyAdmission.IntentId(investCandidate.Policy,investCandidate.Action)).Select(c=>
                     c.Policy=="production"&&!investment.AllowsProduction(budget.Available,PlayableUnitRules.Cost(profile,c.Action.UnitKind),launches.ReservationFor(c.Action)!=null,
-                        missingScout&&c.Action.UnitKind==PlayableEntityKind.Explorer)?
+                        missingScout&&c.Action.UnitKind==PlayableEntityKind.Explorer||doctrineCore!=null&&c.Action.UnitKind==doctrineCore.Action.UnitKind)?
                     new AiEconomyCandidate(c.Policy,c.Action,c.Reason??investment.Reason,c.Priority):c)),EconomyPlan.ExpansionSiteIds,EconomyPlan.ExpansionReason,EconomyPlan.Capacity);
             }
             bool FreshActor(int id)
@@ -896,12 +1328,15 @@ namespace Spacewars.Runtime
                 return armies.ArmyFor(id)==0&&!pendingItems.Any(i=>i.Action.EntityIds.Contains(id));
 #endif
             }
-            bool FreshFinancialActor(int id)=>FreshActor(id)||
-                preparationScoutSite>0&&scoutPlanner.IsPreparationActor(armies,preparationScoutSite,id)&&!pendingItems.Any(i=>i.Action.EntityIds.Contains(id));
+            bool OpeningIncomeActor(int id)=>!openingExecutor.EarlyGroundPending||openingExecutor.GroundScout==id;
+            bool FreshFinancialActor(int id)=>OpeningIncomeActor(id)&&(FreshActor(id)||
+                preparationScoutSite>0&&scoutPlanner.IsPreparationActor(armies,preparationScoutSite,id)&&!pendingItems.Any(i=>i.Action.EntityIds.Contains(id)));
             bool AdmissibleNewSite(int id)=>(teamAssignment==null||!teamAssignment.DeniedSites.Contains(id))&&!expansionFinancial.IsExpiredFingerprint(observation.Sites.FirstOrDefault(s=>s.Site.Id==id),arbiter);
             expansion.PreferRemote=expansionFinancial.RemotePreference(observation,nativeProfile,arbiter);
             expansion.LocalSiteId=expansionFinancial.LocalSite(observation,profile,nativeProfile,arbiter,expansion);
             PlayableAiAction expansionAction=null;
+            bool earlyMineProposed=false;
+            bool earlyMineCommitted=false;
             if(!threatened&&openingExecutor.AllowsExpansion)
             {
                 if(expansion.Capture().SiteId!=0)
@@ -909,6 +1344,8 @@ namespace Spacewars.Runtime
                     // A live owner commitment continues through the ordinary planner even
                     // when a separate financial memo is no longer ready.
                     var continuing=expansion.Fork();
+                    earlyMineCommitted=expansionFinancial.BootstrapActive(arbiter)&&observation.Sites.Any(s=>
+                        s.Site.Id==continuing.Capture().SiteId&&s.Site.Kind==PlayableBuildingKind.Mine);
                     expansionAction=continuing.TryPlan(observation,profile,nativeProfile,0,FreshActor,AdmissibleNewSite);
                     Propose("expansion",expansionAction,()=>expansion=continuing,continuing.ObserveReceipt,1);
                 }
@@ -922,6 +1359,16 @@ namespace Spacewars.Runtime
                         var intent=Propose("expansion",candidate,()=>expansion=financial,financial.ObserveReceipt,1);
                         if(intent!=null){expansionAction=candidate;financeIntentAdded=true;}
                     }
+                    if(!financeIntentAdded&&financialAllowed&&openingExecutor.PreferOpeningMine(observation,nativeProfile))
+                    {
+                        // Spend only after the first wave and existing growth/production
+                        // protections. Reuse the local, safe, profitable Mine admission.
+                        var openingMine=expansion.Fork();
+                        var candidate=openingMine.TryPlan(observation,profile,nativeProfile,0,
+                            id=>OpeningIncomeActor(id)&&FreshActor(id),AdmissibleNewSite,earlyMine:true);
+                        if(Propose("expansion",candidate,()=>expansion=openingMine,openingMine.ObserveReceipt,1,protectedFunds)!=null)
+                        {expansionAction=candidate;financeIntentAdded=true;}
+                    }
                     if(!financeIntentAdded)
                     {
                         // The one fallback cannot reuse the active financial site or an
@@ -929,9 +1376,21 @@ namespace Spacewars.Runtime
                         // after every hold and the higher protected bands.
                         bool AdmissibleFallbackSite(int id)=>id!=financialSite&&AdmissibleNewSite(id);
                         var ordinary=expansion.Fork();
-                        expansionAction=ordinary.TryPlan(observation,profile,nativeProfile,0,FreshActor,AdmissibleFallbackSite);
+                        expansionAction=ordinary.TryPlan(observation,profile,nativeProfile,0,id=>OpeningIncomeActor(id)&&FreshActor(id),AdmissibleFallbackSite);
                         Propose("expansion",expansionAction,()=>expansion=ordinary,ordinary.ObserveReceipt,1,protectedFunds);
                     }
+                }
+                // A rush has a single income purchase on the critical path
+                // to its first troops. Let the faster home build own that path.
+                else if(financialAllowed&&openingExecutor.RequiredHomeRefineryCount(nativeProfile)>1&&
+                    openingExecutor.OpeningIncomeShortfall(observation,nativeProfile)>held.Unpaid.Count(e=>
+                        e.Action.Kind==PlayableCommandKind.BuildAt&&(e.Action.BuildingKind==PlayableBuildingKind.Refinery||e.Action.BuildingKind==PlayableBuildingKind.Mine))&&
+                    EconomyPlan.Candidates.Any(c=>c.Policy=="economy"&&c.Action.BuildingKind==PlayableBuildingKind.Refinery&&
+                        (c.Legal||c.Reason=="insufficient credits")))
+                {
+                    var early=expansion.Fork();
+                    expansionAction=early.TryPlan(observation,profile,nativeProfile,0,FreshActor,AdmissibleNewSite,earlyMine:true);
+                    earlyMineProposed=Propose("expansion",expansionAction,()=>expansion=early,early.ObserveReceipt,1,earlyMineProtection,openingIncomeAlternative:true)!=null;
                 }
             }
 #if UNITY_INCLUDE_TESTS
@@ -957,28 +1416,94 @@ namespace Spacewars.Runtime
                 PreselectionReadbackOwnerCallsForTests++;
             }
 #endif
-            ProposePositionDevelopment(observation,proposals,positionProtectedFunds,urgentRepair,positionChoices,positionSaving);
-            foreach(var candidate in infrastructure.Plan(observation,profile,nativeProfile,EconomyPlan.Capacity).Where(c=>c.Legal&&(c.Action.Kind!=PlayableCommandKind.SellBuilding||!launches.ContainsProducer(c.Action.EntityIds.Single()))))
-            {if(!Available("infrastructure"))break;var ip=infrastructure.Fork();Propose("infrastructure",ip.Admit(observation,candidate.Action,budget),()=>infrastructure=ip,ip.ObserveReceipt,candidate.Priority,positionSaving!=null&&candidate.Priority==0?(int?)checked(positionProtectedFunds+positionPrice):null);}
+            if(continuationProtection==0)
+                ProposePositionDevelopment(observation,proposals,protectedFunds,urgentRepair,
+                    positionChoices.Where(c=>discretionaryDefense||c.Action.Kind==PlayableCommandKind.UpgradeRefinery).ToArray(),positionSaving);
+            var defenseRetrofit=discretionaryDefense&&!threatened&&positionPhase==PlayableAiOpeningPhase.Complete&&
+                infrastructure.Capture().SiteId==0&&!pendingItems.Any(item=>item.Action.Kind==PlayableCommandKind.BuildAt&&TerritoryRules.Defensive(item.Action.BuildingKind))?
+                AiPositionDevelopmentPlanner.Retrofit(observation,profile,nativeProfile,positionKnowledge,nativeConfig.Difficulty,
+                    Math.Max(0,budget.Available-protectedFunds)):null;
+            IEnumerable<AiEconomyCandidate> infrastructureChoices=infrastructure.Plan(observation,profile,nativeProfile,scaling,
+                financialAllowed?Math.Max(0,budget.Available-protectedFunds):0,
+                doctrine.Ready?doctrine.GroundProductionKind(observation,nativeProfile):PlayableEntityKind.Tank,TechnologyPlan.FundingGoal);
+            if(defenseRetrofit!=null)
+                infrastructureChoices=infrastructureChoices.Append(new AiEconomyCandidate("infrastructure",defenseRetrofit,null,0));
+            foreach(var candidate in infrastructureChoices.Where(c=>c.Legal&&
+                (c.Action.Kind!=PlayableCommandKind.SellBuilding||!launches.ContainsProducer(c.Action.EntityIds.Single()))))
+            {if(!Available("infrastructure"))break;var ip=infrastructure.Fork();Propose("infrastructure",ip.Admit(observation,candidate.Action,budget),()=>infrastructure=ip,ip.ObserveReceipt,candidate.Priority,candidate.Priority==0?discretionaryFundingGuard:null);}
+            var upgrade=financialAllowed&&homeEconomyReady&&openingExecutor.Capture().InitialForceFulfilled&&
+                !initialGrowthCommitmentPending&&!missingScout?
+                AiEconomicInvestmentPlanner.BuildingUpgrade(observation,profile,nativeProfile,
+                    doctrine.Ready?doctrine.GroundProductionKind(observation,nativeProfile):PlayableEntityKind.Tank,
+                    Math.Max(0,budget.Available-protectedFunds),!scienceBranch&&(TechnologyPlan.FundingGoal!=null||TechnologyPlan.Action!=null),prioritizeAirDefense:massAir):null;
+            AiIntent producerUpgrade=null;
+            if(upgrade?.Kind==PlayableCommandKind.UpgradeProducer&&Available("economy"))
+            {
+                var e=economy.Fork();
+                producerUpgrade=Propose("economy",e.Admit(observation,upgrade),()=>economy=e,e.ObserveReceipt,1,protectedFunds);
+            }
             foreach(var candidate in EconomyPlan.Candidates.Where(c=>c.Legal&&Available(c.Policy)&&!expansion.ClaimsSite(c.Action.SiteId)&&!infrastructure.ClaimsSlot(c.Action.SiteId,c.Action.SlotId)))
             {
+                if(candidate.Policy=="production"&&producerUpgrade!=null&&
+                    candidate.Action.EntityIds.SequenceEqual(producerUpgrade.Action.EntityIds))continue;
                 if(positionSaving!=null&&candidate.Policy=="production"&&candidate.Priority<2&&openingExecutor.Capture().InitialForceFulfilled&&launches.ReservationFor(candidate.Action)==null&&
-                    !(missingScout&&candidate.Action.UnitKind==PlayableEntityKind.Explorer)&&
+                    !(missingScout&&candidate.Action.UnitKind==PlayableEntityKind.Explorer||doctrineCore!=null&&candidate.Action.UnitKind==doctrineCore.Action.UnitKind)&&
                     !positionSaving.AllowsProduction(budget.Available,PlayableUnitRules.Cost(profile,candidate.Action.UnitKind)))continue;
                 if(candidate.Policy=="economy")
-                {var e=economy.Fork();Propose("economy",e.Admit(observation,candidate.Action),()=>economy=e,e.ObserveReceipt,candidate.Priority,
-                    positionSaving!=null?(int?)checked(positionProtectedFunds+positionPrice):null);}
+                {
+                    bool refinery=candidate.Action.Kind==PlayableCommandKind.BuildAt&&candidate.Action.BuildingKind==PlayableBuildingKind.Refinery;
+                    if(refinery&&earlyMineCommitted&&openingExecutor.OpeningIncomeShortfall(observation,nativeProfile)==1)continue;
+                    var e=economy.Fork();
+                    Propose("economy",e.Admit(observation,candidate.Action),()=>economy=e,e.ObserveReceipt,candidate.Priority,
+                        continuationActions!=null&&continuationActions.Contains(AiEconomyAdmission.IntentId(candidate.Policy,candidate.Action))?null:discretionaryFundingGuard,
+                        openingIncomeAlternative:refinery&&earlyMineProposed);
+                }
                 else
                 {var pr=production.Fork();Propose("production",pr.Admit(observation,candidate.Action),()=>production=pr,pr.ObserveReceipt,launches.ReservationFor(candidate.Action)!=null?1:candidate.Priority);}
+            }
+            if (!threatened && !urgentRepair && Available("production") && openingExecutor.Capture().InitialForceFulfilled &&
+                budget.Available - protectedFunds >= profile.CerberusCreditCost)
+            {
+                var cerberus = PlanCerberusProduction(observation);
+                if (cerberus != null)
+                {
+                    var planner = production.Fork();
+                    Propose("production", planner.Admit(observation, cerberus), () => production = planner,
+                        planner.ObserveReceipt, 1, protectedFunds);
+                }
+            }
+            var repairSupport = PlanSkatSupport(observation, Math.Max(0, budget.Available - protectedFunds));
+            if (repairSupport?.Kind == PlayableCommandKind.BuildAt && Available("economy"))
+            {
+                var planner = economy.Fork();
+                Propose("economy", planner.Admit(observation, repairSupport), () => economy = planner,
+                    planner.ObserveReceipt, 0, protectedFunds + profile.SkatCreditCost);
+            }
+            else if (repairSupport?.Kind == PlayableCommandKind.QueueSkat && Available("production"))
+            {
+                var planner = production.Fork();
+                Propose("production", planner.Admit(observation, repairSupport), () => production = planner,
+                    planner.ObserveReceipt, 1, protectedFunds);
             }
             var sc=scout.Fork();
             // Detached candidates compete through the arbiter's shared recipient
             // claims; an unselected expansion does not own its proposed actor.
-            var scoutAction=sc.Admit(observation,scoutPlanner.Plan(observation,knowledge.Capture(),armies,profile,nativeProfile,ScoutBudget,preparationScoutSite));
-            Propose("scout",scoutAction,()=>{scoutPlanner.Commit(observation,scoutAction,armies,preparationScoutSite);scout=sc;},sc.ObserveReceipt,relayMap?1:0);
+            committedRelayActors.UnionWith(AiRelayObjectives.CaptureGuards(observation,profile));
+            var scoutAction=sc.Admit(observation,scoutPlanner.Plan(observation,knowledge.Capture(),armies,profile,nativeProfile,ScoutBudget,preparationScoutSite,reservedActors:committedRelayActors));
+            bool scoutDisengagement=scoutAction!=null&&scoutAction.Kind!=PlayableCommandKind.Attack&&
+                observation.Entities.Any(u=>scoutAction.EntityIds.Contains(u.Id)&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack&&armies.IsScoutMember(u.Id));
+            Propose("scout",scoutAction,()=>{scoutPlanner.Commit(observation,scoutAction,armies,preparationScoutSite,nativeProfile);scout=sc;},
+                sc.ObserveReceipt,scoutDisengagement?2:relayMap?1:0);
             // The pure technology plan applies the same productive prerequisite to
             // science infrastructure AND QueueResearch; opening/scout/ledger bands remain.
-            var re=research.Fork();Propose("research",re.Admit(observation,TechnologyPlan.Action),()=>research=re,re.ObserveReceipt,0,positionSaving!=null&&!priorityResearch&&!technologyFunding.HasAcceptedScience(budget,arbiter)?(int?)checked(positionProtectedFunds+positionPrice):null);
+            int researchProtection=Math.Max(priorityResearch?0:continuationProtection,Math.Max(doctrineCoreProtection,positionSaving!=null&&!priorityResearch&&!technologyFunding.HasAcceptedScience(budget,arbiter)?checked(positionProtectedFunds+positionPrice):0));
+            var researchAction=TechnologyPlan.Action;
+            if(upgrade?.Kind==PlayableCommandKind.QueueResearch&&(researchAction==null||(scienceBranch||massAir)&&!priorityResearch))
+            {
+                researchAction=upgrade;
+                researchProtection=Math.Max(researchProtection,protectedFunds);
+            }
+            var re=research.Fork();Propose("research",re.Admit(observation,researchAction),()=>research=re,re.ObserveReceipt,0,researchProtection>0?(int?)researchProtection:null);
 
             var microPlan=combatMicro.Plan(observation,profile,nativeProfile,nativeConfig.Difficulty,armies);
             if(microPlan!=null)Propose(AiCombatMicroPolicy.Policy,microPlan.Action,()=>combatMicro.Commit(microPlan,Generation,observation.Tick),combatMicro.Receipt,microPlan.Survival?2:0);
@@ -1028,7 +1553,9 @@ namespace Spacewars.Runtime
                 if(expansionFinancial.ShouldConsume(intent,budget,arbiter,profile))intent=expansionFinancial.Consume(intent,budget,arbiter,profile);
                 bool scoutReusesBuiltExpansion=intent.Policy=="scout"&&intent.Action.Kind==PlayableCommandKind.Move&&intent.Action.EntityIds.Any(expansion.AllowsScoutReuse);
                 if(intent.Policy!="expansion"&&!scoutReusesBuiltExpansion&&intent.Action.EntityIds.Any(expansion.ClaimsActor)){expansion.Release("survival preemption");expansion.ReconcileFunding(budget,profile,authorityTick);}
-                intent.Commit();var local=intent.Action;
+                bool quickReturn=intent.Policy==AiCombatMicroPolicy.Policy&&
+                    combatMicro.IsQuickRecovery(observation,profile,nativeProfile,Difficulty,intent.Action);
+                intent.Commit();
                 var identity=new AiReceiptIdentity(Generation,OwnerId,decision,++actionOrdinal);
                 bool fundedTechnology=intent.ReservationId!=null&&intent.ReservationId.StartsWith(AiTechnologyFunding.Purpose+":",StringComparison.Ordinal);
                 if(fundedTechnology)
@@ -1041,12 +1568,37 @@ namespace Spacewars.Runtime
                         "terminal receipt / invalid target / expiry",intent.Claims,BudgetTerms,identity)))throw new InvalidOperationException("Selected intent exceeds owner budget.");
                 }
                 if(intent.Policy=="expansion")expansion.BeginFunding(intent,budget,profile);else launches.Begin(intent,identity,snapshot.Tick,budget,profile,nativeProfile);
-                var action=Reidentify(local,allocateAction!=null?allocateAction():checked(decision*actionLimit+actionOrdinal));
-                var item=new Pending{Observation=observation,ObservationIdentity=observation.Identity,ObservationTick=observation.Tick,SnapshotSequence=observation.SnapshotSequence,Action=action,DueTick=snapshot.Tick+CombatReaction(action,snapshot.Tick,intent.ExpiresTick),HumanSequence=humanSequence,Receipt=intent.Feedback,Scout=intent.Policy=="scout",PolicyName=intent.Policy,Ordinal=decision,Identity=identity,LocalActionId=local.ActionId,Intent=intent};
-                pendingItems.Add(item);
-                Emit(item,PlayableAiDeliveryStatus.Scheduled,0,null,null,null,null,"Authority scheduled.");
-                Record(new PlayableAiTraceRecord(observation.Identity,action.ActionId,item.DueTick,0,0,PlayableAiDeliveryStatus.Scheduled,null,item.PolicyName==AiArmyPlanner.Policy?armyPlanner.Capture().Reason:"Authority scheduled.",OwnerId,action.SourceIdentity,identity,item.PolicyName,action.Kind));
+                EnqueueIntent(intent,identity,observation,humanSequence,quickReturn);
             }
+            Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);
+        }
+        private void EnqueueIntent(AiIntent intent,AiReceiptIdentity identity,PlayableAiObservation observation,long humanSequence,bool quickReturn)
+        {
+            var local=intent.Action;
+            var action=Reidentify(local,allocateAction!=null?allocateAction():checked(identity.DecisionOrdinal*actionLimit+identity.ActionOrdinal));
+            var item=new Pending{Observation=observation,ObservationIdentity=observation.Identity,ObservationTick=observation.Tick,SnapshotSequence=observation.SnapshotSequence,Action=action,DueTick=observation.Tick+(quickReturn?ObservationDelayTicks:CombatReaction(action,observation.Tick,intent.ExpiresTick)),HumanSequence=humanSequence,Receipt=intent.Feedback,Scout=intent.Policy=="scout",PolicyName=intent.Policy,Ordinal=identity.DecisionOrdinal,Identity=identity,LocalActionId=local.ActionId,Intent=intent};
+            pendingItems.Add(item);
+            Emit(item,PlayableAiDeliveryStatus.Scheduled,0,null,null,null,null,"Authority scheduled.");
+            Record(new PlayableAiTraceRecord(observation.Identity,action.ActionId,item.DueTick,0,0,PlayableAiDeliveryStatus.Scheduled,null,AiArmyPlanner.IsArmyPolicy(item.PolicyName)?(item.PolicyName==AiArmyPlanner.FlankPolicy?flankPlanner:armyPlanner).Capture().Reason:"Authority scheduled.",OwnerId,action.SourceIdentity,identity,item.PolicyName,action.Kind));
+        }
+
+        private void TryEarlyCombatMicro(PlayableAiObservation observation,long humanSequence)
+        {
+            if(pendingItems.Count>=actionLimit||pendingItems.Any(item=>item.PolicyName==AiCombatMicroPolicy.Policy))return;
+            var plan=combatMicro.PlanSwitchedReturn(observation,profile,nativeProfile,Difficulty,armies)??
+                combatMicro.PlanEarlyWithdrawal(observation,profile,nativeProfile,Difficulty,armies);
+            if(plan==null||plan.Action.EntityIds.Any(expansion.ClaimsActor))return;
+            var intent=Proposal(AiCombatMicroPolicy.Policy,plan.Action,observation,plan.Survival?2:0);
+            if(intent==null)return;
+            intent.Feedback=combatMicro.Receipt;
+            int free=observation.Population==null?0:Math.Max(0,observation.Population.Capacity-observation.Population.Living-observation.Population.Reserved);
+            if(arbiter.Select(new[]{intent},observation.Tick,observation.Credits,free,1,budget,armies,profile).Count==0)return;
+            var identity=new AiReceiptIdentity(Generation,OwnerId,++ordinal,1);
+            if(!budget.Accept(new AiBudgetEntry(intent.Id,intent.Policy,intent.Action,intent.Credits,intent.Priority,observation.Tick,intent.ExpiresTick,
+                "terminal receipt / invalid target / expiry",intent.Claims,BudgetTerms,identity)))
+                throw new InvalidOperationException("Selected combat return exceeds owner budget.");
+            combatMicro.Commit(plan,Generation,observation.Tick);
+            EnqueueIntent(intent,identity,observation,humanSequence,quickReturn:plan.Phase==AiCombatMicroPhase.Resume);
             Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);
         }
         private bool RecentGroupOrder(PlayableAiObservation o,PlayableEntitySnapshot u)
@@ -1062,31 +1614,63 @@ namespace Spacewars.Runtime
         private static bool Tactical(PlayableAiAction a)=>a.Kind==PlayableCommandKind.Move||a.Kind==PlayableCommandKind.Attack||a.Kind==PlayableCommandKind.AttackMove||a.Kind==PlayableCommandKind.Stop||a.Kind==PlayableCommandKind.Follow;
         private static bool SameOrder(PlayableAiAction a,PlayableEntitySnapshot u,string policy,bool missionApplied,string owner,long generation)
         {
-            var pending=u.Queue?.Pending;
-            bool sameLiveExpansionMove=(policy=="expansion"||policy==AiScoutPlanner.Policy)&&a.PlayerId==owner&&a.Generation==generation&&a.SourceIdentity==PlayableAiOpeningComposition.SourceIdentity&&
-                a.Kind==PlayableCommandKind.Move&&a.SiteId>0&&a.EntityIds.Contains(u.Id)&&u.Queue?.PendingAiRouteViable==true&&
-                pending!=null&&pending.AiActionId>0&&pending.Kind==PlayableCommandKind.Move&&pending.PublicObjectiveId==a.SiteId&&
-                pending.Anchor.HasValue&&pending.Anchor.Value.Position.Equals(a.Target);
-            bool sameLiveAttackMove=(AiArmyPlanner.IsArmyPolicy(policy)&&missionApplied||policy==AiScoutPlanner.Policy)&&a.PlayerId==owner&&a.Generation==generation&&a.Kind==PlayableCommandKind.AttackMove&&a.SiteId>0&&
-                u.Queue?.PendingAiRouteViable==true&&pending!=null&&pending.AiActionId>0&&pending.Kind==PlayableCommandKind.AttackMove&&
-                pending.PublicObjectiveId==a.SiteId&&pending.Anchor.HasValue&&pending.Anchor.Value.Position.Equals(a.Target)&&
-                a.SourceIdentity==PlayableAiOpeningComposition.SourceIdentity;
-            bool sameLiveMissionMove=AiArmyPlanner.IsArmyPolicy(policy)&&missionApplied&&a.PlayerId==owner&&a.Generation==generation&&a.Kind==PlayableCommandKind.Move&&
-                u.Queue?.PendingAiRouteViable==true&&pending!=null&&pending.AiActionId>0&&pending.Kind==PlayableCommandKind.Move&&
-                pending.Anchor.HasValue&&pending.Anchor.Value.Position.Equals(a.Target)&&a.SourceIdentity==PlayableAiOpeningComposition.SourceIdentity;
-            if(sameLiveExpansionMove||sameLiveAttackMove||sameLiveMissionMove)return true;
-            return (u.Queue?.Pending==null&&(u.Queue==null||u.Queue.Deferred.Count==0))&&(a.Kind==PlayableCommandKind.Stop?u.CurrentOrder==null&&!u.Held:
-                u.CurrentOrder!=null&&(a.Kind==PlayableCommandKind.Follow?u.CurrentOrder.Kind==PlayableTacticalOrderKind.Follow&&u.CurrentOrder.TargetId==a.TargetId:
-                a.Kind==PlayableCommandKind.Attack?u.CurrentOrder.Kind==PlayableTacticalOrderKind.Attack&&u.CurrentOrder.TargetId==a.TargetId:
-                u.CurrentOrder.Kind==(a.Kind==PlayableCommandKind.Move?PlayableTacticalOrderKind.Move:PlayableTacticalOrderKind.AttackMove)&&u.CurrentOrder.Destination.Equals(a.Target)));
+            var queue=u.Queue;
+            var current=u.CurrentOrder;
+            if(a.Kind==PlayableCommandKind.Stop)return current==null&&!u.Held&&queue?.Active==null&&
+                queue?.Pending==null&&(queue==null||queue.Deferred.Count==0);
+            if(a.Kind==PlayableCommandKind.Follow)return queue?.Pending==null&&(queue==null||queue.Deferred.Count==0)&&
+                current?.Kind==PlayableTacticalOrderKind.Follow&&current.TargetId==a.TargetId;
+            if(a.PlayerId!=owner||a.Generation!=generation||a.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||
+                !a.EntityIds.Contains(u.Id)||u.Held||u.OrderStamp?.Origin==PlayableOrderOrigin.Human)return false;
+
+            bool Matches(PlayableQueuedOrderSnapshot order)=>order!=null&&order.AiActionId>0&&order.Kind==a.Kind&&
+                (a.Kind==PlayableCommandKind.Attack?a.TargetId>0&&order.VisibleTargetId==a.TargetId:
+                    order.CommandSiteId==a.SiteId&&order.Anchor is NavLocation anchor&&anchor.Position.Equals(a.Target));
+            if(queue?.Pending!=null)
+            {
+                // A new army mission must bind its own command. Plain moves are
+                // also distinct from an objective-bound scout or expansion order.
+                bool canReuse=AiArmyPlanner.IsArmyPolicy(policy)?missionApplied:
+                    policy!=AiScoutPlanner.Policy&&policy!="expansion"||a.SiteId>0;
+                return canReuse&&queue.PendingAiRouteViable&&Matches(queue.Pending);
+            }
+            if(queue?.Deferred.Count>0)return false;
+            if(queue?.Active!=null)
+                return queue.ActiveAiOrderViable&&Matches(queue.Active);
+            // Legacy local commands can execute outside the tactical queue.
+            if(current==null||current.Owner!=u.Owner||current.Generation!=generation)return false;
+            return a.Kind==PlayableCommandKind.Attack?current.Kind==PlayableTacticalOrderKind.Attack&&current.TargetId==a.TargetId:
+                (u.Moving||u.NavigationOutcome is NavigationOutcome.Moving or NavigationOutcome.Waiting)&&
+                current.Kind==(a.Kind==PlayableCommandKind.Move?PlayableTacticalOrderKind.Move:PlayableTacticalOrderKind.AttackMove)&&
+                current.Destination.Equals(a.Target);
         }
+        private PlayableAiAction PlanCerberusProduction(PlayableAiObservation observation)
+        {
+            if (!PlayableResearchRules.UpgradedCenterReady(observation.Buildings, observation.Owner) ||
+                AiEconomyAdmission.CerberusOrderRejection(observation, profile,
+                    pendingItems.Count(item => item.Action.Kind == PlayableCommandKind.QueueCerberus)) != null)
+                return null;
+
+            foreach (var factory in AiProductionDemand.Lines(observation, roster, PlayableEntityKind.Cerberus))
+            {
+                if (factory.SystemsDisabled) continue;
+                var action = new PlayableAiAction(1, observation.OwnerId, observation.ProfileId, observation.ProfileRevision,
+                    observation.Generation, observation.SnapshotSequence, PlayableCommandKind.QueueCerberus,
+                    new[] { factory.Id }, unitKind: PlayableEntityKind.Cerberus,
+                    seed: observation.Seed, sourceIdentity: opening.SourceIdentity);
+                if (AiEconomyAdmission.Reject(observation, profile, action, idleProducer: true, catalog: roster) == null) return action;
+            }
+            return null;
+        }
+
         private int BudgetCost(PlayableAiAction action)
         {
             if(action.Kind==PlayableCommandKind.BuildAt)return TerritoryRules.Cost(profile,action.BuildingKind);
             if(action.Kind==PlayableCommandKind.UpgradeRefinery)return (int)Math.Ceiling(profile.RefineryUpgradeCost);
             if(AiRosterCatalog.IsProduction(action.Kind))
                 return (int)roster.CreditCost(roster.Production(action.Kind).kind,profile);
-            if(action.Kind==PlayableCommandKind.QueueResearch)return (int)Math.Ceiling(AiResearchCatalog.For(action.ResearchKind).Cost(profile));
+            if(action.Kind==PlayableCommandKind.UpgradeProducer)return profile.ProducerUpgradeCost(action.BuildingKind);
+            if(action.Kind==PlayableCommandKind.QueueResearch)return (int)Math.Ceiling(PlayableResearchRules.Cost(profile,action.ResearchKind));
             return 0;
         }
         private bool BudgetReservationValid(AiBudgetEntry entry,PlayableAiObservation o)=>AiExpansionFinancial.IsFunding(entry)?expansionFinancial.Valid(entry,arbiter):AiTechnologyFunding.IsFunding(entry)?technologyFunding.Valid(entry,o,profile,budget,arbiter):AiExpansionPlanner.IsFunding(entry)?expansion.FundTargetValid(entry,o):BudgetTargetValid(entry.Action,o);
@@ -1094,7 +1678,7 @@ namespace Spacewars.Runtime
             action.EntityIds.All(id=>observation.Entities.Any(x=>x.Id==id&&x.Owner==observation.Owner&&x.Health>0)||observation.Buildings.Any(x=>x.Id==id&&x.Owner==observation.Owner&&x.Health>0))&&
             (action.Kind!=PlayableCommandKind.BuildAt||observation.Sites.Any(x=>x.Site.Id==action.SiteId&&(x.Owner==observation.Owner||action.SlotId==0&&x.Claimant==observation.Owner&&x.Progress>=1))&&
                 (action.ParentId==0||observation.Buildings.Any(x=>x.Id==action.ParentId&&x.Owner==observation.Owner&&x.Health>0)));
-        private AiIntent Proposal(string policyName,PlayableAiAction action,PlayableAiObservation o,int priority,bool pendingRepairHandoff=false)
+        private AiIntent Proposal(string policyName,PlayableAiAction action,PlayableAiObservation o,int priority,bool pendingRepairHandoff=false,bool openingIncomeAlternative=false)
         {
             // Incidental capture is not permission for a second unselected remote income build.
             if(policyName=="economy"&&action.Kind==PlayableCommandKind.BuildAt&&action.SlotId==0&&
@@ -1113,7 +1697,14 @@ namespace Spacewars.Runtime
                 var kind=doctrine.GroundProductionKind(o,nativeProfile);
                 action=new PlayableAiAction(action.ActionId,action.PlayerId,action.ProfileId,action.ProfileRevision,action.Generation,action.SnapshotSequence,action.Kind,action.CopyEntityIds(),action.Target,action.SiteId,action.SlotId,action.BuildingKind,action.ParentId,action.TargetId,action.ProductionOrderId,kind,action.ResearchKind,action.Seed,action.SourceIdentity);
             }
-            var actualAdmissionRejection=AiEconomyAdmission.Reject(o,profile,action,catalog:roster);
+            var actualAdmissionRejection=(action.Kind==PlayableCommandKind.BuildAt?
+                action.UnitKind==PlayableEntityKind.Skat&&action.BuildingKind==PlayableBuildingKind.Hangar
+                    ? (SkatHangarOpportunity(o)?null:"Repair support prerequisites changed.")
+                    : AiEconomicInvestmentPlanner.MixRejection(o,profile,nativeProfile,action.BuildingKind,action.SiteId,groundKind:action.UnitKind):null)??
+                AiEconomyAdmission.Reject(o,profile,action,catalog:roster);
+            if (actualAdmissionRejection == null && action.Kind == PlayableCommandKind.QueueIgla)
+                actualAdmissionRejection = AiEconomyAdmission.IglaOrderRejection(o,
+                    pendingItems.Count(item => item.Action.Kind == PlayableCommandKind.QueueIgla));
             if(actualAdmissionRejection!=null)
             {
 #if UNITY_INCLUDE_TESTS
@@ -1124,11 +1715,20 @@ namespace Spacewars.Runtime
             }
             if(AiOrbitalPolicy.IsHack(action)&&!AiOrbitalPolicy.HackValid(o,profile,action.EntityIds.SingleOrDefault()))return null;
             int cost=0,pop=0;var claims=action.EntityIds.Select(id=>(AiOrbitalPolicy.IsHack(action)?"orbital-target:":"recipient:")+id).ToList();
+            if(action.Kind==PlayableCommandKind.UseOrbital&&action.TargetId==OrbitalAbilities.Reinforcement)
+            {
+                cost=o.Orbital.ReinforcementQuote.Credits;
+                pop=o.Orbital.ReinforcementQuote.Population;
+            }
             if(AiRepairUsePolicy.IsAction(o,action))claims.Add("repair-tower:"+action.ParentId);
-            if(action.Kind==PlayableCommandKind.UpgradeRefinery)cost=(int)Math.Ceiling(profile.RefineryUpgradeCost);
+            if(action.Kind==PlayableCommandKind.UpgradeRefinery||action.Kind==PlayableCommandKind.UpgradeProducer)cost=BudgetCost(action);
             // Wire v2 has one pending callback per policy. Alternative candidates compete
             // for that policy as well as their physical recipients/slots.
             claims.Add("policy:"+policyName);
+            if(openingIncomeAlternative)claims.Add(AiOpeningExecutor.IncomeChoiceClaim);
+            if(NeedsTerritorialRoutes&&AiArmyPlanner.IsArmyPolicy(policyName)&&AiArmyPlanner.IsGuardDeployment(action)&&
+                !(policyName==AiArmyPlanner.Policy?armyPlanner:flankPlanner).Active)
+                claims.Add(action.SiteId>0?"guard-site:"+action.SiteId:"guard-asset:"+action.ParentId);
             if(policyName=="expansion")
             claims.Add("expansion-site:"+action.SiteId);
             bool queue=AiRosterCatalog.IsProduction(action.Kind);
@@ -1193,7 +1793,8 @@ namespace Spacewars.Runtime
                 var groupIds=new HashSet<int>(action.EntityIds);
                 var armyIds=new HashSet<long>(action.EntityIds.Select(armies.ArmyFor).Where(id=>id!=0));
                 foreach(var a in armies.Capture().Armies.Where(a=>armyIds.Contains(a.Id)))groupIds.UnionWith(a.Members);
-                if(priority<2&&o.Entities.Any(u=>groupIds.Contains(u.Id)&&RecentGroupOrder(o,u)))
+                bool recovering=policyName==AiCombatMicroPolicy.Policy&&combatMicro.IsWithdrawalRecovery(o,action);
+                if(priority<2&&!recovering&&o.Entities.Any(u=>groupIds.Contains(u.Id)&&RecentGroupOrder(o,u)))
                 {
 #if UNITY_INCLUDE_TESTS
                     if(policyName=="expansion"&&ProposalAdmissionReadbackForTests!=null&&(ProposalAdmissionOwnerFilterForTests==null||ProposalAdmissionOwnerFilterForTests==OwnerId))
@@ -1211,10 +1812,10 @@ namespace Spacewars.Runtime
             if(action.Kind==PlayableCommandKind.Move||action.Kind==PlayableCommandKind.AttackMove)conditions+=":"+MovementRetryConditions(o,action,profile);
             if(pendingRepairHandoff)conditions=AiCombatMicroPolicy.PendingRepairHandoff+conditions;
             long startup=policyName=="expansion"&&action.Kind==PlayableCommandKind.Move&&!expansion.HasFundingFor(action,budget)?(long)TerritoryRules.Cost(profile,action.BuildingKind):action.Kind==PlayableCommandKind.BuildAt&&action.BuildingKind==PlayableBuildingKind.Factory&&o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Factory)?(long)nativeProfile.Value("economy.factoryLaunchCycles")*PlayableUnitRules.Cost(profile,action.UnitKind):0;
-            double utility=policyName=="research"?TechnologyPlan.Branches.Single(b=>b.Descriptor.Kind==action.ResearchKind).Utility:
+            double utility=policyName=="research"&&!PlayableResearchRules.Local(action.ResearchKind)?TechnologyPlan.Branches.Single(b=>b.Descriptor.Kind==action.ResearchKind).Utility:
                 action.Kind==PlayableCommandKind.BuildAt&&action.BuildingKind==PlayableBuildingKind.ScientificCenter?TechnologyPlan.Infrastructure?.Utility??1:1;
             string reason=policyName=="research"||action.Kind==PlayableCommandKind.BuildAt&&action.BuildingKind==PlayableBuildingKind.ScientificCenter?TechnologyPlan.Reason:null;
-            return new AiIntent(key,policyName,action,checked(o.Tick+DecisionIntervalTicks+ObservationDelayTicks),cost,pop,claims,priority,utility,conditions,reason,startupFund:startup,reservationId:technologyFunding.ReservationFor(action,budget,arbiter)??(policyName=="expansion"?expansionFinancial.ReservationFor(action,o,profile,budget,arbiter):null)??(policyName=="infrastructure"?infrastructure.ReservationFor(action,budget):policyName=="expansion"?expansion.ReservationFor(action,budget):launches.ReservationFor(action)),overdue:policyName=="production"&&priority==1&&launches.ReservationFor(action)==null||policyName==AiArmyPlanner.Policy&&o.Tick-armyPlanner.Capture().LastInitiativeTick>=AiProfile.SecondsToTicks(nativeProfile.Value("armies.offensiveOverdueSeconds"),30));
+            return new AiIntent(key,policyName,action,checked(o.Tick+IntentLifetime(action)),cost,pop,claims,priority,utility,conditions,reason,startupFund:startup,reservationId:technologyFunding.ReservationFor(action,budget,arbiter)??(policyName=="expansion"?expansionFinancial.ReservationFor(action,o,profile,budget,arbiter):null)??(policyName=="infrastructure"?infrastructure.ReservationFor(action,budget):policyName=="expansion"?expansion.ReservationFor(action,budget):launches.ReservationFor(action)),overdue:policyName=="production"&&priority==1&&launches.ReservationFor(action)==null||policyName==AiArmyPlanner.Policy&&o.Tick-armyPlanner.Capture().LastInitiativeTick>=AiProfile.SecondsToTicks(nativeProfile.Value("armies.offensiveOverdueSeconds"),30));
         }
         internal static string MovementRetryConditions(PlayableAiObservation o,PlayableAiAction action,PlayableProfile p)
         {
@@ -1244,12 +1845,17 @@ namespace Spacewars.Runtime
             Emit(item,status,sequence,sequence!=0||status==PlayableAiDeliveryStatus.Stale?(long?)authorityTick:null,authorityTick,status==PlayableAiDeliveryStatus.Applied?(long?)applicationTick:null,runtimeStatus,message);
             lastPolicy=item.PolicyName;lastActionKind=item.Action.Kind;
             arbiter.Terminal(item.Intent,authorityTick,status);
+            if(item.PolicyName==AiRelayObjectives.DominationPolicy&&status==PlayableAiDeliveryStatus.Rejected&&
+                sequence!=0&&(runtimeStatus==PlayableCommandStatus.InvalidTarget||runtimeStatus==PlayableCommandStatus.Overflow))
+                arbiter.RejectDominationApproach(item.Action.SiteId,item.Action.Target,applicationTick,
+                    AiProfile.SecondsToTicks(nativeProfile.Value("armies.stallSeconds"),30));
             if(item.PolicyName==AiOrbitalPolicy.Policy&&item.Action.Kind==PlayableCommandKind.UseOrbital&&item.Action.TargetId==1&&status==PlayableAiDeliveryStatus.Applied)
                 arbiter.RememberOrbitalScan(item.Action.Target,applicationTick);
             budget.Reconcile(item.Intent.Id,item.Identity,status,gameplayPaid);
             technologyFunding.Terminal(item.Intent,status,budget,arbiter);
             launches.Terminal(item.Intent,item.Identity,status,gameplayPaid,budget,profile);
             var terminalReceipt=new PlayableAiTraceRecord(record.ObservationIdentity,item.LocalActionId,record.DueTick,sequence,applicationTick,status,runtimeStatus,message,OwnerId,item.Action.SourceIdentity,item.Identity,item.PolicyName,item.Action.Kind);item.Receipt(terminalReceipt);
+            if(item.Scout)scoutPlanner.ObserveReceipt(armies,item.Action,status);
             if(item.PolicyName=="expansion"&&item.Action.Kind==PlayableCommandKind.BuildAt&&status==PlayableAiDeliveryStatus.Applied)
                 scoutPlanner.ReleasePreparation(armies,item.Action.SiteId,item.Action.EntityIds.SingleOrDefault());
             openingExecutor.ObserveReceipt(item.Action,terminalReceipt);if(item.PolicyName=="expansion")expansion.TerminalFunding(item.Intent,status,budget,profile);expansion.ReconcileFunding(budget,profile,authorityTick,pendingItems.Select(x=>x.Intent));Record(record);

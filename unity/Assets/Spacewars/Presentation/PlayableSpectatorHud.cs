@@ -25,13 +25,13 @@ namespace Spacewars.Presentation
         private double spectatorRate=1;
         private void ResetSpectatorPresentation()
         {
-            spectatorMode=matchSetup?.Spectator==true;spectatorPerspective=null;spectatorFrame=null;inspectionEntityId=0;spectatorCollapsed=false;spectatorSequence=-1;spectatorRate=1;
+            spectatorMode=matchSetup?.Spectator==true;spectatorPerspective=null;spectatorManualCamera=false;spectatorFrame=null;inspectionEntityId=0;spectatorCollapsed=false;spectatorSequence=-1;spectatorRate=1;
             spectatorRowCache.Clear();spectatorRows?.Clear();if(spectatorPanel!=null){UpdateSpectatorSpeed();UpdateSpectatorCollapse();spectatorPanel.style.display=DisplayStyle.None;}if(spectatorTooltip!=null)spectatorTooltip.style.display=DisplayStyle.None;
             input?.ClearMode();if(input!=null)input.CommandInputEnabled=!spectatorMode;
         }
         private void ReadPresentationFrame()
         {
-            if(spectatorMode){ownerFrame=null;spectatorFrame=runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId);view=spectatorFrame?.Perspective(spectatorPerspective);ValidateInspection();}else {ownerFrame=matchSetup?.Participants!=null?runtime.OfflineFrame:null;view=ownerFrame!=null?ownerFrame.Views[LocalOwnerId]:runtime.Latest;}
+            if(spectatorMode){ownerFrame=localBinding!=null?runtime.OfflineFrame:null;spectatorFrame=runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId);view=spectatorFrame?.Perspective(spectatorPerspective);ValidateInspection();}else {ownerFrame=matchSetup?.Participants!=null?runtime.OfflineFrame:null;view=ownerFrame!=null?ownerFrame.Views[LocalOwnerId]:runtime.Latest;}
         }
         private void CreateSpectatorHud()
         {
@@ -42,6 +42,7 @@ namespace Spacewars.Presentation
             spectatorPanel.RegisterCallback<GeometryChangedEvent>(_=>OrbitalTheme.LayoutDeviceDiagnostics(panelRoot));
             top.RegisterCallback<GeometryChangedEvent>(_=>OrbitalTheme.LayoutDeviceDiagnostics(panelRoot));
             spectatorTableScroll=new ScrollView(ScrollViewMode.Horizontal){name="spectator-table-scroll"};spectatorTableScroll.horizontalScrollerVisibility=ScrollerVisibility.Auto;spectatorTableScroll.verticalScrollerVisibility=ScrollerVisibility.Hidden;spectatorTableScroll.style.flexShrink=0;spectatorPanel.Add(spectatorTableScroll);
+            spectatorTableScroll.horizontalScroller.style.height=18;
             spectatorTable=new VisualElement{name="spectator-table"};spectatorTable.style.width=SpectatorTableWidth;spectatorTable.style.flexShrink=0;spectatorTableScroll.Add(spectatorTable);
             spectatorHead=SpectatorRow();var widths=new[]{96,86,54,108,108,108,(int)SpectatorEscalationWidth};var names=new[]{"ИГРОК","КРЕДИТЫ","АРМИЯ","ЮНИТЫ","ПРОИЗВОДСТВО","АПГРЕЙДЫ","ЭСКАЛАЦИЯ"};for(int i=0;i<names.Length;i++){var label=SpectatorCell(names[i],widths[i]);label.style.fontSize=10;label.style.color=Muted;spectatorHead.Add(label);}spectatorHead.style.height=26;spectatorTable.Add(spectatorHead);
             spectatorRows=new VisualElement();spectatorRows.RegisterCallback<GeometryChangedEvent>(_=>FitSpectatorNameColumn());spectatorTable.Add(spectatorRows);UpdateSpectatorSpeed();
@@ -54,25 +55,75 @@ namespace Spacewars.Presentation
         private void SpectatorIcon(VisualElement parent,string glyph,string tooltip,double progress=-1,string badge=null)
         {
             int index=parent.userData is int n?n:0;parent.userData=index+1;
-            VisualElement tile;if(index<parent.childCount)tile=parent[index];else{tile=new VisualElement{focusable=true};parent.Add(tile);var captured=tile;tile.RegisterCallback<PointerEnterEvent>(_=>ShowSpectatorTooltip(captured));tile.RegisterCallback<PointerLeaveEvent>(_=>spectatorTooltip.style.display=DisplayStyle.None);tile.RegisterCallback<FocusInEvent>(_=>ShowSpectatorTooltip(captured));tile.RegisterCallback<FocusOutEvent>(_=>spectatorTooltip.style.display=DisplayStyle.None);}
-            tile.tooltip=tooltip;tile.Clear();tile.style.width=24;tile.style.height=26;tile.style.flexShrink=0;tile.style.marginRight=3;tile.style.backgroundColor=new Color(.12f,.19f,.21f,.9f);
-            var icon=new OrbitalGlyph(glyph){pickingMode=PickingMode.Ignore};icon.style.width=23;icon.style.height=22;tile.Add(icon);
-            if(progress>=0){var bar=new VisualElement{pickingMode=PickingMode.Ignore};bar.style.position=Position.Absolute;bar.style.left=0;bar.style.bottom=0;bar.style.width=Length.Percent((float)Math.Max(0,Math.Min(100,progress*100)));bar.style.height=2;bar.style.backgroundColor=Amber;tile.Add(bar);}
-            if(badge!=null){var mark=new Label(badge){pickingMode=PickingMode.Ignore};mark.style.position=Position.Absolute;mark.style.right=0;mark.style.top=-5;mark.style.fontSize=11;mark.style.color=Cyan;tile.Add(mark);}
+            VisualElement tile;if(index<parent.childCount)tile=parent[index];else{tile=new SpectatorIconTile(glyph);parent.Add(tile);var captured=tile;tile.RegisterCallback<PointerEnterEvent>(_=>ShowSpectatorTooltip(captured));tile.RegisterCallback<PointerLeaveEvent>(_=>spectatorTooltip.style.display=DisplayStyle.None);tile.RegisterCallback<FocusInEvent>(_=>ShowSpectatorTooltip(captured));tile.RegisterCallback<FocusOutEvent>(_=>spectatorTooltip.style.display=DisplayStyle.None);}
+            ((SpectatorIconTile)tile).Update(glyph,tooltip,progress,badge);
         }
+        // Keep the same visual tree between publications. Reusing the artwork
+        // also avoids reloading/validating its immutable styling profile every frame.
+        private sealed class SpectatorIconTile : VisualElement
+        {
+            readonly OrbitalGlyph icon;
+            VisualElement bar;
+            Label mark,overflow;
+            internal SpectatorIconTile(string glyph)
+            {
+                focusable=true;style.width=24;style.height=26;style.flexShrink=0;style.marginRight=3;style.backgroundColor=new Color(.12f,.19f,.21f,.9f);
+                icon=new OrbitalGlyph(glyph){pickingMode=PickingMode.Ignore};icon.style.width=23;icon.style.height=22;Add(icon);
+            }
+            internal void Update(string glyph,string text,double progress,string badge)
+            {
+                tooltip=text;overflow?.RemoveFromHierarchy();
+                if(icon.parent!=this)Insert(0,icon);icon.Kind=glyph;
+                if(progress>=0){
+                    if(bar==null){bar=new VisualElement{pickingMode=PickingMode.Ignore};bar.style.position=Position.Absolute;bar.style.left=0;bar.style.bottom=0;bar.style.height=2;bar.style.backgroundColor=Amber;}
+                    if(bar.parent!=this)Insert(1,bar);
+                    bar.style.width=Length.Percent((float)Math.Max(0,Math.Min(100,progress*100)));
+                }else bar?.RemoveFromHierarchy();
+                if(badge!=null){
+                    if(mark==null){mark=new Label{pickingMode=PickingMode.Ignore};mark.style.position=Position.Absolute;mark.style.right=0;mark.style.top=-5;mark.style.fontSize=11;mark.style.color=Cyan;}
+                    mark.text=badge;if(mark.parent!=this)Add(mark);
+                }else mark?.RemoveFromHierarchy();
+            }
+            internal void ShowOverflow(int count,string text)
+            {
+                tooltip=text;icon.RemoveFromHierarchy();bar?.RemoveFromHierarchy();mark?.RemoveFromHierarchy();
+                if(overflow==null){overflow=new Label{pickingMode=PickingMode.Ignore};overflow.style.fontSize=11;overflow.style.unityTextAlign=TextAnchor.MiddleCenter;overflow.style.flexGrow=1;}
+                overflow.text="+"+count;if(overflow.parent!=this)Add(overflow);
+            }
+        }
+
         private void ShowSpectatorTooltip(VisualElement tile){spectatorTooltipTarget=tile;spectatorTooltip.text=tile.tooltip;spectatorTooltip.style.left=Mathf.Clamp(tile.worldBound.xMin,8,Mathf.Max(8,root.resolvedStyle.width-308));spectatorTooltip.style.top=Mathf.Min(tile.worldBound.yMax+6,root.resolvedStyle.height-80);spectatorTooltip.style.display=DisplayStyle.Flex;spectatorTooltip.BringToFront();}
         private static void FinishIcons(VisualElement parent)
         {
             int count=parent.userData is int n?n:0;while(parent.childCount>count)parent.RemoveAt(parent.childCount-1);
             for(int i=0;i<count;i++)parent[i].style.display=i<4?DisplayStyle.Flex:DisplayStyle.None;
-            if(count>4){var overflow=parent[3];overflow.tooltip=string.Join("\n",parent.Children().Skip(3).Select(e=>e.tooltip));overflow.Clear();var label=new Label("+"+(count-3)){pickingMode=PickingMode.Ignore};label.style.fontSize=11;label.style.unityTextAlign=TextAnchor.MiddleCenter;label.style.flexGrow=1;overflow.Add(label);}
+            if(count>4)((SpectatorIconTile)parent[3]).ShowOverflow(count-3,string.Join("\n",parent.Children().Skip(3).Select(e=>e.tooltip)));
         }
-        private static string SpectatorUnitGlyph(PlayableEntityKind kind)=>kind==PlayableEntityKind.Hawk?"hawk":kind==PlayableEntityKind.Explorer?"explorer":kind==PlayableEntityKind.Shkval?"shkval":"tank";
+        private static readonly PlayableEntityKind[] SpectatorUnitKinds={PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval,PlayableEntityKind.Hawk,PlayableEntityKind.Skat,PlayableEntityKind.Igla,PlayableEntityKind.Cerberus};
+        private static void UpdateSpectatorUnits(VisualElement units,PlayableSnapshot player)
+        {
+            int index=0;
+            foreach(var kind in SpectatorUnitKinds){
+                int count=player.Entities.Count(e=>e.Owner==player.Owner&&e.Kind==kind);if(count==0)continue;
+                VisualElement cell;
+                if(index<units.childCount)cell=units[index];
+                else{
+                    cell=new VisualElement();cell.style.flexDirection=FlexDirection.Row;
+                    var icon=new OrbitalGlyph(SpectatorUnitGlyph(kind));icon.style.width=20;icon.style.height=20;cell.Add(icon);
+                    var number=SpectatorCell("",18);number.style.paddingLeft=0;cell.Add(number);units.Add(cell);
+                }
+                ((OrbitalGlyph)cell[0]).Kind=SpectatorUnitGlyph(kind);((Label)cell[1]).text=count.ToString();index++;
+            }
+            while(units.childCount>index)units.RemoveAt(units.childCount-1);
+        }
+        private static string SpectatorUnitGlyph(PlayableEntityKind kind)=>kind==PlayableEntityKind.Igla?"igla":kind==PlayableEntityKind.Cerberus?"cerberus":kind==PlayableEntityKind.Skat?"skat":kind==PlayableEntityKind.Hawk?"hawk":kind==PlayableEntityKind.Explorer?"explorer":kind==PlayableEntityKind.Shkval?"shkval":"tank";
         private string SpectatorName(PlayableSnapshot player)=>matchSetup==null?player.OwnerId:matchSetup.ParticipantName((int)player.Owner);
         private Color SpectatorPaint(PlayableOwner owner)=>matchSetup!=null?LobbyPaint(owner):Color.HSVToRGB((int)owner/8f,.5f,.9f);
         private int SpectatorTeam(PlayableSnapshot player)=>player.Team;
         private void SetSpectatorPerspective(PlayableOwner owner)
         {
+            if(!spectatorPerspective.HasValue||spectatorPerspective==owner)spectatorManualCamera=false;
+            if(spectatorPerspective==owner){botCameraOwner=null;botCameraTarget=null;}
             spectatorPerspective=spectatorPerspective==owner?null:(PlayableOwner?)owner;spectatorSequence=-1;input?.ClearMode();selection.Clear();selectedSite=selectedSlot=0;root.Focus();
             if(spectatorFrame!=null){view=spectatorFrame.Perspective(spectatorPerspective);ValidateInspection();}
             // Personal signals and current speech cannot survive a perspective switch.
@@ -81,15 +132,38 @@ namespace Spacewars.Presentation
             SharedAudio?.ResetAudio();
             lastAiCommunication=0;heardTeamSignals.Clear();signalAudioBaselineTick=view?.Tick??-1;
         }
-        private void ValidateInspection(){if(view!=null&&!view.Entities.Any(e=>e.Id==inspectionEntityId)&&!view.Buildings.Any(b=>b.Id==inspectionEntityId&&b.Phase!=ConstructionPhase.Pending))inspectionEntityId=0;}
-        private void UpdateSpectatorCollapse(){spectatorTableScroll.style.display=spectatorCollapsed?DisplayStyle.None:DisplayStyle.Flex;spectatorHead.style.display=spectatorRows.style.display=spectatorCollapsed?DisplayStyle.None:DisplayStyle.Flex;spectatorPanel.Q<Button>("spectator-collapse").text=spectatorCollapsed?"›":"‹";}
+        private void ValidateInspection()
+        {
+            if(inspectionEntityId==0||view==null)return;
+            if(!view.Entities.Any(e=>e.Id==inspectionEntityId&&e.Health>0)&&
+                !view.Buildings.Any(b=>b.Id==inspectionEntityId&&b.Health>0&&b.Phase!=ConstructionPhase.Pending))
+                inspectionEntityId=0;
+        }
+
+        private bool TryInspectForeign(int id)
+        {
+            if(id==0||spectatorMode)return false;
+            bool inspectable=view.Entities.Any(e=>e.Id==id&&e.Owner!=LocalOwner&&e.Health>0)||
+                view.Buildings.Any(b=>b.Id==id&&b.Owner!=LocalOwner&&b.Health>0&&b.Phase!=ConstructionPhase.Pending);
+            if(!inspectable)return false;
+            SetPadSelection(System.Array.Empty<int>());
+            padRememberedBuilding=0;
+            inspectionEntityId=id;
+            battleGestures.SetMode("world");
+            root.Focus();
+            return true;
+        }
+        private void UpdateSpectatorCollapse(){
+            // Fit the existing four speed buttons, gaps, fold button, padding and frame.
+            spectatorPanel.style.width=spectatorCollapsed&&localHumanCount>1?new StyleLength(4*(42+8)+28+2*8+2):spectatorTable.style.width;
+            spectatorTableScroll.style.display=spectatorCollapsed?DisplayStyle.None:DisplayStyle.Flex;spectatorHead.style.display=spectatorRows.style.display=spectatorCollapsed?DisplayStyle.None:DisplayStyle.Flex;spectatorPanel.Q<Button>("spectator-collapse").text=spectatorCollapsed?"›":"‹";}
         private void UpdateSpectatorSpeed(){foreach(var b in spectatorPanel.Query<Button>().ToList())if(b.userData is double rate)b.style.color=rate==spectatorRate?Cyan:Ink;}
         private void FitSpectatorNameColumn()
         {
             if(spectatorRows==null||spectatorRows.childCount==0)return;
             // Content-driven table geometry; keep the original non-name columns unchanged.
             float width=96;
-            foreach(var row in spectatorRows.Children())
+            foreach(var row in spectatorRowCache.Values)
             {
                 var name=(Button)row[0];
                 float text=name.MeasureTextSize(name.text,0,VisualElement.MeasureMode.Undefined,0,VisualElement.MeasureMode.Undefined).x;
@@ -97,32 +171,94 @@ namespace Spacewars.Presentation
             }
             spectatorHead[0].style.width=spectatorHead[0].style.minWidth=width;
             foreach(var row in spectatorRows.Children())row[0].style.width=row[0].style.minWidth=width;
-            spectatorPanel.style.width=SpectatorTableWidth+width-96;
+            spectatorTable.style.width=SpectatorTableWidth+width-96;if(!spectatorCollapsed)spectatorPanel.style.width=spectatorTable.style.width;
+            UpdateSpectatorTableViewport();
         }
         private void UpdateSpectatorHud()
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.HudSpectator);
             if(spectatorPanel==null)return;spectatorPanel.style.display=spectatorMode&&!inLobby&&!preparing&&!ModalVisible()?DisplayStyle.Flex:DisplayStyle.None;if(!spectatorMode||spectatorFrame==null)return;
-            top.style.display=spectatorPerspective.HasValue?DisplayStyle.Flex:DisplayStyle.None;top.style.top=8;top.style.right=8;OrbitalTheme.LayoutDeviceDiagnostics(panelRoot);if(!spectatorPerspective.HasValue)ShowArmyComposition(false);noticeLabel.style.display=DisplayStyle.None;
+            top.style.display=spectatorPerspective.HasValue?DisplayStyle.Flex:DisplayStyle.None;top.style.top=8;top.style.left=StyleKeyword.Auto;
+            bool split=localHumanCount>1;
+            // The top-left view ends at the same seam that centers the global counters.
+            top.style.right=8+(split&&localViewportIndex==0?OrbitalTheme.SplitDiagnosticsInset():0);
+            if(!split)OrbitalTheme.LayoutDeviceDiagnostics(panelRoot);
+            if(!spectatorPerspective.HasValue)ShowArmyComposition(false);noticeLabel.style.display=DisplayStyle.None;
             UpdateSpectatorTableViewport();
+            // A collapsed table has no visible rows. Leave its sequence stale so
+            // reopening always projects the latest complete frame.
+            if(spectatorCollapsed){UpdateSpectatorCollapse();return;}
             if(spectatorSequence==spectatorFrame.Overview.Sequence)return;spectatorSequence=spectatorFrame.Overview.Sequence;
             var players=spectatorFrame.Players.OrderBy(SpectatorTeam).ThenBy(p=>(int)p.Owner).ToArray();var teams=players.Select(SpectatorTeam).Distinct().ToArray();
             var shades=new[]{new Color(.10f,.20f,.24f,.95f),new Color(.20f,.16f,.20f,.95f),new Color(.13f,.22f,.19f,.95f),new Color(.24f,.21f,.13f,.95f),new Color(.18f,.18f,.25f,.95f),new Color(.24f,.17f,.13f,.95f),new Color(.12f,.22f,.22f,.95f),new Color(.22f,.22f,.22f,.95f)};
             foreach(var player in players)
             {
-                bool created=!spectatorRowCache.TryGetValue(player.OwnerId,out var row);if(created){row=SpectatorRow();spectatorRowCache.Add(player.OwnerId,row);spectatorRows.Add(row);}row.name="spectator-row-"+player.OwnerId;bool eliminated=player.OwnerEliminated||!player.Buildings.Any(b=>b.Owner==player.Owner&&TerritoryRules.Center(b.Kind)&&b.Phase!=ConstructionPhase.Pending);row.style.backgroundColor=eliminated?new Color(.13f,.15f,.16f,.95f):shades[Array.IndexOf(teams,SpectatorTeam(player))];row.style.opacity=eliminated ? .5f : 1;
+                bool created=!spectatorRowCache.TryGetValue(player.OwnerId,out var row);if(created){row=SpectatorRow();spectatorRowCache.Add(player.OwnerId,row);spectatorRows.Add(row);}row.name="spectator-row-"+player.OwnerId;bool eliminated=player.OwnerEliminated||!player.Buildings.Any(b=>b.Owner==player.Owner&&TerritoryRules.Center(b.Kind)&&b.Phase!=ConstructionPhase.Pending);StyleRosterElimination(row,eliminated,shades[Array.IndexOf(teams,SpectatorTeam(player))]);
                 Button name;if(created){name=Button(SpectatorName(player),()=>SetSpectatorPerspective(player.Owner));name.name="spectator-player-"+player.OwnerId;name.style.width=96;name.style.minWidth=96;name.style.height=30;name.style.minHeight=30;name.style.fontSize=11;name.style.whiteSpace=WhiteSpace.NoWrap;name.style.paddingTop=name.style.paddingBottom=0;name.style.paddingLeft=8;name.style.paddingRight=2;name.style.marginRight=0;name.style.marginBottom=0;name.style.backgroundColor=Color.clear;name.style.unityTextAlign=TextAnchor.MiddleLeft;name.style.borderTopWidth=name.style.borderRightWidth=name.style.borderBottomWidth=0;name.style.borderLeftWidth=3;name.style.borderLeftColor=SpectatorPaint(player.Owner);name.style.color=SpectatorPaint(player.Owner);name.tooltip=SpectatorName(player);row.Add(name);
                 row.RegisterCallback<ClickEvent>(e=>{var target=e.target as VisualElement;for(var at=target;at!=null&&at!=row;at=at.parent)if(at.focusable)return;SetSpectatorPerspective(player.Owner);});
                 row.Add(SpectatorCell("",86));row.Add(SpectatorCell("",54));row.Add(SpectatorIcons(108));row.Add(SpectatorIcons(108));row.Add(SpectatorIcons(108));row.Add(CreateSpectatorEscalation());}
                 UpdateSpectatorEscalation(row[6],player.Orbital);
                 name=(Button)row[0];name.text=SpectatorName(player);name.style.backgroundColor=spectatorPerspective==player.Owner?new Color(1,1,1,.08f):Color.clear;name.style.color=SpectatorPaint(player.Owner);((Label)row[1]).text=player.Credits+" +"+player.IncomePerSecond.ToString("0.#")+"/с";((Label)row[2]).text=player.Population.Living+"/"+player.Population.Capacity;
-                var units=row[3];units.Clear();foreach(var kind in new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval,PlayableEntityKind.Hawk}){int count=player.Entities.Count(e=>e.Owner==player.Owner&&e.Kind==kind);if(count==0)continue;var cell=new VisualElement();cell.style.flexDirection=FlexDirection.Row;var icon=new OrbitalGlyph(SpectatorUnitGlyph(kind));icon.style.width=20;icon.style.height=20;cell.Add(icon);var n=SpectatorCell(count.ToString(),18);n.style.paddingLeft=0;cell.Add(n);units.Add(cell);}
+                UpdateSpectatorUnits(row[3],player);
                 var production=row[4];production.userData=0;foreach(var b in player.Buildings.Where(b=>b.Owner==player.Owner&&b.Phase!=ConstructionPhase.Ready).OrderBy(b=>b.Id))SpectatorIcon(production,OrbitalPrecision.BuildingGlyph(b.Kind),BuildingName(b.Kind),b.Progress);
                 foreach(var b in player.Buildings.Where(b=>b.Owner==player.Owner&&(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)).OrderBy(b=>b.Id)){var state=b.PrivateState;foreach(var order in state.Orders)SpectatorIcon(production,order.IsUpgrade?OrbitalPrecision.BuildingArtwork(b.Kind,true):SpectatorUnitGlyph(order.Kind),order.IsUpgrade?"Улучшение здания":UnitName(order.Kind),order.Active?order.Progress:0,!order.IsUpgrade&&state.Repeat&&state.RepeatKind==order.Kind?"∞":null);if(state.Repeat&&!state.Orders.Any(o=>!o.IsUpgrade&&o.Kind==state.RepeatKind))SpectatorIcon(production,SpectatorUnitGlyph(state.RepeatKind),UnitName(state.RepeatKind)+" · ожидает",0,"∞");}
-                FinishIcons(production);var upgrades=row[5];upgrades.userData=0;foreach(var research in player.OwnerResearch.Where(r=>r.Complete||r.Active).OrderBy(r=>r.Kind))SpectatorIcon(upgrades,OrbitalPrecision.ResearchGlyph(research.Kind),ResearchName(research.Kind)+"\n"+ResearchDescription(research.Kind),research.Active?research.Progress:-1,research.Complete?"✓":null);FinishIcons(upgrades);
+                FinishIcons(production);var upgrades=row[5];upgrades.userData=0;foreach(var research in player.OwnerResearch.Where(r=>r.Complete||r.Active).OrderBy(r=>r.Kind))SpectatorIcon(upgrades,OrbitalPrecision.ResearchGlyph(research.Kind),ResearchName(research.Kind)+"\n"+PlayableMenuDescriptions.ResearchDetail(profile,research.Kind,player.OwnerResearch),research.Active?research.Progress:-1,research.Complete?"✓":null);FinishIcons(upgrades);
+            }
+            foreach(var team in players.GroupBy(SpectatorTeam))
+            {
+                if(team.Count()<2)continue;
+                var shade=shades[Array.IndexOf(teams,team.Key)];
+                UpdateSpectatorTeamTotal(team,shade);
             }
             UpdateSpectatorCollapse();
             FitSpectatorNameColumn();
         }
-        private string ResearchDescription(PlayableResearchKind kind)=>PlayableResearchRules.Description(profile,kind);
+        private void UpdateSpectatorTeamTotal(IGrouping<int,PlayableSnapshot> team,Color shade)
+        {
+            var id="spectator-team-total-"+team.Key;
+            var row=spectatorRows.Q(id);
+            if(row==null)
+            {
+                var players=team.Select(player=>spectatorRowCache[player.OwnerId]).ToArray();
+                var teamName="Team "+team.Key;
+                var title=SpectatorCell("▾ "+teamName,96);
+                var header=new Button{name=id};
+                header.style.flexDirection=FlexDirection.Row;
+                header.style.alignItems=Align.Center;
+                header.style.height=24;
+                header.style.flexShrink=0;
+                header.style.marginLeft=header.style.marginRight=header.style.marginTop=header.style.marginBottom=0;
+                header.style.paddingLeft=header.style.paddingRight=header.style.paddingTop=header.style.paddingBottom=0;
+                header.style.borderLeftWidth=header.style.borderRightWidth=header.style.borderBottomWidth=0;
+                header.style.borderTopWidth=1;
+                header.style.borderTopColor=new Color(Ink.r,Ink.g,Ink.b,.35f);
+                header.style.backgroundColor=Color.Lerp(shade,Ink,.08f);
+                header.style.color=Ink;
+                header.style.unityFontStyleAndWeight=FontStyle.Bold;
+                header.tooltip="Свернуть игроков команды";
+                header.Add(title);
+                header.Add(SpectatorCell("",86));
+                header.Add(SpectatorCell("",54));
+                foreach(var cell in header.Children())cell.pickingMode=PickingMode.Ignore;
+                header.clicked+=()=>
+                {
+                    var collapsed=players[0].style.display.value!=DisplayStyle.None;
+                    foreach(var player in players)player.style.display=collapsed?DisplayStyle.None:DisplayStyle.Flex;
+                    title.text=(collapsed?"▸ ":"▾ ")+teamName;
+                    header.tooltip=collapsed?"Раскрыть игроков команды":"Свернуть игроков команды";
+                    if(collapsed)spectatorTooltip.style.display=DisplayStyle.None;
+                    UpdateSpectatorTableViewport();
+                };
+                spectatorRows.Insert(spectatorRows.IndexOf(players[0]),header);
+                row=header;
+            }
+
+            var active=team.Where(player=>!player.OwnerEliminated);
+            var income=active.Sum(player=>player.IncomePerSecond);
+            var living=active.Sum(player=>player.Population.Living);
+            var capacity=active.Sum(player=>player.Population.Capacity);
+            ((Label)row[1]).text="+"+income.ToString("0.#")+"/с";
+            ((Label)row[2]).text=living+"/"+capacity;
+        }
     }
 }

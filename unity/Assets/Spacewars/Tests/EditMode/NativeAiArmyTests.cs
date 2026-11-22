@@ -60,7 +60,15 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void Registry_ScoutCapAndCatalogForceRejectReconOnlyMajor()
         {
-            var r=Registry(AiDifficulty.Recruit);var o=Observation();Assert.True(r.TryCreate(o,AiArmyRole.Scout,"scout",new[]{101},out _));Assert.False(r.TryCreate(o,AiArmyRole.Scout,"scout",new[]{102},out _));Assert.False(r.TryCreate(o,AiArmyRole.Attack,"attack",new[]{102,103,104},out _));Assert.False(r.TryCreate(o,AiArmyRole.Attack,"attack",new[]{1,102,103},out _));
+            var r=Registry(AiDifficulty.Recruit);var o=Observation();
+            var data=AiRosterCatalog.Initial.CopyData();
+            data.Single(x=>x.kind==PlayableEntityKind.Explorer).lineWeight=0;
+            var reconOnly=new AiRosterCatalog(data);
+            Assert.True(r.TryCreate(o,AiArmyRole.Scout,"scout",new[]{101},out _,reconOnly));
+            Assert.False(r.TryCreate(o,AiArmyRole.Scout,"scout",new[]{102},out _,reconOnly));
+            Assert.False(r.TryCreate(o,AiArmyRole.Attack,"attack",new[]{102,103,104},out _,reconOnly));
+            Assert.False(r.TryCreate(o,AiArmyRole.Attack,"attack",new[]{1,102,103},out _,reconOnly));
+            Assert.True(r.TryCreate(o,AiArmyRole.Attack,"attack",new[]{102,103,104},out _),"Current combat Explorers can form an All-In army.");
         }
         [Test] public void Registry_ForeignAndStaleClaimsNeverMutateMembership()
         {

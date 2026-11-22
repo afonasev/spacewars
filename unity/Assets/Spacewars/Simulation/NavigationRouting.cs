@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 
 namespace Spacewars.Simulation
 {
-    public sealed class SharedFlowRouter
+    public sealed class SharedFlowRouter : IDisposable
     {
 #if UNITY_INCLUDE_TESTS
         // Private test-only seams preserve exact FIFO and allocation-failure contracts.
@@ -11,14 +12,65 @@ namespace Spacewars.Simulation
         private static bool testSparseFields;
         private static Func<int,int[]> testDistanceAllocator;
         private static Action<int,int> testFieldDequeued;
+        private static Func<int,bool> testNativePageAdmission;
+        private static Action<object,int> testFieldPublication;
 #endif
         private struct Cell : IEquatable<Cell> { public readonly int X, Z; public Cell(int x, int z) { X = x; Z = z; } public bool Equals(Cell other) { return X == other.X && Z == other.Z; } public override bool Equals(object other) { return other is Cell && Equals((Cell)other); } public override int GetHashCode() { return X * 486187739 ^ Z; } }
-        private sealed class Distances
+        private sealed class Distances : IDisposable
         {
             private Dictionary<Cell,int> sparse;private readonly int side;private int[] dense;private int count;private readonly bool generic;
-            internal Distances(int boundedSide,IReadOnlyList<Cell> seeds,bool generic=false)
+            // Large observer fields allocate only visited pages, instead of repeatedly
+            // growing/copying a dictionary entry for every discovered grid cell. Pages
+            // belong to this field (no eviction/reuse across fields or geometries).
+            private const int PageShift=5,PageSide=1<<PageShift,PageCells=PageSide*PageSide;
+            // Two unsigned 16-bit entries per word. Zero is undiscovered; 65535
+            // redirects to the exact sparse int value, so long detours never saturate.
+            private const int PageWords=PageCells/2,OverflowEntry=ushort.MaxValue;
+            private readonly int pagedSide;private Dictionary<Cell,Page> pages;
+            private Cell lastPageKey;private Page lastPage;private bool pageAllocationUnavailable;
+            private readonly bool native;private NativePages nativePages;private bool disposed;
+            internal bool Retired;
+            internal long NativeBytes=>nativePages?.Bytes??0;
+            private readonly struct Page
             {
-                side=boundedSide;this.generic=generic;
+                internal readonly int[] Managed;internal readonly IntPtr Native;
+                internal Page(int[] managed){Managed=managed;Native=IntPtr.Zero;}
+                internal Page(IntPtr native){Managed=null;Native=native;}
+                internal bool Present=>Managed!=null||Native!=IntPtr.Zero;
+            }
+            // One SafeHandle per field, not per page. The intrusive list owns every
+            // actual allocation, even if a subsequent dictionary insertion refuses.
+            // Normal lifetime is deterministic; SafeHandle only covers abandoned callers.
+            private sealed unsafe class NativePages : SafeHandle
+            {
+                internal long Bytes {get;private set;}
+                internal NativePages():base(IntPtr.Zero,true){}
+                public override bool IsInvalid=>handle==IntPtr.Zero;
+                internal IntPtr Allocate()
+                {
+                    if(IsClosed)throw new ObjectDisposedException(nameof(NativePages));
+                    int bytes=checked(IntPtr.Size+PageWords*sizeof(int));
+#if UNITY_INCLUDE_TESTS
+                    if(testNativePageAdmission!=null&&!testNativePageAdmission(bytes))throw new OutOfMemoryException("Native distance page refused");
+#endif
+                    var block=Marshal.AllocHGlobal(bytes);
+                    if(block==IntPtr.Zero)throw new OutOfMemoryException();
+                    *(IntPtr*)block=handle;var payload=(int*)((byte*)block+IntPtr.Size);
+                    for(int i=0;i<PageWords;i++)payload[i]=0;
+                    SetHandle(block);Bytes+=bytes;return (IntPtr)payload;
+                }
+                protected override bool ReleaseHandle()
+                {
+                    var block=handle;
+                    while(block!=IntPtr.Zero){var next=*(IntPtr*)block;Marshal.FreeHGlobal(block);block=next;}
+                    handle=IntPtr.Zero;Bytes=0;return true;
+                }
+            }
+            public void Dispose(){if(disposed)return;disposed=true;nativePages?.Dispose();lastPage=default;pages?.Clear();}
+
+            internal Distances(int boundedSide,IReadOnlyList<Cell> seeds,bool generic=false,int pagedSide=0,bool native=false)
+            {
+                side=boundedSide;this.generic=generic;this.pagedSide=pagedSide;this.native=native;
                 if(side>0&&seeds!=null){bool valid=true;foreach(var seed in seeds)if(Index(seed)<0){valid=false;break;}
                     if(valid)try{int length=checked(side*side);
 #if UNITY_INCLUDE_TESTS
@@ -33,18 +85,60 @@ namespace Spacewars.Simulation
             private int Index(Cell cell)=>generic?(side==0||cell.X<0||cell.Z<0||cell.X>=side||cell.Z>=side?-1:cell.X*side+cell.Z):(side==0||cell.X< -1||cell.Z< -1||cell.X>=side-1||cell.Z>=side-1?-1:(cell.Z+1)*side+cell.X+1);
             internal int[] Dense=>dense;
             internal void AddDense(int index,int distance){dense[index]=distance+1;count++;}
-            internal int Count=>dense==null?sparse.Count:count;
+            internal int Count=>dense==null?count+sparse.Count:count;
+            private bool TryPage(Cell cell,bool create,out Page page,out int index)
+            {
+                if(disposed)throw new ObjectDisposedException(nameof(Distances));
+                page=default;index=0;long x=(long)cell.X+1,z=(long)cell.Z+1;
+                if(pagedSide==0||x<0||z<0||x>=pagedSide||z>=pagedSide)return false;
+                var key=new Cell((int)(x>>PageShift),(int)(z>>PageShift));
+                index=((int)z&(PageSide-1))*PageSide+((int)x&(PageSide-1));
+                if(lastPage.Present&&key.Equals(lastPageKey)){page=lastPage;return true;}
+                if(pages!=null&&pages.TryGetValue(key,out page)){lastPageKey=key;lastPage=page;return true;}
+                if(!create||pageAllocationUnavailable)return false;
+                try{
+                    if(native){if(nativePages==null)nativePages=new NativePages();page=new Page(nativePages.Allocate());}
+                    else{
+#if UNITY_INCLUDE_TESTS
+                        var array=testDistanceAllocator==null?new int[PageWords]:testDistanceAllocator(PageWords);
+#else
+                        var array=new int[PageWords];
+#endif
+                        if(array==null||array.Length!=PageWords){pageAllocationUnavailable=true;return false;}
+                        page=new Page(array);
+                    }
+                    if(pages==null)pages=new Dictionary<Cell,Page>();
+                    pages.Add(key,page);lastPageKey=key;lastPage=page;return true;
+                }catch(OutOfMemoryException){pageAllocationUnavailable=true;page=default;return false;}
+            }
+            private unsafe int PageEntry(Page page,int offset)
+            {
+                int word=page.Managed!=null?page.Managed[offset>>1]:((int*)page.Native)[offset>>1];
+                GC.KeepAlive(nativePages);return (int)((uint)word>>((offset&1)*16))&ushort.MaxValue;
+            }
+            private unsafe void SetPageEntry(Page page,int offset,int value)
+            {
+                int index=offset>>1,shift=(offset&1)*16;
+                int word=page.Managed!=null?page.Managed[index]:((int*)page.Native)[index];
+                int next=unchecked((int)(((uint)word&~(0xffffu<<shift))|((uint)value<<shift)));
+                if(page.Managed!=null)page.Managed[index]=next;else ((int*)page.Native)[index]=next;
+                GC.KeepAlive(nativePages);
+            }
             internal bool ContainsKey(Cell cell)=>TryGetValue(cell,out _);
             internal bool TryGetValue(Cell cell,out int value)
-            {if(dense==null)return sparse.TryGetValue(cell,out value);int index=Index(cell);int stored=index<0?0:dense[index];value=stored==0?0:stored-1;return stored!=0;}
+            {if(dense==null){if(TryPage(cell,false,out var page,out int offset)){int entry=PageEntry(page,offset);if(entry==OverflowEntry)return sparse.TryGetValue(cell,out value);value=entry==0?0:entry-1;return entry!=0;}return sparse.TryGetValue(cell,out value);}int index=Index(cell);int stored=index<0?0:dense[index];value=stored==0?0:stored-1;return stored!=0;}
             internal int this[Cell cell]
             {
                 get{if(TryGetValue(cell,out var value))return value;throw new KeyNotFoundException();}
-                set{int index=Index(cell);if(dense!=null&&index<0){sparse=new Dictionary<Cell,int>();for(int i=0;i<dense.Length;i++)if(dense[i]!=0)sparse.Add(generic?new Cell(i/side,i%side):new Cell(i%side-1,i/side-1),dense[i]-1);dense=null;}
-                    if(dense==null){sparse[cell]=value;return;}if(dense[index]==0)count++;dense[index]=checked(value+1);}
+                set{int index=Index(cell);if(dense!=null&&index<0){sparse=new Dictionary<Cell,int>();for(int i=0;i<dense.Length;i++)if(dense[i]!=0)sparse.Add(generic?new Cell(i/side,i%side):new Cell(i%side-1,i/side-1),dense[i]-1);dense=null;count=0;}
+                    if(dense==null){if(TryPage(cell,true,out var page,out int offset)){
+                        int stored=checked(value+1),previous=PageEntry(page,offset);
+                        if(stored>=OverflowEntry){sparse[cell]=value;if(previous!=0&&previous!=OverflowEntry)count--;SetPageEntry(page,offset,OverflowEntry);}
+                        else{if(previous==OverflowEntry)sparse.Remove(cell);if(previous==0||previous==OverflowEntry)count++;SetPageEntry(page,offset,stored);}
+                    }else sparse[cell]=value;return;}if(dense[index]==0)count++;dense[index]=checked(value+1);}
             }
         }
-        private sealed class Field { public bool FreeRoots;public readonly Distances Distance;public readonly Queue<Cell> Frontier=new Queue<Cell>();internal Field(int side,IReadOnlyList<Cell> seeds,bool generic){Distance=new Distances(side,seeds,generic);} }
+        private sealed class Field { public bool FreeRoots;public readonly Distances Distance;public readonly Queue<Cell> Frontier=new Queue<Cell>();internal Field(int side,IReadOnlyList<Cell> seeds,bool generic,int pagedSide,bool native){Distance=new Distances(side,seeds,generic,pagedSide,native);} }
         // Each router owns one immutable geometry/profile. Keys retain only ordered roots.
         // Lookup views may borrow a caller list; dictionary entries snapshot multi-root lists.
         private readonly struct FieldKey : IEquatable<FieldKey>
@@ -86,6 +180,25 @@ namespace Spacewars.Simulation
         // An exhausted field is a closed set under this exact directed grid graph.
         // Retain at most one such witness even when its distance field is evicted.
         private Distances closedReachability;
+        private readonly bool nativeDistancePages;
+        private bool disposed;
+        public long NativeDistanceBytes {
+            get{long bytes=closedReachability?.Retired==true?closedReachability.NativeBytes:0;foreach(var field in fields.Values)bytes+=field.Distance.NativeBytes;return bytes;}
+        }
+        private void SetClosedReachability(Distances next)
+        {
+            var previous=closedReachability;closedReachability=next;
+            if(previous!=next&&previous?.Retired==true)previous.Dispose();
+        }
+        public void Dispose()
+        {
+            if(disposed)return;disposed=true;
+            foreach(var field in fields.Values)field.Distance.Dispose();
+            closedReachability?.Dispose();closedReachability=null;fields.Clear();fieldOrder.Clear();CachedCells=0;
+            pathCache.Clear();pathOrder.Clear();CachedPathPoints=0;
+        }
+        private void ThrowIfDisposed(){if(disposed)throw new ObjectDisposedException(nameof(SharedFlowRouter));}
+
         public long ClosedReachabilityHits {get;private set;}
         // Geometry/profile are immutable for this router. Cache only exact grid predicates,
         // retaining direction because numerical boundary predicates need not be symmetric.
@@ -94,6 +207,7 @@ namespace Spacewars.Simulation
         public long GridGeometryChecks {get;private set;}
         public void PrepareGridPredicates(Func<bool> stopping=null)
         {
+            ThrowIfDisposed();
             if(preparation!=null){preparation.Prepare(stopping);return;}
             if(denseWidth==0)return; // Never preallocate an unbounded sparse arena.
             for(int x=0;x<denseWidth;x++){
@@ -109,8 +223,8 @@ namespace Spacewars.Simulation
             }
         }
         public void TrimFields(int maximum) {
-            if(maximum<0)throw new ArgumentOutOfRangeException(nameof(maximum));
-            while(fields.Count>maximum){var key=fieldOrder.Dequeue();CachedCells-=fields[key].Distance.Count;fields.Remove(key);}
+            ThrowIfDisposed();if(maximum<0)throw new ArgumentOutOfRangeException(nameof(maximum));
+            while(fields.Count>maximum){var key=fieldOrder.Dequeue();var distance=fields[key].Distance;CachedCells-=distance.Count;fields.Remove(key);distance.Retired=true;if(distance!=closedReachability)distance.Dispose();}
         }
         public SharedFlowRouter(NavGeometry geometry, NavigationProfile profile) { if (geometry == null || profile == null) throw new ArgumentNullException(); this.geometry = geometry; this.profile = profile;
             // Bounded dense addressing removes hot dictionary lookups on ordinary maps.
@@ -126,7 +240,10 @@ namespace Spacewars.Simulation
         // Large observed maps memoize the same exact predicates in bounded tiles.
         // Existing callers retain their original dense eligibility/fallback contract.
         public SharedFlowRouter(NavGeometry geometry,NavigationProfile profile,SharedFlowRouter previousObserverRouter,bool memoizeLargeGeometry)
+            :this(geometry,profile,previousObserverRouter,memoizeLargeGeometry,false){}
+        public SharedFlowRouter(NavGeometry geometry,NavigationProfile profile,SharedFlowRouter previousObserverRouter,bool memoizeLargeGeometry,bool nativeDistancePages)
         {
+            this.nativeDistancePages=nativeDistancePages;
             if(geometry==null||profile==null)throw new ArgumentNullException();this.geometry=geometry;this.profile=profile;
             // Borrow only pure preparation; never retain the predecessor or its field dictionaries.
             var prior=previousObserverRouter?.preparation;
@@ -172,6 +289,7 @@ namespace Spacewars.Simulation
             internal bool Matches(NavGeometry next,NavigationProfile nextProfile)=>ReferenceEquals(geometry,next)&&radius==nextProfile.Radius&&gridCell==nextProfile.GridCell;
             internal int Bytes=>values==null?checked((tiles?.Count??0)*TileCells):checked(values.Length);
             internal int AllocatedSide=>values==null?0:side;
+            internal int PagedDistanceSide=>side==0?tiledSide:0;
             private int Index(Cell cell)=>side==0||cell.X< -1||cell.Z< -1||cell.X>=side-1||cell.Z>=side-1?-1:(cell.Z+1)*side+cell.X+1;
             private bool EnsureValues()
             {
@@ -239,6 +357,7 @@ namespace Spacewars.Simulation
         public long CachedCells {get;private set;}
         public NavPoint[] FindPath(NavPoint start,NavPoint goal)
         {
+            ThrowIfDisposed();
             var key=new PathKey(start,goal);
             if(pathCache.TryGetValue(key,out var cached)){PathCacheHits++;return (NavPoint[])cached.Clone();}
             var result=FindPathCore(start,goal);
@@ -253,6 +372,7 @@ namespace Spacewars.Simulation
         // An inconclusive certificate always falls back to the ordinary router.
         internal bool HasPath(NavPoint start,NavPoint goal)
         {
+            ThrowIfDisposed();
             if(!geometry.IsFree(start,profile.Radius)||!geometry.IsFree(goal,profile.Radius))return false;
             if(geometry.SegmentFreeBetweenFreeEndpoints(start,goal,profile.Radius))return true;
             var from=ToCell(start);var to=ToCell(goal);
@@ -278,6 +398,7 @@ namespace Spacewars.Simulation
         // fixed 3x3 stencil. Repeated calls resume the exact immutable field frontier.
         internal bool TryHasPath(NavPoint start,NavPoint goal,ref int credits,out bool reachable)
         {
+            ThrowIfDisposed();
             reachable=false;if(credits<=0)return false;
             if(!geometry.IsFree(start,profile.Radius)||!geometry.IsFree(goal,profile.Radius))return true;
             if(geometry.SegmentFreeBetweenFreeEndpoints(start,goal,profile.Radius)){reachable=true;return true;}
@@ -294,7 +415,7 @@ namespace Spacewars.Simulation
                     field.Distance[next]=distance+1;CachedCells++;field.Frontier.Enqueue(next);
                 }
             }
-            reachable=Found();if(field.Frontier.Count==0)closedReachability=field.Distance;
+            reachable=Found();if(field.Frontier.Count==0)SetClosedReachability(field.Distance);
             return reachable||field.Frontier.Count==0;
         }
 
@@ -323,6 +444,8 @@ namespace Spacewars.Simulation
             if (Attached(start, from) && Attached(goal, target)&&
                 !(closedReachability!=null&&closedReachability.ContainsKey(target)&&!closedReachability.ContainsKey(from)))
             {
+                if(nativeDistancePages&&preparation?.AllocatedSide==0&&TryShortestGridRoute(start,goal,from,target,out var shortest))
+                    return shortest;
                 var directField = GetCertifiedSingleField(target); ExpandSingle(directField, from);
                 if (directField.Distance.ContainsKey(from)) return Route(start, goal, from, directField);
             }
@@ -369,11 +492,79 @@ namespace Spacewars.Simulation
             return result;
         }
         private static double Length(NavPoint a, NavPoint b) => Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
+        // Find the first Manhattan-shortest walk in the distance field's direction
+        // order. If the grid needs a detour or a directed-edge decision, keep the
+        // canonical field solver. Bound speculative work on every query.
+        private bool TryShortestGridRoute(NavPoint start,NavPoint goal,Cell from,Cell target,out NavPoint[] route)
+        {
+            long span = Math.Abs((long)from.X - target.X) + Math.Abs((long)from.Z - target.Z);
+            long stepsLeft = 8 * span + 256;
+            var walk = new List<(Cell Cell, int NextDirection)> { (from, 0) };
+            HashSet<Cell> deadEnds = null;
+            while (walk.Count > 0 && stepsLeft-- > 0)
+            {
+                int tail = walk.Count - 1;
+                var (cell, firstDirection) = walk[tail];
+                if (cell.Equals(target))
+                {
+                    var raw = new List<NavPoint>(walk.Count + 2) { start };
+                    foreach (var step in walk) raw.Add(ToPoint(step.Cell));
+                    raw.Add(goal);
+                    route = ValidateSmoothedRoute(start, raw);
+                    return true;
+                }
+
+                bool advanced = false;
+                for (int direction = firstDirection; direction < 4; direction++)
+                {
+                    bool toward = direction switch
+                    {
+                        0 => cell.Z < target.Z,
+                        1 => cell.X < target.X,
+                        2 => cell.Z > target.Z,
+                        _ => cell.X > target.X
+                    };
+                    if (!toward) continue;
+                    var next = Neighbor(cell, direction);
+                    if (deadEnds?.Contains(next) == true || !IsFree(next)) continue;
+
+                    bool forward = GridSegmentFreeDirected(cell, next, direction);
+                    bool reverse = GridSegmentFreeDirected(next, cell, (direction + 2) % 4);
+                    if (forward != reverse)
+                    {
+                        route = null;
+                        return false;
+                    }
+                    if (!forward) continue;
+
+                    walk[tail] = (cell, direction + 1);
+                    walk.Add((next, 0));
+                    advanced = true;
+                    break;
+                }
+                if (advanced) continue;
+
+                // Every step gets closer to the target, so this suffix cannot
+                // reach the goal on any other Manhattan-shortest walk either.
+                (deadEnds ??= new HashSet<Cell>()).Add(cell);
+                walk.RemoveAt(tail);
+            }
+
+            route = null;
+            return false;
+        }
+
         private NavPoint[] Route(NavPoint start, NavPoint goal, Cell from, Field field)
         {
             var raw = new List<NavPoint>(); Cell current = from; raw.Add(start); raw.Add(ToPoint(from));
             while (field.Distance[current] != 0) { Cell next = BestNeighbor(field, current); if (next.Equals(current)) return new NavPoint[0]; current = next; raw.Add(ToPoint(current)); }
-            raw.Add(goal); var route = Smooth(raw); var previous = start;
+            raw.Add(goal);return ValidateSmoothedRoute(start,raw);
+        }
+
+        private NavPoint[] ValidateSmoothedRoute(NavPoint start,List<NavPoint> raw)
+        {
+            var route=Smooth(raw);
+            var previous=start;
             foreach (var point in route)
             {
                 if (!geometry.IsFree(point, profile.Radius) || !geometry.SegmentFree(previous, point, profile.Radius)) return new NavPoint[0];
@@ -397,19 +588,33 @@ namespace Spacewars.Simulation
             if(targets==null)targets=new[]{key.At(0)};
             var storedKey=key.Snapshot();
             int fieldSide=preparation?.AllocatedSide??denseWidth;
+            int pagedSide=preparation?.PagedDistanceSide??0;
 #if UNITY_INCLUDE_TESTS
-            if(testSparseFields)fieldSide=0;
+            if(testSparseFields){fieldSide=0;pagedSide=0;}
 #endif
-            field = new Field(fieldSide,targets,preparation==null);
-            foreach (Cell target in targets) { field.Distance[target] = 0; field.Frontier.Enqueue(target); }
-            fields[storedKey] = field; fieldOrder.Enqueue(storedKey); CachedCells += field.Distance.Count; RebuildCount++; return field;
+            field = new Field(fieldSide,targets,preparation==null,pagedSide,nativeDistancePages);
+            try{
+                foreach (Cell target in targets) { field.Distance[target] = 0; field.Frontier.Enqueue(target); }
+#if UNITY_INCLUDE_TESTS
+                testFieldPublication?.Invoke(field,0);
+#endif
+                fields[storedKey] = field;
+#if UNITY_INCLUDE_TESTS
+                testFieldPublication?.Invoke(field,1);
+#endif
+                fieldOrder.Enqueue(storedKey); CachedCells += field.Distance.Count; RebuildCount++; return field;
+            }catch{
+                // The dictionary may have accepted the field before FIFO growth
+                // refused. No published counter/order entry owns its native blocks yet.
+                fields.Remove(storedKey);field.Distance.Dispose();throw;
+            }
         }
         private void ExpandSingle(Field field,Cell required)=>ExpandRequired(field,new SingleCellList(required));
         private void ExpandUntil(Field field,IReadOnlyList<Cell> required)=>ExpandRequired(field,required);
         private void ExpandRequired<TRequired>(Field field,TRequired required) where TRequired:IReadOnlyList<Cell>
         {
-            if(preparation!=null&&field.Distance.Dense!=null){ExpandPreparedDense(field,required);if(field.Frontier.Count==0)closedReachability=field.Distance;return;}
-            if(denseWidth>0&&field.Distance.Dense!=null){ExpandDense(field,required);if(field.Frontier.Count==0)closedReachability=field.Distance;return;}
+            if(preparation!=null&&field.Distance.Dense!=null){ExpandPreparedDense(field,required);if(field.Frontier.Count==0)SetClosedReachability(field.Distance);return;}
+            if(denseWidth>0&&field.Distance.Dense!=null){ExpandDense(field,required);if(field.Frontier.Count==0)SetClosedReachability(field.Distance);return;}
             // Distances only grow during this invocation. Count each missing request entry
             // once (including duplicates), then retire it when that exact cell is discovered.
             int remaining=0;
@@ -433,7 +638,7 @@ namespace Spacewars.Simulation
                     for(int i=0;i<required.Count;i++)if(next.Equals(required[i]))remaining--;
                 }
             }
-            if(field.Frontier.Count==0)closedReachability=field.Distance;
+            if(field.Frontier.Count==0)SetClosedReachability(field.Distance);
         }
         private void ExpandPreparedDense<TRequired>(Field field,TRequired required) where TRequired:IReadOnlyList<Cell>
         {
@@ -485,7 +690,8 @@ namespace Spacewars.Simulation
         // outside the exact changed bounds still describe the same geometry.
         public SharedFlowRouter ForGeometry(NavGeometry next)
         {
-            if(preparation!=null)return new SharedFlowRouter(next,profile,null,preparation.MemoizeLargeGeometry);
+            ThrowIfDisposed();
+            if(preparation!=null)return new SharedFlowRouter(next,profile,null,preparation.MemoizeLargeGeometry,nativeDistancePages);
             var result=new SharedFlowRouter(next,profile);
             if(denseWidth==0||denseWidth!=result.denseWidth||geometry.HalfExtent!=next.HalfExtent)return result;
             Array.Copy(denseFree,result.denseFree,denseFree.Length);Array.Copy(denseEdges,result.denseEdges,denseEdges.Length);

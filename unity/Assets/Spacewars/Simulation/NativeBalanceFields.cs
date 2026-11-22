@@ -12,7 +12,7 @@ namespace Spacewars.Simulation
         // AI has an independent revision and numeric DTO; gameplay writers never mutate it.
         public static IReadOnlyList<AiProfileField> AiFields=>AiProfileMetadata.Fields;
         public static IReadOnlyList<AiProfileField> AiOpeningFields=>AiProfileMetadata.Fields
-            .Where(f=>f.Path.StartsWith("openingsMidgame.",StringComparison.Ordinal)||f.Path.StartsWith("positionDevelopment.",StringComparison.Ordinal)||f.Path.StartsWith("activeStrategy.",StringComparison.Ordinal)||f.Path.StartsWith("safeReinforcements.",StringComparison.Ordinal)||
+            .Where(f=>AiProfile.IsDefaultExtensionField(f.Path)||f.Path.StartsWith("openingsMidgame.",StringComparison.Ordinal)||f.Path.StartsWith("positionDevelopment.",StringComparison.Ordinal)||f.Path.StartsWith("activeStrategy.",StringComparison.Ordinal)||f.Path.StartsWith("safeReinforcements.",StringComparison.Ordinal)||
                 f.Path.StartsWith("difficulty.",StringComparison.Ordinal)&&(f.Path.Contains(".control.")||f.Path.Contains(".micro.")||f.Path.EndsWith(".reactionSeconds",StringComparison.Ordinal)))
             .ToArray();
         public static AiProfile InitialAiOpeningProfile()
@@ -33,7 +33,7 @@ namespace Spacewars.Simulation
         }
         private static readonly Dictionary<string,FieldInfo> Fields=typeof(PlayableProfileData).GetFields().ToDictionary(f=>f.Name);
         public static PlayableProfileData Copy(PlayableProfileData source)
-        {var target=new PlayableProfileData();foreach(var f in Fields.Values)f.SetValue(target,f.GetValue(source));return target;}
+        =>source.CopyFields();
         public static void Write(PlayableProfileField descriptor,PlayableProfileData data,double value)
         {
             // Zero is absence of the new extension in an explicit exact profile.
@@ -49,7 +49,7 @@ namespace Spacewars.Simulation
             if(ReferenceEquals(field,PlayableProfileMetadata.AccruedCreditField))return true;
             string name=field.FieldName??"";
             // Retain retired fields in profile bindings and saves, but omit their controls from the lab.
-            if(name=="shkvalLeadSpeedThreshold"||name=="shkvalLeadFalloff"||name=="shkvalMaxLeadTimeSec"||name=="shkvalFriendlyFirePenalty")return false;
+            if(name=="shkvalLeadSpeedThreshold"||name=="shkvalLeadFalloff"||name=="shkvalMaxLeadTimeSec"||name=="shkvalFriendlyFirePenalty"||name=="provingGroundAttackRearLaneOffset")return false;
             if(name.StartsWith("orbitalMine",StringComparison.Ordinal))return true; // New placements capture independent mine terms.
             // Maneuver capability is bound at genesis/current capture; changes require a new match.
             if(name.StartsWith("tankReverse",StringComparison.Ordinal))return false;
@@ -62,6 +62,58 @@ namespace Spacewars.Simulation
             if(name.Contains("CollisionRadius")||name.Contains("FootprintRadius")||name.Contains("ModelRadius")||name.Contains("ModelScale")||name.Contains("ModelHeight"))return false;
             return true;
         }
+        // Controls are narrower than profile compatibility and live-apply bindings.
+        // Historical revisions keep their authored values when a control is retired.
+        public static bool LabEditable(PlayableProfileField field)
+        {
+            if(!Editable(field))return false;
+            string path=field.Path;
+            if(path.StartsWith("presentation.",StringComparison.Ordinal))
+                return path=="presentation.unitWreck.lifetimeSeconds";
+            if(path.StartsWith("wrecks.",StringComparison.Ordinal))
+                return path is "wrecks.spawnProtectionSeconds" or "wrecks.wreckSinkSeconds" or "wrecks.hawkWreckChancePercent" or "wrecks.skatWreckChancePercent" or "wrecks.hawkWreckFallSeconds";
+            if(path.StartsWith("crowdMotion.",StringComparison.Ordinal)||path.StartsWith("navigation.",StringComparison.Ordinal)||
+                path.StartsWith("combatRounding.",StringComparison.Ordinal)||path.StartsWith("unitUpgrades.",StringComparison.Ordinal))
+                return false;
+            if(path.StartsWith("teamSignals.",StringComparison.Ordinal))
+                return path is "teamSignals.lifetimeSeconds" or "teamSignals.maximumPerAuthor" or "teamSignals.repeatRadius";
+            string name=field.FieldName??"";
+            if(name.StartsWith("orbital",StringComparison.Ordinal))
+            {
+                if(name.StartsWith("orbitalMine",StringComparison.Ordinal))
+                    return name is "orbitalMineCapacity" or "orbitalMineVision" or "orbitalMineDirectDamage" or "orbitalMineSplashDamage" or "orbitalMineBlastRadius" or "orbitalMineModelRadius" or "orbitalMineEnemyClearanceMeters";
+                if(name.StartsWith("orbitalScan",StringComparison.Ordinal))
+                    return name is "orbitalScanRadius" or "orbitalScanSeconds";
+                return !name.StartsWith("orbitalUi",StringComparison.Ordinal)&&!name.StartsWith("orbitalCard",StringComparison.Ordinal)&&
+                    name is not ("orbitalPanelWidth" or "orbitalIconSize" or "orbitalLevelFontSize" or "orbitalFinalSpeed");
+            }
+            if(name.StartsWith("hawkDebris",StringComparison.Ordinal)||name.StartsWith("shkvalExhaust",StringComparison.Ordinal)||
+                name.StartsWith("aiArmySystems",StringComparison.Ordinal)&&name.EndsWith("UtilityScale",StringComparison.Ordinal))
+                return false;
+            return name is not (
+                "gaussCostMultiplier" or "gaussHealthMultiplier" or "shkvalBaseBlastRadiusMultiplier" or "shkvalRange" or
+                "gaussChargeSeconds" or "gaussChargeIntensity" or "gaussRecoilMeters" or "gaussRecoilSeconds" or
+                "gaussRecoilPeakFraction" or "gaussBeamGlowWidth" or "gaussBeamRiseFraction" or "gaussBeamSeconds" or "gaussBeamIntensity" or
+                "turretLaserWidth" or "turretLaserIntensity" or "turretTurningSpread" or
+                "hawkMissileTurn" or "hawkUpgradedReloadSeconds" or "hawkSelectionRadius" or "hawkRotorSpeed" or "hawkCruisePitch" or "hawkAccelerationPitch" or "hawkBank" or
+                "hawkAttitudeSpeed" or "hawkMissileLength" or "hawkMissileVisualScale" or "tankChassisGlowIntensity" or
+                "refineryTurbineSpeed" or "rallyFlagHeight" or "saleMarkerScale" or "padBorderRatio" or "capturePulseHz" or
+                "provingGroundDividerWidth" or "shkvalMarkerStartRadius" or "shkvalMarkerOpacity" or "shkvalImpactEffectRadius" or
+                "incomeSettlementSeconds" or "attackRepathSeconds" or
+                "constructionInitialHealthRatio" or "constructionDamageMultiplier" or "constructionVisionMultiplier" or
+                "buildingRepairCostRatio" or "idleAutoDefenseMultiplier" or "attackApproachRangeRatio" or
+                "projectileExtraRangePercent" or "upgradedProducerSpeedMultiplier");
+        }
+
+        public static IReadOnlyList<AiProfileField> AiLabFields {get;}=AiOpeningFields.Where(field=>
+            field.Unit!="weight"&&!field.Path.EndsWith("Multiplier",StringComparison.Ordinal)&&
+            !field.Path.EndsWith("Scale",StringComparison.Ordinal)&&
+            field.Path is not ("positionDevelopment.towerValue" or "positionDevelopment.concreteValue")&&
+            field.Path!="difficulty.expert.incomeBonusPercent"&&
+            !field.Path.EndsWith(".control.fairRun",StringComparison.Ordinal)&&
+            !field.Path.EndsWith(".micro.focusAttackers",StringComparison.Ordinal)&&
+            !field.Path.EndsWith(".micro.lossPerSecond",StringComparison.Ordinal)).ToArray();
+
         public static string ValidateLiveDifference(PlayableProfile before,PlayableProfile after)
         {
             var a=before.CopyData();var b=after.CopyData();

@@ -1,0 +1,48 @@
+#pragma kernel MarkDirty
+#pragma kernel ExpandDirty
+#pragma only_renderers metal
+
+#define TILE 16
+
+Texture2D<float> _CurrentDepth;
+Texture2D<float> _PreviousDepth;
+Texture2D<uint> _DirtyInput;
+RWTexture2D<uint> _DirtyOutput;
+int2 _Size;
+int2 _TileCount;
+int _HaloTiles;
+groupshared uint changed;
+
+[numthreads(TILE, TILE, 1)]
+void MarkDirty(uint3 pixel : SV_DispatchThreadID, uint3 tile : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    if (lane == 0) changed = 0;
+    GroupMemoryBarrierWithGroupSync();
+    if (all(pixel.xy < uint2(_Size)))
+    {
+        int3 coordinate = int3(pixel.xy, 0);
+        if (asuint(_CurrentDepth.Load(coordinate)) != asuint(_PreviousDepth.Load(coordinate)))
+            InterlockedOr(changed, 1);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0) _DirtyOutput[tile.xy] = changed;
+}
+
+[numthreads(8, 8, 1)]
+void ExpandDirty(uint3 thread : SV_DispatchThreadID)
+{
+    int2 tile = int2(thread.xy);
+    if (any(tile >= _TileCount)) return;
+    int2 first = max(0, tile - _HaloTiles);
+    int2 last = min(_TileCount - 1, tile + _HaloTiles);
+    for (int y = first.y; y <= last.y; y++)
+    for (int x = first.x; x <= last.x; x++)
+    {
+        if (_DirtyInput.Load(int3(x, y, 0)) != 0)
+        {
+            _DirtyOutput[tile] = 1;
+            return;
+        }
+    }
+    _DirtyOutput[tile] = 0;
+}

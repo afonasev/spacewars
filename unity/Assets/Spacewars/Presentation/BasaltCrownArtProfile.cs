@@ -51,7 +51,6 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Basalt Crown sites","Pad margin","Stone margin beyond the actual headquarters, outpost and slot footprints.","m",.5f,2,.25f)] public float siteApronMargin=1.25f;
         [SurfaceSetting("Basalt Crown sites","Link width","Flat stone paths connecting slot foundations to the main pad.","m",1,3,.25f)] public float siteLinkWidth=2;
         [SurfaceSetting("Basalt Crown sites","Pad feather","Dust transition around compound site paving.","m",.15f,1,.05f)] public float siteApronFeather=.4f;
-        [SurfaceSetting("Basalt Crown sites","Pad value","Brightness of neutral construction pads, independent of ownership.","ratio",.35f,.7f,.025f)] public float siteApronValue=.56f;
         public IEnumerable<SurfaceParameter> Parameters(){foreach(var field in GetType().GetFields()){var a=field.GetCustomAttribute<SurfaceSettingAttribute>();if(a==null)continue;yield return new SurfaceParameter("visual.basaltCrown."+field.Name,a.Group,a.Label,a.Description,a.Unit,a.Minimum,a.Maximum,a.Step,()=> (float)field.GetValue(this),v=>field.SetValue(this,v));}}
         public void Validate(){if(id!="basalt-crown-warm-stone-v1"||revision<1)throw new ArgumentException("Invalid Basalt Crown art identity");foreach(var p in Parameters())if(float.IsNaN(p.Read())||float.IsInfinity(p.Read())||p.Read()<p.Minimum||p.Read()>p.Maximum)throw new ArgumentException("Invalid Basalt Crown art: "+p.Path);}
         public static BasaltCrownArtProfile Load(){var p=JsonUtility.FromJson<BasaltCrownArtProfile>(Resources.Load<TextAsset>("BasaltCrownArtProfile").text);p.Validate();return p;}
@@ -72,8 +71,7 @@ namespace Spacewars.Presentation
             m.SetVector("_RoadSlabs",new Vector4(slabLength,slabWidth,jointWidth,jointContrast));
             m.SetVector("_RoadFinish",new Vector4(edgingWidth,roadDust,roadFeather,pavingGrain));
             m.SetVector("_Geology",new Vector4(strataSpacing,strataContrast,0,0));
-            m.SetVector("_SiteFinish",new Vector4(siteLinkWidth,siteApronFeather,0,0));
-            var siteTint=Color.HSVToRGB(warmHue,warmSaturation*pavingSaturation,siteApronValue).linear;m.SetVector("_SiteTint",new Vector4(siteTint.r,siteTint.g,siteTint.b,1));
+            m.SetFloat("_SiteFeather",siteApronFeather);
             m.SetVector("_MineFinish",new Vector4(mineApronRadius,mineApronFeather,0,0));
             var mineTint=Color.HSVToRGB(warmHue,warmSaturation*pavingSaturation,mineApronValue).linear;m.SetVector("_MineTint",new Vector4(mineTint.r,mineTint.g,mineTint.b,1));
             m.SetTexture("_FogMask",fog);m.SetVector("_FogBounds",bounds);m.SetColor("_FogColor",fogColor);return m;

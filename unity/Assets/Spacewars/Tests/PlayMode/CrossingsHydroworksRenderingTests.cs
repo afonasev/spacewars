@@ -49,6 +49,7 @@ namespace Spacewars.Tests.PlayMode
                 var views=new[]{"overview","ordinary","hero-close","north-bridge","south-bridge","water-bank","vertical","transition","water-motion-a","water-motion-b","fog","gameplay-camera","gameplay-close","quarry-gameplay","north-gameplay","south-gameplay"};
                 var focus=new[]{Vector3.zero,Vector3.zero,new Vector3(0,-1,-(float)map.CentralBridgeWidth/2),new Vector3(0,0,(float)map.CrossingZ),new Vector3(0,0,-(float)map.CrossingZ),new Vector3(7,-2,23),new Vector3(-29,2,25),new Vector3(-19,0,-18),new Vector3(0,-3,-18),new Vector3(0,-3,-18),Vector3.zero,new Vector3(0,0,-10),new Vector3(10,0,-12),new Vector3(9,-1,23),new Vector3(0,0,38),new Vector3(0,0,-38)};
                 var zoom=new[]{100f,40,15,20,20,12,12,14,14,14,100,12.8f,6,8,12.8f,12.8f};
+                Color32[] waterAtFirstTick=null;
                 for(int v=0;v<views.Length;v++)
                 {
                     bool overview=v==0||v==10;camera.orthographic=overview;camera.orthographicSize=72;
@@ -61,11 +62,22 @@ namespace Spacewars.Tests.PlayMode
                         RenderSettings.ambientLight=Color.HSVToRGB(lighting.ambientHue,lighting.ambientSaturation,lighting.ambientValue);
                         camera.orthographic=true;camera.orthographicSize=zoom[v];camera.transform.position=focus[v]+new Vector3((float)profile.CameraOffsetX,(float)profile.CameraHeight,(float)profile.CameraOffsetZ);camera.transform.LookAt(focus[v]);
                     }
-                    if(v==9)yield return new WaitForSecondsRealtime(.8f);
+                    if(v==8||v==9)
+                    {
+                        long tick=v==8?30:90;
+                        var match=new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,tick,tick,
+                            RuntimeStatus.Running,true,PlayableMatchOutcome.Playing,0,null,
+                            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),
+                            Array.Empty<PlayableProjectileSnapshot>(),null,null);
+                        world.UpdateMatchAnimation(match);
+                    }
                     for(int j=0;j<5;j++)yield return null;
                     var old=RenderTexture.active;try{RenderTexture.active=target;pixels.ReadPixels(new Rect(0,0,1600,1000),0,0);pixels.Apply();}finally{RenderTexture.active=old;}
                     int bright=0,magenta=0;foreach(var c in pixels.GetPixels32()){if(Mathf.Max(c.r,Mathf.Max(c.g,c.b))>45)bright++;if(c.r>200&&c.b>200&&c.g<40)magenta++;}
                     Assert.AreEqual(0,magenta,"Shader compilation: "+views[v]);if(v!=10)Assert.Greater(bright,100000,"Actual production rendering: "+views[v]);
+                    if(v==8)waterAtFirstTick=pixels.GetPixels32();
+                    if(v==9)Assert.False(waterAtFirstTick.SequenceEqual(pixels.GetPixels32()),
+                        "Changing only the paused match tick changes the rendered water phase.");
                     File.WriteAllBytes(Path.Combine(output,views[v]+".png"),pixels.EncodeToPNG());
                 }
                 world.InspectionReveal();

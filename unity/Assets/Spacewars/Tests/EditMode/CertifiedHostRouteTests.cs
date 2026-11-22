@@ -67,38 +67,68 @@ namespace Spacewars.Tests.EditMode
         {
             var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);
             var session=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation);
-            session.Crowd.Add(1,new NavPoint(-5,0));
-            Assert.True(session.Move(1,new NavPoint(5,0)));
-            using(var host=new UnityHostRouteService()){
-                var binding=new PlayableRouteBinding(geometry,PlayableProfile.Default,session.Admission,session.RoutePort);
-                for(int i=0;i<40&&session.PendingCount>0;i++){host.Service(binding,4);session.ApplyResults();}
+            try
+            {
+                var actor=session.Crowd.Add(1,new NavPoint(-5,0));
+                Assert.True(session.Move(1,new NavPoint(5,0)));
+                using(var host=new UnityHostRouteService()){
+                    var binding=new PlayableRouteBinding(geometry,PlayableProfile.Default,session.Admission,session.RoutePort);
+                    for(int i=0;i<40&&session.PendingCount>0;i++){host.Service(binding,4);session.ApplyResults();}
+                }
+                Assert.AreEqual(1,session.AppliedResults);
+                var prior=session.InstalledExecutionFor(1);
+                Assert.NotNull(prior);
+                var priorBacking=actor.StorageOwner.Global;
+                var priorGoal=actor.Goal;
+                var priorOwner=actor.StorageOwner.InstalledExecution;
+                var priorLegacy=actor.StorageOwner.LegacyInstalledExecution;
+                Assert.True(priorOwner!=null||priorLegacy!=null,"The accepted corridor must have a live owner");
+                Assert.NotNull(priorBacking);
+                int rejected=session.RejectedResults;
+                int activated=0;session.RouteActivated+=_=>activated++;
+                Assert.True(session.Move(1,new NavPoint(7,1)));
+                Assert.True(session.Requests.TryDequeue(out var request));
+                var group=session.GroupFor(1);
+                var origin=request.StartLocation.Value;var endpoint=request.GoalLocation.Value;
+                var leg=new NavCorridorLeg(origin,endpoint,NavTypedLegKind.Surface,null,
+                    Math.Sqrt(Math.Pow(origin.Position.X-endpoint.Position.X,2)+
+                        Math.Pow(origin.Position.Z-endpoint.Position.Z,2)),
+                    NavCorridorSection.IndividualConnector,0,0);
+                var forged=new NavCorridorDescriptor(1,new string('0',64),new string('0',64),
+                    NavigationAdmission.ExactProfileBinding(request.Profile),NavLocation.FlatSurface,
+                    request.HeldIdentity,request.BaseGeometry.Revision,request.Profile.Radius,request.Profile.GridCell,
+                    NavRouteProvenance.CommandMember,request.Session,group.GroupId,group.OrderRevision,
+                    group.CommandSequence,group.IssuedTick,request.MemberIdentity.OrderRevision,
+                    request.Entity,request.MemberIdentity.Incarnation,request.MemberIdentity.MobilityRevision,
+                    request.Request,request.Order,origin,endpoint,new[]{leg});
+                Assert.True(session.Answers.TryEnqueue(new NavigationAnswer(request,new[]{request.Goal},
+                    NavSolveStatus.Ready,forged)));
+                session.ApplyResults();
+                Assert.AreEqual(0,activated);
+                Assert.AreEqual(1,session.AppliedResults);
+                Assert.AreEqual(rejected+1,session.RejectedResults);
+                Assert.Zero(session.PendingCount);
+                Assert.AreEqual(request.Request,actor.FailedRequest);
+                Assert.AreEqual(NavigationOutcome.Rejected,actor.LastFailure);
+                // The newer order detaches the old group binding at admission. The
+                // motor still owns the old route and can keep following it.
+                Assert.IsNull(session.InstalledExecutionFor(1));
+                Assert.True(actor.StorageOwner.InstalledDetached);
+                Assert.AreSame(priorOwner,actor.StorageOwner.InstalledExecution);
+                Assert.AreSame(priorLegacy,actor.StorageOwner.LegacyInstalledExecution);
+                Assert.AreEqual(prior.Corridor.Request,actor.InstalledRequest);
+                Assert.AreSame(priorBacking,actor.StorageOwner.Global);
+                Assert.AreEqual(priorGoal,actor.Goal);
+                Assert.True(actor.Moving);
+                var position=actor.Position;
+                session.Step(1d/30);
+                Assert.Greater(actor.Position.X,position.X,"The retained route must still drive movement");
             }
-            Assert.AreEqual(1,session.AppliedResults);
-            var prior=session.InstalledExecutionFor(1);
-            Assert.NotNull(prior);
-            int activated=0;session.RouteActivated+=_=>activated++;
-            Assert.True(session.Move(1,new NavPoint(7,1)));
-            Assert.True(session.Requests.TryDequeue(out var request));
-            var group=session.GroupFor(1);
-            var origin=request.StartLocation.Value;var endpoint=request.GoalLocation.Value;
-            var leg=new NavCorridorLeg(origin,endpoint,NavTypedLegKind.Surface,null,
-                Math.Sqrt(Math.Pow(origin.Position.X-endpoint.Position.X,2)+
-                    Math.Pow(origin.Position.Z-endpoint.Position.Z,2)),
-                NavCorridorSection.IndividualConnector,0,0);
-            var forged=new NavCorridorDescriptor(1,new string('0',64),new string('0',64),
-                NavigationAdmission.ExactProfileBinding(request.Profile),NavLocation.FlatSurface,
-                request.HeldIdentity,request.BaseGeometry.Revision,request.Profile.Radius,request.Profile.GridCell,
-                NavRouteProvenance.CommandMember,request.Session,group.GroupId,group.OrderRevision,
-                group.CommandSequence,group.IssuedTick,request.MemberIdentity.OrderRevision,
-                request.Entity,request.MemberIdentity.Incarnation,request.MemberIdentity.MobilityRevision,
-                request.Request,request.Order,origin,endpoint,new[]{leg});
-            Assert.True(session.Answers.TryEnqueue(new NavigationAnswer(request,new[]{request.Goal},
-                NavSolveStatus.Ready,forged)));
-            session.ApplyResults();
-            Assert.AreEqual(0,activated);
-            Assert.AreEqual(1,session.AppliedResults);
-            Assert.True(session.Crowd.Units.Single().Moving);
-            Assert.AreEqual(prior.Corridor.Request,session.InstalledExecutionFor(1).Corridor.Request);
+            finally
+            {
+                session.ReleaseCommittedHostRoot();
+                session.DestroyNavigationAuthority();
+            }
         }
 
         [Test] public void TamperedReadyMailboxCorridorIsRejectedBeforeRestorePublication()

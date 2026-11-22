@@ -16,9 +16,15 @@ namespace Spacewars.Presentation
             var mines=BasaltCrownDetails.Mines(map,profile);
             if(mines.Length!=4)throw new System.InvalidOperationException("Basalt Crown requires four mines");
             basaltTerrainMaterial.SetVectorArray("_MineCenters",mines.Select(s=>new Vector4((float)s.Position.X,(float)s.Position.Z,0,0)).ToArray());
+            var plaza=BasaltCrownRoads.Plaza(map,profile);
+            basaltTerrainMaterial.SetVector("_RelayPlaza",new Vector4(plaza.Center.x,plaza.Center.y,plaza.Radius,0));
             var pads=BasaltCrownDetails.SitePads(map,profile,art);
             var centers=new Vector4[BasaltCrownDetails.MaxPads];var hubs=new Vector4[BasaltCrownDetails.MaxPads];
-            for(int i=0;i<pads.Length;i++){centers[i]=new Vector4((float)pads[i].Center.X,(float)pads[i].Center.Z,pads[i].Radius,0);hubs[i]=new Vector4((float)pads[i].Hub.X,(float)pads[i].Hub.Z,0,0);}
+            for(int i=0;i<pads.Length;i++){
+                var pad=pads[i];
+                centers[i]=new Vector4((float)pad.Center.X,(float)pad.Center.Z,pad.Corner,0);
+                hubs[i]=new Vector4(0,0,pad.HalfX,pad.HalfZ);
+            }
             basaltTerrainMaterial.SetInt("_SitePadCount",pads.Length);basaltTerrainMaterial.SetVectorArray("_SitePads",centers);basaltTerrainMaterial.SetVectorArray("_SiteHubs",hubs);
             // Ramp precedence and flat supports come from the navigation provider.
             // Clip the underlying decks around ramps so no flat cap covers the slope.
@@ -26,9 +32,14 @@ namespace Spacewars.Presentation
                 if(budget.Expired){yield return null;budget.Restart();}
                 var pieces=new List<NavObstacle>{support.Bounds};
                 if(support.Id!="citadel-ramp")foreach(var ramp in map.Supports)if(ramp.Id=="citadel-ramp")pieces=Subtract(pieces,ramp.Bounds);
-                foreach(var b in pieces)Prism(support.Id,b,-1,support.Height,support.HeightAt);
+                var citadel = new Vector4(
+                    support.Id == "citadel" ? 1 : 0,
+                    support.Id == "citadel-ramp" ? 1 : 0,
+                    (float)support.Height, 0);
+                foreach(var b in pieces)Prism(support.Id,b,-1,support.Height,support.HeightAt,citadel:citadel);
             }
             foreach(var rock in map.Solids)if(!double.IsNaN(rock.Top))Prism("Basalt ridge",rock,rock.Bottom,rock.Top,null,true);
+            yield return CreateBasaltEdgeRidges(map,art,budget);
             var details=BasaltCrownDetails.Plan(map,profile,art);
             foreach(var group in details.GroupBy(p=>p.Type)){
                 var mesh=BasaltCrownDetails.Build(group,map);FinalProceduralMesh.IndexOwned(mesh);terrainMeshes.Add(mesh);
@@ -36,11 +47,90 @@ namespace Spacewars.Presentation
                 obj.AddComponent<MeshFilter>().sharedMesh=mesh;var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=basaltTerrainMaterial;
                 var properties=new MaterialPropertyBlock();properties.SetFloat("_RoadSurface",0);properties.SetFloat("_DetailKind",(int)group.Key);renderer.SetPropertyBlock(properties);
             }
-            void Prism(string name,NavObstacle shape,double bottom,double top,System.Func<NavPoint,double> height,bool ridge=false){
+            void Prism(string name,NavObstacle shape,double bottom,double top,System.Func<NavPoint,double> height,bool ridge=false,Vector4 citadel=default){
                 var mesh=ridge?TerrainMesh.ErodedRock(shape,bottom,top,art.ridgeErosion):TerrainMesh.Prism(shape,bottom,top,height);FinalProceduralMesh.IndexOwned(mesh);terrainMeshes.Add(mesh);
                 var obj=new GameObject(name);obj.transform.SetParent(root,false);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
                 var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=basaltTerrainMaterial;
-                var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",Color.white);properties.SetFloat("_SurfaceRole",4);properties.SetFloat("_RoadSurface",ridge?0:1);renderer.SetPropertyBlock(properties);
+                var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",Color.white);properties.SetFloat("_SurfaceRole",4);properties.SetFloat("_RoadSurface",ridge?0:1);
+                if(citadel.x != 0 || citadel.y != 0)properties.SetVector("_CitadelSurface",citadel);
+                renderer.SetPropertyBlock(properties);
+            }
+        }
+        // One pair per entry. Rotate the dressing by 180 degrees for the opposite side.
+        static readonly (bool North, float Along, float Width, float Height)[] BasaltEdgeGroups =
+        {
+            (true, -34, 1f, 2.5f), (true, 40, .85f, 2.1f),
+            (false, -32, 1.05f, 2.7f), (false, 31, .9f, 2.2f),
+        };
+        const float BasaltEdgeInset = .4f;
+        // RGB selects the shared dark basalt, mid stone and mineral paint roles.
+        static readonly (float Start, float End, float Near, float Far, float Height, Color32 Paint)[] BasaltEdgeBlocks =
+        {
+            (-5, -2, 0, 2.2f, .58f, new Color32(255,0,0,255)),
+            (-2, 2, 0, 3.1f, 1f, new Color32(0,255,0,255)),
+            (2, 5, 0, 2f, .72f, new Color32(0,0,255,255)),
+            (-1, 2.5f, 3.1f, 4.3f, .7f, new Color32(255,0,0,255)),
+        };
+
+        private System.Collections.IEnumerator CreateBasaltEdgeRidges(BasaltCrownMap map,BasaltCrownArtProfile art,LoadingFrameBudget budget)
+        {
+            var ground=map.Supports.Single(support=>support.Id=="outer-ring").Bounds;
+            int groupIndex=0;
+            foreach(var group in BasaltEdgeGroups)
+            foreach(int side in new[]{1,-1})
+            {
+                if(budget.Expired){yield return null;budget.Restart();}
+                var tiers=new Mesh[3];
+                for(int level=0;level<tiers.Length;level++)
+                {
+                    var pieces=new List<CombineInstance>();
+                    try
+                    {
+                        foreach(var block in BasaltEdgeBlocks)
+                        {
+                            double top=group.Height*block.Height;
+                            var solid=Shape(block.Start,block.End,block.Near,block.Far);
+                            var mesh=TerrainMesh.ErodedRock(solid,-1,top,art.ridgeErosion,out _,subdivisions:2-level);
+                            var paint=new Color32[mesh.vertexCount];
+                            System.Array.Fill(paint,block.Paint);
+                            mesh.colors32=paint;
+                            pieces.Add(new CombineInstance{mesh=mesh});
+                        }
+                        var tier=new Mesh{name="Basalt border rock LOD "+level,indexFormat=UnityEngine.Rendering.IndexFormat.UInt32};
+                        tiers[level]=tier;
+                        terrainMeshes.Add(tier);
+                        tier.CombineMeshes(pieces.ToArray(),true,false);
+                        FinalProceduralMesh.IndexOwned(tier);
+                    }
+                    finally
+                    {
+                        foreach(var piece in pieces)ReleaseWorldObject(piece.mesh);
+                    }
+                }
+                foreach(var tier in tiers)tier.bounds=tiers[0].bounds;
+                var obj=new GameObject("Basalt border — "+(++groupIndex));
+                obj.transform.SetParent(root,false);
+                obj.AddComponent<MeshFilter>().sharedMesh=tiers[0];
+                var renderer=obj.AddComponent<MeshRenderer>();
+                renderer.sharedMaterial=basaltTerrainMaterial;
+                var properties=new MaterialPropertyBlock();
+                properties.SetFloat("_RoadSurface",0);
+                properties.SetFloat("_DetailKind",(int)BasaltCrownDetails.Kind.BorderRock);
+                renderer.SetPropertyBlock(properties);
+                var lod=obj.AddComponent<ModelDetailLod>();
+                lod.Configure(new Renderer[]{renderer},new[]{tiers[0]},new[]{tiers[1]},new[]{tiers[2]},tiers[0].bounds);
+                sceneryDetail.Add(lod);
+
+                NavObstacle Shape(float start,float end,float near,float far)
+                {
+                    double a=(group.Along+start*group.Width)*side, b=(group.Along+end*group.Width)*side;
+                    double edge=(group.North?ground.MaxZ:ground.MaxX)-BasaltEdgeInset;
+                    double c=(edge-near)*side, d=(edge-far)*side;
+                    var alongMin=System.Math.Min(a,b);var alongMax=System.Math.Max(a,b);
+                    var edgeMin=System.Math.Min(c,d);var edgeMax=System.Math.Max(c,d);
+                    return group.North?new NavObstacle(alongMin,edgeMin,alongMax,edgeMax)
+                        :new NavObstacle(edgeMin,alongMin,edgeMax,alongMax);
+                }
             }
         }
         private Texture2D basaltPaintMask,basaltAccentMask;
@@ -67,11 +157,34 @@ namespace Spacewars.Presentation
                 if(budget.Expired){yield return null;budget.Restart();}
                 fields[role]=Feather(fields[role],size,Mathf.CeilToInt((role==2?art.roadFeather:art.naturalFeather)/step));
             }
+            // The crest follows exposed navigation edges, which omit ramp openings and internal seams.
+            var crest = new float[length];
+            float width = art.strataSpacing;
+            int Pixel(double coordinate) =>
+                Mathf.Clamp(Mathf.FloorToInt((float)(coordinate + map.HalfExtent) / step), 0, size - 1);
+            for (int edge = map.Solids.Count; edge < map.MovementBlockers.Count; edge++)
+            {
+                if (budget.Expired) { yield return null; budget.Restart(); }
+                var cliff = map.MovementBlockers[edge];
+                int minX = Pixel(cliff.MinX - width), maxX = Pixel(cliff.MaxX + width);
+                int minZ = Pixel(cliff.MinZ - width), maxZ = Pixel(cliff.MaxZ + width);
+                for (int z = minZ; z <= maxZ; z++)
+                for (int x = minX; x <= maxX; x++)
+                {
+                    double worldX = (x + .5) * step - map.HalfExtent;
+                    double worldZ = (z + .5) * step - map.HalfExtent;
+                    double dx = System.Math.Max(0, System.Math.Max(cliff.MinX - worldX, worldX - cliff.MaxX));
+                    double dz = System.Math.Max(0, System.Math.Max(cliff.MinZ - worldZ, worldZ - cliff.MaxZ));
+                    float weight = 1 - Mathf.SmoothStep(0, 1, (float)System.Math.Sqrt(dx * dx + dz * dz) / width);
+                    int i = z * size + x;
+                    crest[i] = Mathf.Max(crest[i], weight);
+                }
+            }
             var a=new Color[length];var c=new Color[length];
             for(int i=0;i<length;i++){
                 float total=0;foreach(var f in fields)total+=f[i];total=Mathf.Max(total,.00001f);
                 a[i]=new Color(fields[0][i]/total,fields[1][i]/total,fields[2][i]/total,fields[3][i]/total);
-                c[i]=new Color(fields[4][i]/total,fields[5][i]/total,fields[6][i]/total,0);
+                c[i]=new Color(fields[4][i]/total,fields[5][i]/total,fields[6][i]/total,crest[i]);
             }
             Texture2D Mask(string name,Color[] pixels){var t=new Texture2D(size,size,TextureFormat.RGBA32,false,true){name=name,wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};t.SetPixels(pixels);t.Apply(false,false);return t;}
             ready(new[]{Mask("Basalt Crown ground role weights",a),Mask("Basalt Crown accent role weights",c)});

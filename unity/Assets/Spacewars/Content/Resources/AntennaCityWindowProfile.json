@@ -1,0 +1,11 @@
+{
+  "baseRadius": 51,
+  "baseActivity": 0.22,
+  "trafficRadius": 26,
+  "trafficActivity": 0.55,
+  "battleRadius": 42,
+  "battleActivity": 0.76,
+  "shotActivity": 0.095,
+  "wakeSeconds": 3.2,
+  "fadeSeconds": 14
+}

@@ -26,8 +26,8 @@ namespace Spacewars.Input.Tests
             Call(first,"ToggleSelectionRoster",false);Assert.True(Get<bool>(first,"selectionRosterExpanded"));CompactContext(2,reset:true);Selection(first).Clear();Selection(first).Add(20001);Call(first,"UpdateHud");Assert.False(Get<bool>(first,"selectionRosterExpanded"),"replacement starts collapsed");
             Assert.AreEqual(receipts,Runtime.OfflineFrame.Receipts.Count);Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
         }
-        [UnityTest] public IEnumerator RtSingleDetailsKeepCameraAndCursorMoving()=>RtCardKeepsStickMotion(1);
-        [UnityTest] public IEnumerator RtGroupRosterKeepsCameraAndCursorMoving()=>RtCardKeepsStickMotion(50);
+        [UnityTest] public IEnumerator RtSingleDetailsKeepCameraPanAndZoom()=>RtCardKeepsStickMotion(1);
+        [UnityTest] public IEnumerator RtGroupRosterKeepsCameraPanAndZoom()=>RtCardKeepsStickMotion(50);
         private IEnumerator RtCardKeepsStickMotion(int count)
         {
             compactBases.Clear();yield return StartOrdinary(2);CompactContext(count,reset:true);
@@ -35,16 +35,15 @@ namespace Spacewars.Input.Tests
             var seat=Seats[1];var other=Seats[0];var pad=pads[1];var camera=Get<Camera>(seat,"cameraView");
             var otherCamera=Get<Camera>(other,"cameraView").transform.position;var otherCursor=Get<Vector2>(other,"battleCursor");
             var selection=Selection(seat).ToArray();long sequence=Get<long>(seat,"sequence");float zoom=camera.orthographicSize;
-            PadCursor(seat,(NavPoint)Call(seat,"Ground",camera.pixelRect.center+new Vector2(-60,40)));
             Press(pad.rightTrigger);InputSystem.Update();Call(seat,"PollOrdinaryPad");Release(pad.rightTrigger);InputSystem.Update();Call(seat,"PollOrdinaryPad");
             Assert.True(Get<bool>(seat,"selectionRosterPadFocus"));Assert.True(Get<bool>(seat,"selectionRosterExpanded"));
-            var start=camera.transform.position;var cursor=Get<Vector2>(seat,"battleCursor");
+            var start=camera.transform.position;
             Set(pad.leftStick,Vector2.right);Set(pad.rightStick,Vector2.up);InputSystem.Update();
             for(int i=0;i<3;i++){yield return null;Call(seat,"PollOrdinaryPad");}
             Assert.Greater(Vector3.Distance(start,camera.transform.position),.01f,"LS must pan while RT card is focused");
-            Assert.Greater(Vector2.Distance(cursor,Get<Vector2>(seat,"battleCursor")),1,"RS must move the field cursor while card is focused");
-            Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(seat,"battleCursorVisual").style.display.value,"cursor must be rendered at its new position");
-            Assert.True(Get<bool>(seat,"selectionRosterPadFocus"));Assert.AreEqual(zoom,camera.orthographicSize);
+            Assert.AreEqual(camera.pixelRect.center,Get<Vector2>(seat,"battleCursor"),"RT card preserves centered aim");
+            Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(seat,"battleCursorVisual").style.display.value,"center aim remains visible");
+            Assert.True(Get<bool>(seat,"selectionRosterPadFocus"));Assert.Less(camera.orthographicSize,zoom,"RS still zooms while the card owns the buttons");
             CollectionAssert.AreEqual(selection,Selection(seat));Assert.AreEqual(sequence,Get<long>(seat,"sequence"));
             yield return Capture("rt-card-motion-"+count,()=>Call(seat,"PollOrdinaryPad"),1600,1000,captureChecks:()=>
             {
@@ -74,14 +73,8 @@ namespace Spacewars.Input.Tests
         }
         [UnityTest] public IEnumerator MouseUsesIconDirectlyAndLevelOpensOnlyPendingCards()
         {
-            yield return StartOrdinary(2,configureRoster:d=>d.Participants[0].DeviceId=0);var seat=Seats[0];var other=Seats[1];var initial=Get<PlayableSnapshot>(seat,"view");var selected=Selection(seat).ToArray();
-            Runtime.RequestPause(true);yield return Wait(()=>Runtime.Latest.Paused,"paused fixture setup");
-            // Fixture initialization at the paused authority boundary. Real command execution below
-            // uses the ordinary threaded runtime, not a substituted presentation snapshot.
-            var domain=typeof(PlayableRuntime).GetField("domain",F).GetValue(Runtime);var type=domain.GetType();
-            type.GetMethod("CreditOrbital",F).Invoke(domain,new object[]{(PlayableOwner?)initial.Owner,Get<PlayableSnapshot>(other,"view").Owner,750d});
-            Assert.AreEqual(PlayableCommandStatus.Applied,type.GetMethod("ChooseOrbital",F).Invoke(domain,new object[]{initial.Owner,1}));
-            Runtime.RequestPause(false);yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").Orbital.Abilities.Count==1,"seed published");Call(seat,"UpdateOrbitalHud");
+            yield return StartMouseOrbital();
+            var seat=Seats[0];var other=Seats[1];var selected=Selection(seat).ToArray();
             Assert.AreEqual(DisplayStyle.None,Get<Label>(seat,"orbitalLtHint").style.display.value);Assert.AreEqual(DisplayStyle.None,Get<Label>(seat,"orbitalXpTooltip").style.display.value);
             var level=Get<Button>(seat,"orbitalLevelButton");using(var enter=PointerEnterEvent.GetPooled()){enter.target=level;level.SendEvent(enter);}Call(seat,"UpdateOrbitalHud");Assert.AreEqual(DisplayStyle.Flex,Get<Label>(seat,"orbitalXpTooltip").style.display.value);StringAssert.Contains("0 / 1000",Get<Label>(seat,"orbitalXpTooltip").text);
             yield return Capture("floating-mouse-hover",()=>{Put(seat,"orbitalLevelHovered",true);Call(seat,"UpdateOrbitalHud");},1600,1000,captureChecks:()=>Inside(Get<VisualElement>(seat,"root").worldBound,Get<Label>(seat,"orbitalXpTooltip").worldBound,"XP tooltip"));
@@ -94,6 +87,71 @@ namespace Spacewars.Input.Tests
             yield return Capture("floating-mouse-cards",captureWidth:1600,captureHeight:1000,captureChecks:()=>Assert.AreEqual(DisplayStyle.None,Get<OrbitalBattleRing>(seat,"orbitalRing").style.display.value));
             nav.ActivateElement(Get<VisualElement>(seat,"orbitalCards").Q<Button>("orbital-card-3"));yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").Orbital.Abilities.Count==2,"mouse choice applied");Assert.False(Get<bool>(seat,"orbitalOpen"));Assert.False((bool)Call(seat,"OpenOrbital",false),"mouse cannot open a wheel when no choice is pending");CollectionAssert.AreEqual(selected,Selection(seat));
             Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
+        }
+
+        [UnityTest] public IEnumerator MouseHoverShowsOrbitalAbilityState()
+        {
+            yield return StartMouseOrbital();
+            var seat = Seats[0];
+            var root = Get<VisualElement>(seat, "root");
+            var slot = root.Q<Button>("orbital-slot-1");
+            var tip = root.Q("orbital-ability-tooltip");
+            var status = tip.Q<Label>("orbital-tooltip-status");
+            void HoverAbility()
+            {
+                using var enter = PointerEnterEvent.GetPooled(new Event { type = EventType.MouseMove, mousePosition = slot.worldBound.center });
+                enter.target = slot;
+                slot.SendEvent(enter);
+                Call(seat, "UpdateOrbitalHud");
+            }
+            HoverAbility();
+            Assert.AreEqual(DisplayStyle.Flex, tip.style.display.value);
+            Assert.AreEqual(OrbitalAbilities.Name(1), tip.Q<Label>("orbital-tooltip-title").text);
+            Assert.AreEqual("Готово", status.text);
+            var data=Get<PlayableProfile>(seat,"profile").CopyData();
+            var stats=tip.Q<Label>("orbital-tooltip-stats").text;
+            StringAssert.Contains("Радиус: "+data.orbitalScanRadius.ToString("0.##")+" м",stats);
+            StringAssert.Contains("Время: "+data.orbitalScanSeconds.ToString("0.##")+" с",stats);
+            StringAssert.DoesNotContain("Откат",stats);
+            yield return Capture("orbital-ability-hover", HoverAbility, 1600, 1000, captureChecks: () =>
+            {
+                Inside(root.worldBound, tip.worldBound, "ability tooltip");
+                Assert.Greater(tip.worldBound.xMin, slot.worldBound.xMax);
+                Assert.AreEqual(PickingMode.Ignore, tip.pickingMode);
+                Assert.AreSame(slot, root.panel.Pick(slot.worldBound.center));
+            });
+            using (var leave = PointerLeaveEvent.GetPooled(new Event { type = EventType.MouseMove, mousePosition = tip.worldBound.center }))
+            {
+                leave.target = slot;
+                slot.SendEvent(leave);
+            }
+            Assert.AreEqual(DisplayStyle.None, tip.style.display.value);
+            var nav = Get<NativeMenuNavigation>(seat, "menuNavigation");
+            nav.ActivateElement(slot);
+            HoverAbility();
+            Assert.AreEqual("Выбор цели", status.text);
+            Call(seat, "ConfirmScan", new NavPoint(0, 0), false);
+            yield return Wait(() => Get<PlayableSnapshot>(seat, "view").Orbital.Abilities[0].Remaining > 0, "mouse use applied");
+            HoverAbility();
+            Assert.AreEqual(DisplayStyle.Flex, tip.style.display.value);
+            Assert.AreEqual("Перезарядка",status.text);
+            nav.ActivateElement(Get<Button>(seat, "orbitalLevelButton"));
+            Assert.True(Get<bool>(seat, "orbitalOpen"));
+            Assert.AreEqual(DisplayStyle.None, tip.style.display.value);
+            Runtime.RequestStop();
+            yield return Wait(() => Runtime.IsStopped, "stop");
+        }
+
+        private IEnumerator StartMouseOrbital()
+        {
+            yield return StartOrdinary(2,configureRoster:d=>d.Participants[0].DeviceId=0);var seat=Seats[0];var other=Seats[1];var initial=Get<PlayableSnapshot>(seat,"view");
+            Runtime.RequestPause(true);yield return Wait(()=>Runtime.Latest.Paused,"paused fixture setup");
+            // Fixture initialization at the paused authority boundary. Real command execution below
+            // uses the ordinary threaded runtime, not a substituted presentation snapshot.
+            var domain=typeof(PlayableRuntime).GetField("domain",F).GetValue(Runtime);var type=domain.GetType();
+            type.GetMethod("CreditOrbital",F).Invoke(domain,new object[]{(PlayableOwner?)initial.Owner,Get<PlayableSnapshot>(other,"view").Owner,750d});
+            Assert.AreEqual(PlayableCommandStatus.Applied,type.GetMethod("ChooseOrbital",F).Invoke(domain,new object[]{initial.Owner,1}));
+            Runtime.RequestPause(false);yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").Orbital.Abilities.Count==1,"seed published");Call(seat,"UpdateOrbitalHud");
         }
     }
 }

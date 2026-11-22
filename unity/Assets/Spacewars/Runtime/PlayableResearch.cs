@@ -16,7 +16,11 @@ namespace Spacewars.Runtime
             if(!research.TryGetValue(owner,out var orders))research.Add(owner,orders=new List<ResearchOrder>());
             return orders;
         }
-        private bool HasResearch(PlayableOwner owner,PlayableResearchKind kind)=>research.TryGetValue(owner,out var orders)&&orders.Any(o=>o.Kind==kind&&o.Complete);
+        private bool HasResearch(PlayableOwner owner,PlayableResearchKind kind)
+        {
+            if(research.TryGetValue(owner,out var orders))for(int i=0;i<orders.Count;i++)if(orders[i].Kind==kind&&orders[i].Complete)return true;
+            return false;
+        }
         private bool CenterUpgraded(int id)=>buildings.TryGetValue(id,out var b)&&b.Kind==PlayableBuildingKind.ScientificCenter&&research.TryGetValue(b.Owner,out var orders)&&orders.Any(o=>PlayableResearchRules.Local(o.Kind)&&o.CenterId==id&&o.Complete);
         private bool OrderedAt(PlayableOwner owner,PlayableResearchKind kind,int centerId)=>Research(owner).Any(o=>o.Kind==kind&&(!PlayableResearchRules.Local(kind)||o.CenterId==centerId));
         private bool LegalResearchCenter(int id,PlayableOwner owner,PlayableResearchKind kind)=>ReadyResearchCenter(id,owner)&&(!PlayableResearchRules.NeedsUpgradedCenter(kind)||CenterUpgraded(id));
@@ -34,6 +38,7 @@ namespace Spacewars.Runtime
             if(!buildings.TryGetValue(centerId,out var center)||center.Owner!=owner||center.Kind!=PlayableBuildingKind.ScientificCenter||!center.Ready||center.Sale!=null)return PlayableCommandStatus.InvalidEntity;
             if(SystemsDisabled(centerId)){message="Сбой систем";return PlayableCommandStatus.Rejected;}
             if(!Enum.IsDefined(typeof(PlayableResearchKind),kind)){message="Неизвестное исследование";return PlayableCommandStatus.Rejected;}
+            if(PlayableResearchRules.Local(kind)&&BoostRemaining(centerId)>0){message=BoostBlockedMessage;return PlayableCommandStatus.Rejected;}
             if(!ResearchProducerReady(owner,kind)){message=PlayableResearchRules.ProducerRequirement(kind);return PlayableCommandStatus.Rejected;}
             if(PlayableResearchRules.CenterRequirement(kind,CenterUpgraded(centerId)) is string requirement){message=requirement;return PlayableCommandStatus.Rejected;}
             var previous=PlayableResearchRules.Previous(kind);if(!FreeProvingGround&&previous.HasValue&&!HasResearch(owner,previous.Value)){message="Сначала завершите предыдущий уровень";return PlayableCommandStatus.Rejected;}
@@ -78,7 +83,7 @@ namespace Spacewars.Runtime
             {
                 var previous=PlayableResearchRules.Previous(next.Kind);
                 if(previous.HasValue&&!HasResearch(owner,previous.Value))continue;
-                if(SystemsDisabled(next.CenterId))continue;
+                if(SystemsDisabled(next.CenterId)||PlayableResearchRules.Local(next.Kind)&&BoostRemaining(next.CenterId)>0)continue;
                 if(!LegalResearchCenter(next.CenterId,owner,next.Kind)||!ResearchProducerReady(owner,next.Kind))continue;
                 double cost=ResearchCost(next.Kind);if(!CanAfford(owner,cost))continue;
                 var center=buildings[next.CenterId];
@@ -98,12 +103,13 @@ namespace Spacewars.Runtime
                 foreach(var active in Research(owner).Where(o=>o.Active&&!o.Complete).OrderBy(o=>o.Id).ToArray())
                 {
                     if(SystemsDisabled(active.CenterId))continue;
-                    active.Elapsed=Math.Min(active.Duration,active.Elapsed+dt);
+                    active.Elapsed=Math.Min(active.Duration,active.Elapsed+BoostedWork(active.CenterId,dt));
                     if(active.Duration-active.Elapsed>2.220446049250313e-16*active.Duration*128)continue;
                     active.Elapsed=active.Duration;
                     var previousMaximum=units.Values.Where(u=>u.Owner==owner).ToDictionary(u=>u.Id,u=>UnitMaximumHealth(owner,u.Kind));
                     var previousBuildingMaximum=BuildingMaxima(owner);
                     active.Active=false;active.Complete=true;
+                    if(active.Kind==PlayableResearchKind.ShkvalGuidance)RescaleShkvalGuidanceTimers(owner,true);
                     Fact(owner,MatchFactKind.ResearchCompleted,ResearchCost(active.Kind),(int)active.Kind,PlayableResearchRules.Description(profile,active.Kind));
                     if(PlayableResearchRules.Concrete(active.Kind))ScaleBuildingHealth(owner,previousBuildingMaximum);
                     if(PlayableResearchRules.Defense(active.Kind)||active.Kind==PlayableResearchKind.TankChassis)
@@ -114,6 +120,17 @@ namespace Spacewars.Runtime
                 }
                 StartResearchIfPossible(owner);
             }
+        }
+        private void RefundDestroyedResearchQueue(Building center)
+        {
+            var queue=Research(center.Owner);
+            foreach(var order in queue.Where(o=>o.CenterId==center.Id&&!o.Complete))
+            {
+                if(!order.Active)continue;
+                AddCredits(center.Owner,order.PaidCost);
+                Sound(PlayableSoundKind.ResearchCancelled,center.Position,PlayableEntityKind.Tank,center.Owner,true);
+            }
+            queue.RemoveAll(o=>o.CenterId==center.Id&&!o.Complete);
         }
         private void InterruptResearchCenter(int centerId)
         {
@@ -167,7 +184,49 @@ namespace Spacewars.Runtime
             var previous=PlayableResearchRules.Previous(kind);
             return !FreeProvingGround&&previous.HasValue&&!HasResearch(owner,previous.Value)?"Сначала завершите предыдущий уровень":null;
         }
-        private PlayableResearchAvailabilitySnapshot[] ResearchAvailability(PlayableOwner owner)=>Enum.GetValues(typeof(PlayableResearchKind)).Cast<PlayableResearchKind>().Select(kind=>
+        // Availability reads only these discrete facts, not elapsed research time,
+        // credits or positive health. Compare the complete read set on every use;
+        // no tick/revision shortcut or authority state is retained in the memo.
+        private sealed class ResearchAvailabilityMemo
+        {
+            internal PlayableProfile Profile;
+            internal bool Free,HasOrders;
+            internal (int Id,PlayableBuildingKind Kind,bool Ready,bool Alive,bool Unsold)[] Buildings;
+            internal (PlayableResearchKind Kind,int Center,bool Active,bool Complete)[] Orders;
+            internal PlayableResearchAvailabilitySnapshot[] Value;
+        }
+        private readonly Dictionary<PlayableOwner,ResearchAvailabilityMemo> researchAvailabilityMemo=new Dictionary<PlayableOwner,ResearchAvailabilityMemo>();
+        private PlayableResearchAvailabilitySnapshot[] ResearchAvailability(PlayableOwner owner)
+        {
+            bool hasOrders=research.TryGetValue(owner,out var orders);
+            if(researchAvailabilityMemo.TryGetValue(owner,out var memo)&&ReferenceEquals(memo.Profile,profile)&&memo.Free==FreeProvingGround&&memo.HasOrders==hasOrders)
+            {
+                bool same=true;int i=0;
+                foreach(var b in buildings.Values)
+                {
+                    if(b.Owner!=owner)continue;
+                    if(i>=memo.Buildings.Length||memo.Buildings[i++]!=(b.Id,b.Kind,b.Ready,b.Health>0,b.Sale==null)){same=false;break;}
+                }
+                same&=i==memo.Buildings.Length;
+                if(same&&(orders?.Count??0)==memo.Orders.Length)
+                {
+                    for(i=0;i<memo.Orders.Length;i++)
+                    {var o=orders[i];if(memo.Orders[i]!=(o.Kind,o.CenterId,o.Active,o.Complete)){same=false;break;}}
+                    if(same)return memo.Value;
+                }
+            }
+            var value=BuildResearchAvailability(owner);
+            // The original builder can lazily create an empty owner order list.
+            hasOrders=research.TryGetValue(owner,out orders);
+            researchAvailabilityMemo[owner]=new ResearchAvailabilityMemo
+            {
+                Profile=profile,Free=FreeProvingGround,HasOrders=hasOrders,Value=value,
+                Buildings=buildings.Values.Where(b=>b.Owner==owner).Select(b=>(b.Id,b.Kind,b.Ready,b.Health>0,b.Sale==null)).ToArray(),
+                Orders=orders==null?Array.Empty<(PlayableResearchKind,int,bool,bool)>():orders.Select(o=>(o.Kind,o.CenterId,o.Active,o.Complete)).ToArray()
+            };
+            return value;
+        }
+        private PlayableResearchAvailabilitySnapshot[] BuildResearchAvailability(PlayableOwner owner)=>Enum.GetValues(typeof(PlayableResearchKind)).Cast<PlayableResearchKind>().Select(kind=>
         {
             var blocked=ResearchBlockedReason(owner,kind);
             return new PlayableResearchAvailabilitySnapshot(kind,ResearchCost(kind),(PlayableResearchRules.Local(kind)||!HasResearch(owner,kind)&&!HasActiveResearch(owner,kind))&&blocked==null,blocked);
@@ -190,7 +249,14 @@ namespace Spacewars.Runtime
                     level=Math.Max(level,PlayableResearchRules.Level(order.Kind));
             return level;
         }
-        private double BuildingHealthMultiplier(PlayableOwner owner,PlayableProfile terms)=>1+(HasResearch(owner,PlayableResearchKind.AdvancedReinforcedConcrete)?terms.ReinforcedConcreteLevel2BonusPercent:HasResearch(owner,PlayableResearchKind.ReinforcedConcrete)?terms.ReinforcedConcreteBonusPercent:0)/100;
+        private int ConcreteLevel(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.AdvancedReinforcedConcrete)?2:
+            HasResearch(owner,PlayableResearchKind.ReinforcedConcrete)?1:0;
+        private double BuildingHealthMultiplier(PlayableOwner owner,PlayableProfile terms)=>1+(ConcreteLevel(owner) switch
+        {
+            2=>terms.ReinforcedConcreteLevel2BonusPercent,
+            1=>terms.ReinforcedConcreteBonusPercent,
+            _=>0
+        })/100;
         private double BuildingMaximumHealth(PlayableOwner owner,PlayableBuildingKind kind,PlayableProfile terms=null)=>PlayableStatRounding.MaximumHealth(profile,TerritoryRules.Health(terms??profile,kind)*BuildingHealthMultiplier(owner,profile));
         // Clamp full HP to its maximum so binary noise cannot expose a phantom extra HP.
         private static double RescaleCurrentHealth(double health,double previous,double maximum)=>Math.Min(maximum,health*(maximum/previous));
@@ -200,10 +266,9 @@ namespace Spacewars.Runtime
             foreach(var b in buildings.Values)if(b.Owner==owner)b.Health=RescaleCurrentHealth(b.Health,previous[b.Id],BuildingMaximumHealth(owner,b.Kind));
         }
         private double UnitMaximumHealth(PlayableOwner owner,PlayableEntityKind kind)=>PlayableStatRounding.MaximumHealth(profile,PlayableUnitRules.Health(profile,kind)*HealthMultiplier(owner)*(kind==PlayableEntityKind.Tank&&Chassis(owner)?1+profile.TankChassisHealthBonusPercent/100:1));
-        private bool UnitUpgraded(Unit u)=>u.Kind==PlayableEntityKind.Hawk?false:u.AuthoredUpgrade??(u.Kind==PlayableEntityKind.Tank?Chassis(u.Owner):u.Kind==PlayableEntityKind.Explorer?Assault(u.Owner):Guidance(u.Owner));
+        private bool UnitUpgraded(Unit u)=>u.Kind==PlayableEntityKind.Igla?false:u.Kind==PlayableEntityKind.Cerberus?false:PlayableUnitRules.Aircraft(u.Kind)?false:u.AuthoredUpgrade??(u.Kind==PlayableEntityKind.Tank?Chassis(u.Owner):u.Kind==PlayableEntityKind.Explorer?Assault(u.Owner):Guidance(u.Owner));
         private bool HawkSalvo(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.HawkSalvoSystems);
         private double HawkPreparation(Unit u)=>HawkSalvo(u.Owner)?profile.HawkUpgradedPreparationSeconds:profile.HawkPreparationSeconds;
-        private double HawkReload(Unit u)=>HawkSalvo(u.Owner)?profile.HawkUpgradedReloadSeconds:profile.HawkReloadSeconds;
         private double HawkSalvoDelay(Unit u)=>HawkSalvo(u.Owner)?profile.HawkUpgradedSalvoDelay:profile.HawkSalvoDelay;
         private bool Chassis(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.TankChassis);
         private bool Assault(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.ExplorerAssaultGuns);

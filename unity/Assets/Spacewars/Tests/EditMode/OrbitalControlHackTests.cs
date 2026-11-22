@@ -106,6 +106,52 @@ namespace Spacewars.Tests.EditMode
             var captured=View().Entities.Single(e=>e.Id==id);Assert.Null(captured.CurrentOrder);Assert.False(captured.Moving);Assert.False(Rows("tacticalQueues").Contains(id));
             var bytes=(byte[])Call("CaptureWorldBytes",7,config.SourceIdentity);CollectionAssert.AreEqual(bytes,OfflineParticipantAuthority.Restore(bytes,config).CaptureBytes());
         }
+        [Test] public void ControlTransferStopPreservesConcurrentRouteWorkerProgress()
+        {
+            var world=(PlayableDomain)domain;
+            var navigation=world.Navigation;
+            var worker=new CertifiedRouteKernel();
+            int captive=Spawn(PlayableOwner.Enemy,NearHome);
+            Hurt(captive);
+            int scout=Spawn(PlayableOwner.Player,new NavPoint(NearHome.X,NearHome.Z+5),PlayableEntityKind.Explorer);
+            Assert.True(navigation.Move(scout,new NavPoint(NearHome.X+5,NearHome.Z+5)));
+            PlayableRouteBinding Binding()=>new PlayableRouteBinding(world.Geometry,profile,navigation.Admission,navigation.RoutePort);
+            bool At(CertifiedRouteKernel.PumpStage stage)
+            {
+                var root=navigation.PinCommittedHostRoot();
+                try{return root?.Frontier.Stage==stage;}
+                finally{root?.Release();}
+            }
+            NavigationHostRoot advanced=null;
+            try
+            {
+                worker.PauseAtPhysicalBoundary=()=>At(CertifiedRouteKernel.PumpStage.Retirement);
+                worker.Pump(Binding(),4);
+                Assert.True(At(CertifiedRouteKernel.PumpStage.Retirement));
+                navigation.AfterStopPreparationForQa=_=>
+                {
+                    worker.PauseAtPhysicalBoundary=()=>At(CertifiedRouteKernel.PumpStage.ArrivalAdvance);
+                    worker.Pump(Binding(),4);
+                    Assert.True(At(CertifiedRouteKernel.PumpStage.ArrivalAdvance));
+                    advanced=navigation.PinCommittedHostRoot();
+                };
+                Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,captive));
+                Assert.NotNull(advanced);
+                var current=navigation.PinCommittedHostRoot();
+                try{Assert.AreSame(advanced,current);}
+                finally{current?.Release();}
+                Assert.AreEqual(PlayableOwner.Player,View().Entities.Single(e=>e.Id==captive).Owner);
+                Assert.AreEqual("player-1",navigation.GroupFor(captive).OwnerId);
+                Assert.Greater(View().Orbital.CommonRemaining,0);
+            }
+            finally
+            {
+                advanced?.Release();
+                navigation.AfterStopPreparationForQa=null;
+                worker.Clear();
+                navigation.ReleaseCommittedHostRoot();
+            }
+        }
         [Test] public void RelayLossNotifiesAtNeutralizationOnlyAndUsesOrdinaryCameraHistory()
         {
             Cleanup();var points=new[]{new NavPoint(-16,-14),new NavPoint(16,14),new NavPoint(-16,14)};

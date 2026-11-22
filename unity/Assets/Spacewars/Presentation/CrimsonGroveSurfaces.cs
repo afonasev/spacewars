@@ -8,6 +8,42 @@ namespace Spacewars.Presentation
     // Cosmetic geometry derived from unchanged authored blockers and construction slots.
     public static partial class CrimsonGroveSurfaces
     {
+        // These weights are written once into the terrain texture and consumed by both
+        // the shader and the trail query. Detail color, loose stones and lighting
+        // never decide whether the surface can take an impression.
+        internal static Vector2 GroundCoverage(Vector2 point,CrimsonGroveArtProfile art,float wornRoad)
+        {
+            var broad=point/art.macroScale;
+            broad+=new Vector2(Noise(broad*.8f+Vector2.one*31),Noise(broad*.7f+Vector2.one*59))*.7f;
+            float deposit=Noise(broad+Vector2.one*71)*.75f+Noise(broad*2.1f+Vector2.one*17)*.25f;
+            float grainEdge=(Noise(point*.8f+Vector2.one*97)-.5f)*.075f;
+            float bedrock=Mathf.SmoothStep(0,1,Mathf.InverseLerp(1-art.bedrockCoverage-.018f,1-art.bedrockCoverage+.018f,deposit+grainEdge));
+            float burial=Noise(point/art.roadDepositScale+Vector2.one*19)*.7f+Noise(point/(art.roadDepositScale*.32f)+Vector2.one*43)*.3f;
+            float exposed=Mathf.SmoothStep(0,1,Mathf.InverseLerp(art.roadBurial-.08f,art.roadBurial+.12f,burial));
+            return new Vector2(bedrock,wornRoad*exposed*.85f);
+        }
+
+        static float Noise(Vector2 point)
+        {
+            float x=Mathf.Floor(point.x),z=Mathf.Floor(point.y);
+            float u=point.x-x,v=point.y-z;
+            u=u*u*(3-2*u);v=v*v*(3-2*v);
+            return Mathf.Lerp(Mathf.Lerp(Hash(x,z),Hash(x+1,z),u),Mathf.Lerp(Hash(x,z+1),Hash(x+1,z+1),u),v);
+        }
+
+        static float Hash(float x,float z)
+        {
+            float value=Mathf.Sin(x*127.1f+z*311.7f)*43758.5453f;
+            return value-Mathf.Floor(value);
+        }
+
+        internal static bool HardGround(Texture2D mask,CrimsonGroveMap map,NavPoint point)
+        {
+            float span=(float)(2*map.HalfExtent);
+            var coverage=mask.GetPixelBilinear((float)point.X/span+.5f,(float)point.Z/span+.5f);
+            return Mathf.Lerp(coverage.b,1,coverage.a)>=.5f;
+        }
+
         public static float CrestHeight(NavObstacle shape,CrimsonGroveArtProfile art,float x,float z){
             float n=Mathf.PerlinNoise(x/12+31,z/12+71);
             return (float)shape.Top-Mathf.Min(art.erosion,(float)shape.Top*.4f)*Mathf.SmoothStep(0,1,Mathf.InverseLerp(.2f,.8f,n));

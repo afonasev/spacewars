@@ -13,6 +13,7 @@ namespace Spacewars.Presentation
         public static float UiScale {get=>Finite("uiScale",1,1,1.25f);set {NativePreferenceWriter.SetFloat(Prefix+"uiScale",value);}}
         public static bool HighContrast {get=>PlayerPrefs.GetInt(Prefix+"highContrast",0)!=0;set {NativePreferenceWriter.SetInt(Prefix+"highContrast",value?1:0);}}
         public static bool ShowFps {get=>PlayerPrefs.GetInt(Prefix+"showFps",0)!=0;set {NativePreferenceWriter.SetInt(Prefix+"showFps",value?1:0);}}
+        public static bool ShowTps {get=>PlayerPrefs.GetInt(Prefix+"showTps",0)!=0;set {NativePreferenceWriter.SetInt(Prefix+"showTps",value?1:0);}}
         private static NativeLocalInputProfile input;
         public static float DefaultDeadzone => (input??(input=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text))).deadzone;
         public static float Deadzone {get=>Finite("deadzone",DefaultDeadzone,0,.5f);set {NativePreferenceWriter.SetFloat(Prefix+"deadzone",value);}}

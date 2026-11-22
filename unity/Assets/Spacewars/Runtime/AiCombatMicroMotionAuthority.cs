@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Spacewars.Simulation;
+using Spacewars.Simulation.Ai;
 namespace Spacewars.Runtime
 {
     // Domain-thread consumer of the complete owning Native publication. Ordinary
@@ -13,12 +14,15 @@ namespace Spacewars.Runtime
         readonly AiCombatMicroExecutionStorage storage=new AiCombatMicroExecutionStorage();
         readonly Dictionary<AiCombatMicroExecutionOwner,AiCombatMicroExecutionOwner.Source> sources=new Dictionary<AiCombatMicroExecutionOwner,AiCombatMicroExecutionOwner.Source>();
         Adoption pending;
+        readonly Dictionary<int,(PlayableAiOwnerLoop Owner,MotionExecutionBinding Binding,string Reason)> deniedRepairBranches=
+            new Dictionary<int,(PlayableAiOwnerLoop,MotionExecutionBinding,string)>();
         readonly List<Adoption> cleanup=new List<Adoption>();
         readonly Dictionary<AiCombatMicroExecutionOwner,Issuer> issuers=new Dictionary<AiCombatMicroExecutionOwner,Issuer>();
         internal long Publications{get;private set;}
         internal long AffectedPublications{get;private set;}
         internal bool HasPending=>pending!=null;
         [NonSerialized] internal Func<int,int> WorkGrantForTests;
+        private int remainingGroundWork;
         internal string LastRefusal{get;private set;}
         internal AiCombatMicroMotionAuthority(PlayableDomain domain,Func<IReadOnlyList<PlayableAiOwnerLoop>> owners)
         {this.domain=domain;currentOwners=owners;}
@@ -30,7 +34,7 @@ namespace Spacewars.Runtime
             public bool TryRetainCommitted(long operation,out IAiCombatMicroNativeCommittedRecord record,out IDisposable retention)
             {
                 record=null;retention=null;if(!Accepted.TryGetValue(operation,out var input)||!session.TryRetainMotionSource(operation,true,out var pin))return false;
-                if(!SameTranscript(input.Pin.Proposal,pin.CommittedTranscript)){pin.Dispose();throw new InvalidOperationException("Native committed transcript differs from its accepted input.");}
+                if(!SameSourceMotion(input.Pin.Proposal,pin.CommittedTranscript)){pin.Dispose();throw new InvalidOperationException("Native committed transcript differs from its accepted input.");}
                 record=new Committed(this,operation,input.Proposal);retention=pin;return true;
             }
             sealed class Committed : IAiCombatMicroNativeCommittedRecord
@@ -77,7 +81,7 @@ namespace Spacewars.Runtime
             internal override void ValidateCurrent()
             {
                 if(Failure!=null)throw new InvalidOperationException("Micro preadmission refused.",Failure);
-                if(!SameTranscript(Pin.Proposal,Publication.Transcript))throw new InvalidOperationException("Complete Native motion changed.");
+                if(!SameSourceMotion(Pin.Proposal,Publication.Transcript))throw new InvalidOperationException("Complete Native motion changed.");
                 foreach(var owner in Authority.currentOwners()){
                     if(!Authority.domain.Authorizes(owner.OwnerId))continue;
                     var affected=Authority.Affected(owner,Publication.Transcript);var row=Rows.FirstOrDefault(r=>ReferenceEquals(r.Registry,owner.ExecutionOwner));
@@ -117,8 +121,13 @@ namespace Spacewars.Runtime
         {
             var affected=new List<int>();
             for(int i=0;i<transcript.Count;i++){
-                var receiver=transcript[i];var actor=domain.CombatExecutionActor(receiver.Before.Entity);
-                if(actor==null||actor.Health<=0||actor.Held||actor.Owner!=domain.OwnerFor(owner.OwnerId)||actor.Kind==PlayableEntityKind.Hawk||actor.OrderStamp?.Origin==PlayableOrderOrigin.Human||!owner.ReservesExecutionSubject(actor.Id))continue;
+                var receiver=transcript[i];
+                // Reservation is a pure owner-client lookup. Ordinary movement
+                // needs no detached combat projection for every unrelated owner.
+                if(!owner.ReservesExecutionSubject(receiver.Before.Entity)||
+                    domain.CombatExecutionHasDefaultGroundIntent(receiver.Before.Entity))continue;
+                var actor=domain.CombatExecutionActor(receiver.Before.Entity);
+                if(actor==null||actor.Health<=0||actor.Held||actor.Owner!=domain.OwnerFor(owner.OwnerId)||actor.Kind==PlayableEntityKind.Hawk||actor.OrderStamp?.Origin==PlayableOrderOrigin.Human)continue;
                 // Pending route installation and an idle micro client do not
                 // authorize future travel. A publication with no physical pose
                 // delta needs no escape-cursor transition; the first actual
@@ -133,13 +142,26 @@ namespace Spacewars.Runtime
             if(!issuers.TryGetValue(row.Registry,out var issuer)){issuer=new Issuer(domain.Navigation);issuers.Add(row.Registry,issuer);}row.Issuer=issuer;
             if(!sources.TryGetValue(row.Registry,out var source)){source=row.Registry.RegisterSource(issuer,NavigationSession.GroundMotionSourceIdentity,ref grant)??throw new InvalidOperationException("Micro source admission refused.");sources.Add(row.Registry,source);}return source;
         }
+        public void ReconcilePendingSource(NavigationSession.MotionPublication publication)
+        {
+            if(pending==null)return;
+            var accepted=pending.Pin.Proposal;
+            var current=publication.Transcript;
+            if(pending.Pin.Record.Source.IncludesResults==publication.IncludesResults&&SameSourceMotion(accepted,current)){
+                return;
+            }
+            var retired=pending;
+            pending=null;
+            retired.KeepPending=false;
+            retired.Dispose();
+        }
         public NavigationMotionAdoption Prepare(NavigationSession.MotionPublication publication)
         {
-            if(pending!=null&&!SameTranscript(pending.Pin.Proposal,publication.Transcript)){
-                pending.KeepPending=false;cleanup.Add(pending);pending=null;
-            }
             var adoption=pending??new Adoption(this,publication);adoption.Publication=publication;adoption.Failure=null;
+            int remaining=publication.StationaryRetry?remainingGroundWork:4096;
             try{
+                if(!publication.StationaryRetry)remaining=WorkGrantForTests?.Invoke(4096)??4096;
+                if(remaining<0||remaining>4096)throw new InvalidOperationException("Invalid test work admission.");
                 if(adoption.Pin==null){
                     adoption.Pin=publication.AcceptSource();
                     if(!storage.TryReserve(checked(8192L+2048L*publication.Transcript.Count),out adoption.Memory))throw new InvalidOperationException("Whole receiver classification admission refused.");
@@ -150,21 +172,32 @@ namespace Spacewars.Runtime
                         var row=new OwnerRow{Owner=owner,Registry=owner.ExecutionOwner};adoption.Rows.Add(row);long grant=long.MaxValue;var source=Source(row,ref grant);
                         var proposal=BuildProposal(owner,row.Registry,adoption.Pin.Proposal,affected,adoption.Tick,adoption.Resources);
                         var input=new NativeInput(row.Issuer,adoption.Pin,proposal);row.Issuer.Accepted.Add(adoption.Pin.Operation,input);
-                        if(!row.Registry.TryRetainInput(source,input,ref grant,out row.Input)||!row.Registry.TrySubmit(row.Input,ref grant,out row.Submission))throw new InvalidOperationException("Micro proposal admission refused.");
+                        if(!row.Registry.TryRetainInput(source,input,ref grant,out row.Input))throw new InvalidOperationException("Micro input retention refused.");
+                        if(!row.Registry.TrySubmitGround(row.Input,ref grant,out row.Submission,out int refusedReceiver,out var repairDenial)){
+                            if(repairDenial.HasValue)
+                                deniedRepairBranches[refusedReceiver]=(row.Owner,repairDenial.Value.Binding,repairDenial.Value.Reason);
+                            if(refusedReceiver!=0)throw new GroundMotionRefusal(refusedReceiver,"Current Micro policy denied the receiver.");
+                            throw new InvalidOperationException("Micro proposal admission refused.");
+                        }
                     }
                 }else publication.SelectSource(adoption.Pin);
                 // A bounded private AI work quantum; continuation is retained in
                 // the existing paid Runtime submission/current codec. It borrows
                 // neither Nav solver grants nor owner action/APM tokens.
-                int remaining=WorkGrantForTests?.Invoke(4096)??4096;if(remaining<0||remaining>4096)throw new InvalidOperationException("Invalid test work admission.");bool ready=true;
+                bool ready=true;
                 foreach(var row in adoption.Rows){
                     long grant=long.MaxValue;var registry=row.Registry;var state=registry.Status(row.Submission);
                     if(state==AiCombatMicroExecutionStatus.Pending&&remaining>0){int used=registry.Advance(row.Submission,remaining,ref grant);remaining-=used;state=registry.Status(row.Submission);}
                     if(state==AiCombatMicroExecutionStatus.Pending){ready=false;continue;}
-                    if(!registry.TryIssue(row.Submission,ref grant,out var issued))throw new InvalidOperationException("Actual micro path denied or stale.");
+                    if(!registry.TryIssue(row.Submission,ref grant,out var issued)){
+                        if(row.Submission.DeniedGroundRepairBranch is { } denied)
+                            deniedRepairBranches[row.Submission.RefusedReceiver]=(row.Owner,denied.Binding,denied.Reason);
+                        if(row.Submission.RefusedReceiver!=0)throw new GroundMotionRefusal(row.Submission.RefusedReceiver,"Actual Micro path or current receiver denied.");
+                        throw new InvalidOperationException("Actual micro path denied or stale.");
+                    }
                     if(state==AiCombatMicroExecutionStatus.Allowed){
                         var affected=Affected(row.Owner,publication.Transcript);
-                        var actual=BuildProposal(row.Owner,registry,publication.Transcript,affected,adoption.Tick,adoption.Resources);
+                        var actual=BuildProposal(row.Owner,registry,publication.Transcript,affected,adoption.Tick,adoption.Resources,acceptedBundle:row.Input.Proposal.BundleId);
                         var source=Source(row,ref grant);
                         if(!registry.TryRetainInput(source,new NativeInput(row.Issuer,adoption.Pin,actual),ref grant,out row.Actual)||!registry.TryPrepareActual(issued,row.Actual,ref grant))throw new InvalidOperationException("Micro actual match admission refused.");state=registry.Status(row.Submission);
                     }
@@ -177,10 +210,24 @@ namespace Spacewars.Runtime
                 if(!ready){pending=adoption;adoption.Failure=new InvalidOperationException("Paid whole micro work remains pending.");}
                 else{pending=null;LastRefusal=null;}
             }catch(Exception error){LastRefusal=error.ToString();adoption.Failure=error;adoption.KeepPending=false;pending=null;}
+            finally{remainingGroundWork=remaining;}
             // Deferred retirement/cancellation occurs only after Native closes
             // its publication phase, never from this policy callback.
             return adoption;
         }
+        // Native has closed both the refused frame and its stationary retry.
+        // Only a definitive denial of the remaining route can end repair custody.
+        // A route or order replaced in the meantime is independently authorized.
+        internal void RetireDeniedRepairBranches()
+        {
+            try
+            {
+                foreach(var denied in deniedRepairBranches.Values)
+                    denied.Owner.RetireDeniedGroundRepair(domain,denied.Binding,denied.Reason);
+            }
+            finally{deniedRepairBranches.Clear();}
+        }
+
         // This runs before normal Domain/Native clocks and command delivery.
         // The cold Runtime operation IDs supply the only Native lookup keys.
         internal void ServiceSources()
@@ -219,7 +266,7 @@ namespace Spacewars.Runtime
                     }
                     if(!registry.TryRebind(submission,row.Input,row.Actual,ref grant))throw new InvalidOperationException("Current Runtime live liability awaits rebind.");
                     if(state==AiCombatMicroExecutionStatus.Executing){
-                        if(pending.Pin.CommittedTranscript==null||!SameTranscript(pending.Pin.Proposal,pending.Pin.CommittedTranscript)||!registry.TryResumeCommitted(source,submission,out var ticket)||!registry.TryConsumeRestoredCommitted(source,ticket,ref grant,ref grant))throw new InvalidOperationException("Current Native committed fact awaits consume-only adoption.");
+                        if(pending.Pin.CommittedTranscript==null||!SameSourceMotion(pending.Pin.Proposal,pending.Pin.CommittedTranscript)||!registry.TryResumeCommitted(source,submission,out var ticket)||!registry.TryConsumeRestoredCommitted(source,ticket,ref grant,ref grant))throw new InvalidOperationException("Current Native committed fact awaits consume-only adoption.");
                     }
                 }
                 // The separate Air source rebind may still be outstanding.
@@ -236,7 +283,7 @@ namespace Spacewars.Runtime
             for(int i=cleanup.Count-1;i>=0;i--)if(cleanup[i].TryCleanup())cleanup.RemoveAt(i);
             if(cleanup.Count!=0)throw new InvalidOperationException("Native source release admission remains pending at stop.");
         }
-        MotionExecutionProposal BuildProposal(PlayableAiOwnerLoop owner,AiCombatMicroExecutionOwner registry,NavMotionTranscript transcript,List<int> affected,long tick,List<IDisposable> resources,MotionExecutionProposal accepted=null,PlayableProfile acceptedProfile=null)
+        MotionExecutionProposal BuildProposal(PlayableAiOwnerLoop owner,AiCombatMicroExecutionOwner registry,NavMotionTranscript transcript,List<int> affected,long tick,List<IDisposable> resources,MotionExecutionProposal accepted=null,PlayableProfile acceptedProfile=null,long? acceptedBundle=null)
         {
             if(!storage.TryBegin(checked(4*affected.Count+1),out var transaction))throw new InvalidOperationException("Motion value storage refused.");
             using(transaction){
@@ -246,9 +293,16 @@ namespace Spacewars.Runtime
                 var primitives=new MotionExecutionPrimitive[affected.Count];
                 for(int j=0;j<affected.Count;j++){
                     var r=transcript[affected[j]];var before=r.Before;var after=r.After;
-                    if(r.Continuation!=NavMotionContinuation.Ready||r.AcceptedRoute==null||r.ProductionException)throw new InvalidOperationException($"Affected motion lacks a complete certified continuation: entity={before.Entity} continuation={r.Continuation} route={r.AcceptedRoute!=null} production={r.ProductionException} from={before.Position} to={after.Position} heading={before.Heading:R}->{after.Heading:R} chord={r.Chord.Count} suffix={r.Remaining.Count} request={before.Request}->{after.Request}.");
+                    if(r.Continuation!=NavMotionContinuation.Ready||r.AcceptedRoute==null||r.ProductionException){
+                        string reason=$"Affected motion lacks a complete certified continuation: entity={before.Entity} continuation={r.Continuation} route={r.AcceptedRoute!=null} production={r.ProductionException} from={before.Position} to={after.Position} heading={before.Heading:R}->{after.Heading:R} chord={r.Chord.Count} suffix={r.Remaining.Count} request={before.Request}->{after.Request}.";
+                        if(accepted==null)throw new GroundMotionRefusal(before.Entity,reason);
+                        throw new InvalidOperationException(reason);
+                    }
                     AiCombatMicroPolicy.ExecutionDescriptor descriptor=null;
-                    if(accepted==null&&!registry.TryDescribe(before.Entity,ref grant,out descriptor))throw new InvalidOperationException("Stale applied micro receiver.");
+                    if(accepted==null&&!registry.TryDescribe(before.Entity,ref grant,out descriptor,out bool admitted)){
+                        if(admitted)throw new GroundMotionRefusal(before.Entity,"Stale applied micro receiver.");
+                        throw new InvalidOperationException("Stale applied micro receiver.");
+                    }
                     using(descriptor){
                         var s=r.AcceptedRoute.Subscription;
                         // Membership is a current group revision, distinct from
@@ -260,8 +314,10 @@ namespace Spacewars.Runtime
                             if(group==null||group.GroupId!=s.GroupId)throw new InvalidOperationException("Accepted route no longer belongs to the current group.");
                             membership=group.MembershipRevision;
                         }
-                        var binding=accepted?.Primitive(j).Binding??new MotionExecutionBinding(transcript.Generation,s.GroupId,membership,s.RootOrderRevision,s.CommandSequence,before.Entity,before.Incarnation,before.Mobility,s.RequestSequence,after.Order,s.ActivationRevision,owner.OwnerId,s.StableKey,profile.ProfileId,"geometry:"+domain.Geometry.Revision,s.HoldBinding,descriptor.Identity,s.GroupId==0?MotionOwnIntentKind.Standalone:MotionOwnIntentKind.Grouped);
-                        if(accepted!=null&&(binding.World!=transcript.Generation||binding.Owner!=owner.OwnerId||binding.Entity!=before.Entity||binding.Incarnation!=before.Incarnation||binding.Mobility!=before.Mobility||binding.Group!=s.GroupId||binding.RootOrder!=s.RootOrderRevision||binding.Command!=s.CommandSequence||binding.Request!=s.RequestSequence||binding.Order!=after.Order||binding.Activation!=s.ActivationRevision||binding.Route!=s.StableKey||binding.Profile!=profile.ProfileId||binding.Hold!=s.HoldBinding))throw new ArgumentException("Saved identity differs from its owning Native accepted source.");
+                        // Native encodes no HOLD obstacles as empty; Micro uses an absent name.
+                        var hold=string.IsNullOrEmpty(s.HoldBinding)?null:s.HoldBinding;
+                        var binding=accepted?.Primitive(j).Binding??new MotionExecutionBinding(transcript.Generation,s.GroupId,membership,s.RootOrderRevision,s.CommandSequence,before.Entity,before.Incarnation,before.Mobility,s.RequestSequence,after.Order,s.ActivationRevision,owner.OwnerId,s.StableKey,profile.ProfileId,"geometry:"+domain.Geometry.Revision,hold,descriptor.Identity,s.GroupId==0?MotionOwnIntentKind.Standalone:MotionOwnIntentKind.Grouped);
+                        if(accepted!=null&&(binding.World!=transcript.Generation||binding.Owner!=owner.OwnerId||binding.Entity!=before.Entity||binding.Incarnation!=before.Incarnation||binding.Mobility!=before.Mobility||binding.Group!=s.GroupId||binding.RootOrder!=s.RootOrderRevision||binding.Command!=s.CommandSequence||binding.Request!=s.RequestSequence||binding.Order!=after.Order||binding.Activation!=s.ActivationRevision||binding.Route!=s.StableKey||binding.Profile!=profile.ProfileId||binding.Hold!=hold))throw new ArgumentException("Saved identity differs from its owning Native accepted source.");
                         var pieces=new List<MotionExecutionTracePiece>(r.Chord.Count+1);var provider=r.AcceptedRoute.Legs.Count==0?null:r.AcceptedRoute.Legs[0].RecastAuthorityProvider;
                         int surfaces=Math.Max(1,r.Chord.Count(l=>l.Kind==NavTypedLegKind.Surface)),surfaceIndex=0;double cut=0;
                         for(int k=0;k<Math.Max(1,r.Chord.Count);k++){
@@ -284,7 +340,7 @@ namespace Spacewars.Runtime
                         if(!MotionExecutionPrimitive.TryCreate(binding,affected[j]+1,kind,tick,1d/30d,before.Location,after.Location,after.Endpoint,before.Radius,"ground",before.Heading,after.Heading,0,0,s.RequestSequence,pieces,ref grant,transaction.TryReserve,out primitives[j],branch))throw new InvalidOperationException("Motion primitive admission refused.");
                     }
                 }
-                if(!MotionExecutionProposal.TryCreate(transcript.Generation,0,0,transcript.Operation,tick,primitives,ref grant,transaction.TryReserve,out var result))throw new InvalidOperationException("Motion bundle admission refused.");resources.Add(transaction.Transfer());return result;
+                if(!MotionExecutionProposal.TryCreate(transcript.Generation,0,0,acceptedBundle??transcript.Operation,tick,primitives,ref grant,transaction.TryReserve,out var result))throw new InvalidOperationException("Motion bundle admission refused.");resources.Add(transaction.Transfer());return result;
             }
         }
         static void Support(PlayableProfile p,ILayeredNavigationProvider provider,NavLocation from,NavLocation to,ref long preparation,out string id,out double x,out double z,out double constant)
@@ -305,9 +361,19 @@ namespace Spacewars.Runtime
         static bool State(NavMotionActorState a,NavMotionActorState b)=>a.Entity==b.Entity&&a.Team==b.Team&&a.Incarnation==b.Incarnation&&a.Mobility==b.Mobility&&a.Group==b.Group&&a.Revision==b.Revision&&a.Request==b.Request&&a.Order==b.Order&&Point(a.Position,b.Position)&&Point(a.Goal,b.Goal)&&MotionExecutionBinding.Same(a.Location,b.Location)&&a.Endpoint.HasValue==b.Endpoint.HasValue&&(!a.Endpoint.HasValue||MotionExecutionBinding.Same(a.Endpoint.Value,b.Endpoint.Value))&&MotionExecutionBinding.Same(a.Heading,b.Heading)&&MotionExecutionBinding.Same(a.Radius,b.Radius)&&MotionExecutionBinding.Same(a.Speed,b.Speed)&&MotionExecutionBinding.Same(a.TurnSpeed,b.TurnSpeed)&&a.Moving==b.Moving&&a.Held==b.Held&&a.CanYield==b.CanYield&&a.Outcome==b.Outcome&&a.RouteIndex==b.RouteIndex&&a.LocalIndex==b.LocalIndex&&a.NoProgressTicks==b.NoProgressTicks&&MotionExecutionBinding.Same(a.BlockedSeconds,b.BlockedSeconds);
         static bool Legs(IReadOnlyList<NavTypedLeg> a,IReadOnlyList<NavTypedLeg> b){if(a.Count!=b.Count)return false;for(int i=0;i<a.Count;i++)if(a[i].Kind!=b[i].Kind||a[i].PortalId!=b[i].PortalId||!MotionExecutionBinding.Same(a[i].From,b[i].From)||!MotionExecutionBinding.Same(a[i].To,b[i].To)||!MotionExecutionBinding.Same(a[i].Cost,b[i].Cost))return false;return true;}
         static bool Subscription(NavRouteSubscription a,NavRouteSubscription b)=>a.WorldGeneration==b.WorldGeneration&&a.GroupId==b.GroupId&&a.RootOrderRevision==b.RootOrderRevision&&a.CommandSequence==b.CommandSequence&&a.IssuedTick==b.IssuedTick&&a.ActivationRevision==b.ActivationRevision&&a.EntityId==b.EntityId&&a.Incarnation==b.Incarnation&&a.MemberOrderRevision==b.MemberOrderRevision&&a.MobilityRevision==b.MobilityRevision&&a.RequestSequence==b.RequestSequence&&a.Provenance==b.Provenance&&a.HoldBinding==b.HoldBinding&&MotionExecutionBinding.Same(a.Origin,b.Origin)&&MotionExecutionBinding.Same(a.AssignedEndpoint,b.AssignedEndpoint);
-        internal static bool SameTranscript(NavMotionTranscript a,NavMotionTranscript b)
+        // The Native source operation and every physical/owner value remain
+        // exact. The newer admission read set has its own validation at write.
+        private static bool SameSourceMotion(NavMotionTranscript accepted,NavMotionTranscript current)
+            =>SameTranscript(accepted,current)||accepted.Operation<current.Operation&&
+                accepted.SamePinnedContext(current)&&SameTranscript(accepted,current,compareOperation:false);
+
+        internal static bool SameTranscript(NavMotionTranscript a,NavMotionTranscript b,bool compareOperation=true)
         {
-            if(a.Generation!=b.Generation||a.Operation!=b.Operation||a.Count!=b.Count)return false;
+            // AcceptSource retains this exact completed, owner-thread transcript.
+            // Reflexivity proves all values at once; distinct transcripts still
+            // compare every actor, route, typed leg, receipt and binding below.
+            if(a!=null&&ReferenceEquals(a,b))return true;
+            if(a.Generation!=b.Generation||compareOperation&&a.Operation!=b.Operation||a.Count!=b.Count)return false;
             for(int i=0;i<a.Count;i++){
                 var x=a[i];var y=b[i];
                 if(!State(x.Before,y.Before)||!State(x.After,y.After)||x.Cooperative!=y.Cooperative||x.ProductionException!=y.ProductionException||x.Continuation!=y.Continuation||!ReferenceEquals(x.AcceptedRoute,y.AcceptedRoute)||!Legs(x.Chord,y.Chord)||!Legs(x.Remaining,y.Remaining))return false;
@@ -325,7 +391,21 @@ namespace Spacewars.Runtime
         AiCombatMicroMotionAuthority combatMotionAuthority;
         AiCombatMicroAirMotionAuthority combatAirMotionAuthority;
         Func<IReadOnlyList<PlayableAiOwnerLoop>> combatExecutionOwners;
-        internal void ConfigureCombatExecutionOwners(Func<IReadOnlyList<PlayableAiOwnerLoop>> owners)=>combatExecutionOwners=owners;
+        internal void ConfigureCombatExecutionOwners(Func<IReadOnlyList<PlayableAiOwnerLoop>> owners)
+        {
+            combatExecutionOwners=owners;
+            navigation.Crowd.OwnedShortReverseDistance=owners==null?null:CombatShortReverseDistance;
+        }
+        double CombatShortReverseDistance(NavUnit actor)
+        {
+            if(!units.TryGetValue(actor.Id,out var unit)||unit.Kind!=PlayableEntityKind.Tank||
+                unit.Health<=0||unit.LastOrder?.Origin!=PlayableOrderOrigin.Ai||
+                unit.LastOrder.Kind is not (PlayableCommandKind.Move or PlayableCommandKind.AttackMove))return 0;
+            foreach(var owner in combatExecutionOwners())
+                if(unit.Owner==OwnerFor(owner.OwnerId))
+                    return owner.CombatShortReverseDistance(this,actor,unit.LastOrder);
+            return 0;
+        }
         internal void AssertCombatExecutionOperational()
         {if(combatExecutionOwners!=null)foreach(var owner in combatExecutionOwners())if(owner.AwaitingExecutionSources)throw new InvalidOperationException("Runtime execution sources await live rebind before clock/commands.");}
         internal AiCombatMicroMotionAuthority CombatMotionAuthority=>combatMotionAuthority;
@@ -345,6 +425,13 @@ namespace Spacewars.Runtime
     }
     internal sealed partial class PlayableAiOwnerLoop
     {
+        internal double CombatShortReverseDistance(PlayableDomain domain,NavUnit actor,PlayableOrderStamp stamp)
+        {
+            if(!combatMicro.ShortReverseOrder(actor.Id,actor.Goal,stamp,domain.Tick,nativeProfile,nativeConfig.Difficulty))
+                return 0;
+            return AiCombatMicroPolicy.WithdrawalStepLength(nativeProfile,nativeConfig.Difficulty,actor.Radius)
+                +profile.Navigation.ArrivalTolerance;
+        }
         internal bool RetainsCurrentExecutionStamp(PlayableDomain domain,int entity)
         {
             if(!domain.TryReadCombatExecutionJobStamp(entity,domain.OwnerFor(OwnerId),out var stamp))return false;
@@ -353,6 +440,11 @@ namespace Spacewars.Runtime
     }
     internal sealed partial class AiCombatMicroPolicy
     {
+        internal bool ShortReverseOrder(int entity,NavPoint goal,PlayableOrderStamp stamp,long tick,AiProfile ai,AiDifficulty difficulty)=>
+            RetainsAppliedExecutionStamp(entity,stamp)&&clients.TryGetValue(entity,out var client)&&
+            client.Phase is (AiCombatMicroPhase.Withdraw or AiCombatMicroPhase.Resume)&&tick-client.Started<=T(ai,difficulty,"maxPhaseSeconds")&&
+            certificates.TryGetValue(entity,out var certificate)&&stamp.ActionId==certificate.ActionId&&
+            stamp.Generation==certificate.Generation&&stamp.Kind==certificate.Kind&&goal.Equals(certificate.Goal);
         internal bool RetainsAppliedExecutionStamp(int entity,PlayableOrderStamp stamp)=>clients.TryGetValue(entity,out var client)&&certificates.TryGetValue(entity,out var certificate)&&client.Sequence>0&&stamp!=null&&stamp.Origin==PlayableOrderOrigin.Ai&&stamp.Source==certificate.Source&&stamp.Sequence==certificate.Sequence;
     }
 }

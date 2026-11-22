@@ -104,6 +104,51 @@ public sealed class PlayableMenuCardTests
         var queue=OfflinePadWorldActions.Building(View(new[]{Building(PlayableBuildingKind.Factory)},research:research),profile,7,false);
         foreach(var action in queue.Where(a=>a.Sector.Hold=="repeat"))StringAssert.Contains("Урон за попадание:",action.Detail);
     }
+    [Test] public void IglaIsSelectableOnBothSidesAndHasEditableLabFields()
+    {
+        var root=Get<VisualElement>("root");
+        var navigation=Get<NativeMenuNavigation>("menuNavigation");
+        var setup=new ProvingGroundSetup(profile);
+        Set("provingGround",setup);
+        Call("CreateProvingGroundUi");
+        for(int side=0;side<2;side++)
+        {
+            var button=root.Q<Button>("proving-unit-"+side+"-Igla");
+            Assert.AreEqual("Игла",button.text);
+            navigation.ActivateElement(button);
+            Assert.AreEqual(PlayableEntityKind.Igla,Get<PlayableEntityKind?>("provingUnit"));
+            Assert.AreEqual(side,Get<int>("provingSide"));
+        }
+        var directory=Directory.CreateDirectory(Path.Combine(Path.GetTempPath(),"igla-lab-"+Guid.NewGuid()));
+        try
+        {
+            var store=new NativeBalanceStore(profile,Path.Combine(directory.FullName,"profiles.json"));
+            var lab=new NativeBalanceView(root,navigation,store,()=>{});
+            navigation.ActivateElement(lab.Page.Q<Button>("lab-object-Игла"));
+            foreach(var field in PlayableProfileMetadata.IglaFields)
+                Assert.NotNull(lab.Page.Q<TextField>("lab-field-"+field.FieldName),field.Path);
+        }
+        finally {directory.Delete(true);}
+    }
+    [UnityTest] public IEnumerator IglaFactoryCardShowsRoleAndSeparateWeaponStats()
+    {
+        var factory=Building(PlayableBuildingKind.Factory);
+        var science=new PlayableBuildingSnapshot(8,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,100,1,0,0,default);
+        var view=View(new[]{factory,science});
+        var action=OfflinePadWorldActions.Building(view,profile,factory.Id).Single(a=>a.Sector.Id.EndsWith(":igla"));
+        var card=new RadialActionCard();
+        var root=Get<VisualElement>("root");
+        root.Clear();root.Add(card);
+        card.style.width=card.PreferredWidth;
+        card.Set(action,false,null);
+        yield return null;
+        Assert.Greater(card.Q<Label>("radial-detail").worldBound.height,0);
+        Assert.AreEqual("Игла",action.Presentation.Title);
+        StringAssert.Contains("В бою требуется обязательное прикрытие.",card.Q<Label>("radial-detail").text);
+        CollectionAssert.Contains(action.Presentation.Stats,"Сектор наведения: ±"+profile.IglaHalfAngle.ToString("0.##")+"°");
+        CollectionAssert.Contains(action.Presentation.Stats,"Дальность огня: "+profile.IglaRange.ToString("0.##")+" м");
+        Assert.True(action.Presentation.Stats.All(line=>line.Split(':').Length==2));
+    }
     [UnityTest] public IEnumerator MineAndUnitCardsRenderWithFilledCentreAndBoundedDetails()
     {
         var root=Get<VisualElement>("root");root.Clear();root.style.width=1280;root.style.height=1200;root.style.backgroundColor=OrbitalTheme.Background;

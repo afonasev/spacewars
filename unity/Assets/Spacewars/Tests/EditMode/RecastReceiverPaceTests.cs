@@ -27,6 +27,26 @@ namespace Spacewars.Tests.EditMode
             Assert.LessOrEqual(NavCrowdMotion.Length(proposal.Velocity),.5);Assert.AreEqual(2,b.Speed);
             b.Yielding=true;Assert.AreEqual(2,b.OwnSpeed);
         }
+        [TestCase(-2, 7)]
+        [TestCase(1, 1)]
+        public void ForwardPaceDependsOnSpaceAhead(double neighborX, double expected)
+        {
+            var bodies = new[] {
+                new NavMotionBody { Id = 1, Target = new NavPoint(10, 0), Radius = .5, Speed = 1,
+                    TurnSpeed = 4, OwnMoving = true, Active = true },
+                new NavMotionBody { Id = 2, Position = new NavPoint(neighborX, 0), Radius = .5 }
+            };
+            const double dt = 1d / 30;
+            var proposals = new[] {
+                new NavMotionProposal { Position = new NavPoint(dt, 0), Velocity = new NavPoint(1, 0) },
+                new NavMotionProposal { Position = bodies[1].Position }
+            };
+            NavCrowdMotion.RestoreClearForwardMotion(bodies, proposals, new[] { 7d, 0 }, NavigationProfile.Default, dt, new Clear());
+            Assert.AreEqual(expected, bodies[0].Speed);
+            NavCrowdMotion.ResolveJoint(bodies, proposals, dt);
+            Assert.AreEqual(neighborX < 0 ? expected : 0, proposals[0].Velocity.X);
+        }
+
         private sealed class Clear:INavMotionClearance{public bool ClearMotion(int actor,NavPoint end)=>true;}
     }
 }

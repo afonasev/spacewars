@@ -57,7 +57,7 @@ namespace Spacewars.Presentation
                 track=new Track{From=start,To=start,Started=now,Owner=entity.Owner,Kind=entity.Kind,Surface=surface};
                 tracks.Add(entity.Id,track);
             }
-            if(snap||(entity.Held&&entity.Kind!=PlayableEntityKind.Hawk)||track.Owner!=entity.Owner||track.Kind!=entity.Kind||track.Surface!=surface){
+            if(snap||entity.StasisRemaining>0||(entity.Held&&entity.Kind!=PlayableEntityKind.Hawk)||track.Owner!=entity.Owner||track.Kind!=entity.Kind||track.Surface!=surface){
                 track.From=track.To=target;track.Started=now;track.Owner=entity.Owner;track.Kind=entity.Kind;track.Surface=surface;
             }else if(!track.To.Position.Equals(target.Position)||track.To.Hull!=target.Hull||track.To.Turret!=target.Turret||track.To.Altitude!=target.Altitude||track.To.Pitch!=target.Pitch||track.To.Roll!=target.Roll){
                 // Use consecutive authority endpoints, not a diagonal shortcut from

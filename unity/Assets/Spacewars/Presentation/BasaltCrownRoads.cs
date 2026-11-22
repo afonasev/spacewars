@@ -1,3 +1,5 @@
+using System.Linq;
+using Spacewars.Simulation;
 using UnityEngine;
 
 namespace Spacewars.Presentation
@@ -7,6 +9,25 @@ namespace Spacewars.Presentation
     public static class BasaltCrownRoads
     {
         public const float RingX=40, RingZ=32, CausewayHalfWidth=4;
+        public readonly struct RelayPlaza
+        {
+            public readonly Vector2 Center;
+            public readonly float Radius;
+
+            public RelayPlaza(NavPoint center,float radius)
+            {
+                Center=new Vector2((float)center.X,(float)center.Z);
+                Radius=radius;
+            }
+
+            public float SignedDistance(float x,float z)
+                =>Vector2.Distance(new Vector2(x,z),Center)-Radius;
+        }
+        public static RelayPlaza Plaza(BasaltCrownMap map,PlayableProfile profile)
+        {
+            var relay=map.Sites(profile).Single(site=>site.Kind==PlayableBuildingKind.RelayTower);
+            return new RelayPlaza(relay.Position,(float)TerritoryRules.CaptureRadius(profile,relay.Kind));
+        }
         public static float SignedDistance(float x,float z,BasaltCrownArtProfile art)
         {
             float outer=Mathf.Max(Mathf.Abs(x)-RingX-art.bypassWidth*.5f,Mathf.Abs(z)-RingZ-art.bypassWidth*.5f);
@@ -15,9 +36,12 @@ namespace Spacewars.Presentation
             float central=Mathf.Max(Mathf.Abs(x)-RingX,Mathf.Abs(z)-CausewayHalfWidth);
             return Mathf.Min(ring,central);
         }
-        public static float Coverage(float x,float z,BasaltCrownArtProfile art)
+        public static float SignedDistance(float x,float z,BasaltCrownArtProfile art,RelayPlaza plaza)
+            =>Mathf.Min(SignedDistance(x,z,art),plaza.SignedDistance(x,z));
+
+        public static float Coverage(float x,float z,BasaltCrownArtProfile art,RelayPlaza plaza)
         {
-            return 1-Mathf.SmoothStep(0,1,Mathf.InverseLerp(-art.roadFeather,art.roadFeather,SignedDistance(x,z,art)));
+            return 1-Mathf.SmoothStep(0,1,Mathf.InverseLerp(-art.roadFeather,art.roadFeather,SignedDistance(x,z,art,plaza)));
         }
     }
 }

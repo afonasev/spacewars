@@ -26,6 +26,13 @@ fi
 case "${1:-}" in
   shared|exclusive)
     mode=$1; shift
+    # Keep the installed Editor intact. The pinned ARM64 Mono allocator is
+    # selected only for the default Editor, never for Player or an explicit override.
+    if [ -z "${UNITY_EDITOR:-}" ] && [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
+      SPACEWARS_BASE_UNITY_EDITOR=$editor
+      export SPACEWARS_BASE_UNITY_EDITOR
+      editor="$repo_dir/tools/unity-editor-mono.sh"
+    fi
     # Finish Editor JIT work before batch domain teardown. Keep Burst enabled;
     # this option controls Editor compilation, not Player AOT or game quality.
     if [ "$batch_editor" = 1 ] && [ "$has_burst_sync" = 0 ]; then

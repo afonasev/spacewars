@@ -39,8 +39,11 @@ namespace Spacewars.Simulation
                     return result;
                 }catch{result.Release();throw;}
             }
+            internal bool MatchesVariant(IPlayableTerrain terrain,NavigationProfile profile,string held)
+                =>ReferenceEquals(Terrain,terrain)&&Radius==profile.Radius&&Grid==profile.LocalGridCell&&
+                    Revision==profile.Revision&&Profile==profile.ProfileId&&Held==held;
             internal bool Matches(IPlayableTerrain terrain,NavGeometry geometry,NavigationProfile profile,string held)
-                =>ReferenceEquals(Terrain,terrain)&&ReferenceEquals(Geometry,geometry)&&Radius==profile.Radius&&Grid==profile.LocalGridCell&&Revision==profile.Revision&&Profile==profile.ProfileId&&Held==held;
+                =>ReferenceEquals(Geometry,geometry)&&MatchesVariant(terrain,profile,held);
             protected override void ReleaseEdges(){Map?.Dispose();Map=null;geometryOwner?.Release();geometryOwner=null;Geometry=null;Terrain=null;Next=null;Profile=Held=null;}
         }
         internal readonly struct Pin:IDisposable
@@ -116,11 +119,35 @@ namespace Spacewars.Simulation
                     long bytes=checked(input.PayloadBytes+NavStorageLayout.ObjectBytesBound(typeof(RecastNavigationMap))+NavStorageLayout.ObjectBytesBound(typeof(RecastMapHandle)));
                     payload=RecastPayload.Allocate(r,bytes);payload.Value=input;payload.DependOn(input.SourceStorageRoot);
                 }
-                using(var memory=RecastNative.Memory(r))next.Map=new RecastNavigationMap(input,cancelled,payload);
+                // Keep one reusable predecessor per public clearance variant.
+                // Context and query pins independently retain older live maps.
+                bool reuseTiles=terrain!=null&&!input.IsLayered&&string.IsNullOrEmpty(held);
+                Entry predecessor=null;
+                if(reuseTiles)
+                    for(var entry=first;entry!=null;entry=entry.Next)
+                        if(entry.MatchesVariant(terrain,profile,held)){predecessor=entry;break;}
+                using(var memory=RecastNative.Memory(r))
+                    next.Map=new RecastNavigationMap(input,cancelled,payload,reuseTiles,predecessor?.Map);
                 payload.Dispose();payload=null;next.Next=first;first=next;next=null;ColdBuilds++;
+                if(predecessor!=null)RetireOlderVariants(terrain,profile,held);
                 return Pin.Acquire(first);
             }finally{next?.Release();payload?.Dispose();}
         }
+        private void RetireOlderVariants(IPlayableTerrain terrain,NavigationProfile profile,string held)
+        {
+            var previous=first;
+            for(var entry=previous.Next;entry!=null;)
+            {
+                var next=entry.Next;
+                if(entry.MatchesVariant(terrain,profile,held))
+                {
+                    previous.Next=next;entry.Next=null;entry.Release();
+                }
+                else previous=entry;
+                entry=next;
+            }
+        }
+
         // Eviction retires cache ownership only. Active contexts retain entries;
         // external queries additionally retain native map and geometry payload.
         internal void RetireUnused(){Entry previous=null,at=first;while(at!=null){var next=at.Next;if(at.References==1){if(previous==null)first=next;else previous.Next=next;at.Next=null;at.Release();}else previous=at;at=next;}}

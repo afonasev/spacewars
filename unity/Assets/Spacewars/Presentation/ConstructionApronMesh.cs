@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Spacewars.Simulation;
 using UnityEngine;
 
 namespace Spacewars.Presentation
@@ -7,6 +8,10 @@ namespace Spacewars.Presentation
     // Designer-controlled dimensions/brightness live in the Environment Art profile.
     public static class ConstructionApronMesh
     {
+        // The authored technical pad is 1.41 m wide before scale and apron margin.
+        public static Vector2 DefenseSupportHalf(PlayableProfile profile,EnvironmentArtProfile art)
+            =>Vector2.one*(.705f*(float)profile.TurretModelScale+art.apronMargin);
+
         public static List<Vector3> CapturePolygon(Vector2 half,EnvironmentArtProfile art,float progress)
         {
             var result=new List<Vector3>();progress=Mathf.Clamp01(progress);if(progress<=0)return result;
@@ -25,7 +30,9 @@ namespace Spacewars.Presentation
             return result;
         }
 
-        public static Mesh Build(Vector2 half,EnvironmentArtProfile art)
+        internal const float MineCurbHeight=.21f;
+
+        public static Mesh Build(Vector2 half,EnvironmentArtProfile art,bool mineOpening=false)
         {
             var vertices=new List<Vector3>();var colors=new List<Color>();var uv=new List<Vector2>();var triangles=new List<int>();
             float h=art.apronHeight,x=half.x,z=half.y,w=Mathf.Min(art.apronMarkWidth,Mathf.Min(x,z)*.09f);
@@ -40,6 +47,41 @@ namespace Spacewars.Presentation
             Vector2[] Chamfer(float a,float b,float cut)=>new[]{new Vector2(-a+cut,-b),new Vector2(a-cut,-b),new Vector2(a,-b+cut),new Vector2(a,b-cut),new Vector2(a-cut,b),new Vector2(-a+cut,b),new Vector2(-a,b-cut),new Vector2(-a,-b+cut)};
             void Rect(float a,float b,float c,float d,float y,Color color)=>Polygon(new[]{new Vector2(a,b),new Vector2(c,b),new Vector2(c,d),new Vector2(a,d)},y,color);
             float trim=w*1.7f,cut=Mathf.Min(w*1.7f,Mathf.Min(x,z)*.15f);
+            if(mineOpening){
+                // The lower bed sits above the permanent yard. Its sloped lining
+                // and raised curb belong to the empty-site mesh, hidden on build.
+                var lip=Chamfer(x,z,cut);
+                var mouth=Chamfer(x*.76f,z*.72f,cut);
+                var bed=Chamfer(x*.56f,z*.49f,cut*.7f);
+                float top=h+MineCurbHeight;
+                Polygon(bed,h+.003f,new Color(.09f,.085f,.08f,1));
+                void Band(Vector2[] outer,float high,Vector2[] inner,float low,Color tint){
+                    for(int i=0;i<outer.Length;i++){
+                        int next=(i+1)%outer.Length;
+                        int offset=vertices.Count;
+                        foreach(var v in new[]{outer[i],outer[next],inner[next],inner[i]})uv.Add(v/art.concreteTile);
+                        vertices.Add(new Vector3(outer[i].x,high,outer[i].y));
+                        vertices.Add(new Vector3(outer[next].x,high,outer[next].y));
+                        vertices.Add(new Vector3(inner[next].x,low,inner[next].y));
+                        vertices.Add(new Vector3(inner[i].x,low,inner[i].y));
+                        for(int k=0;k<4;k++)colors.Add(tint);
+                        triangles.AddRange(new[]{offset,offset+2,offset+1,offset,offset+3,offset+2});
+                    }
+                }
+                Band(Chamfer(x+.05f,z+.05f,cut),h,lip,top,metal);
+                Band(lip,top,mouth,top,new Color(.52f,.48f,.40f,1));
+                Band(mouth,top,bed,h+.004f,new Color(.25f,.235f,.21f,1));
+                for(int i=-1;i<=1;i++)
+                    Rect(-x*.49f,i*z*.22f-.04f,x*.49f,i*z*.22f+.04f,h+.009f,metal);
+                for(int side=-1;side<=1;side+=2){
+                    float rail=side*x*.85f;
+                    Rect(rail-.08f,-z*.66f,rail+.08f,z*.77f,top+.004f,white);
+                }
+                var opening=new Mesh{name="Lunar loading shaft"};
+                opening.SetVertices(vertices);opening.SetColors(colors);opening.SetUVs(0,uv);
+                opening.SetTriangles(triangles,0);opening.RecalculateNormals();opening.RecalculateBounds();
+                return opening;
+            }
             Polygon(Chamfer(x,z,cut),h,metal);
             float value=art.apronConcreteValue;
             Polygon(Chamfer(x-trim,z-trim,cut),h+.001f,new Color(value,value,value,0));

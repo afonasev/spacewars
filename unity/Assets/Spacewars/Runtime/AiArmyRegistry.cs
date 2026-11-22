@@ -73,14 +73,20 @@ namespace Spacewars.Runtime
         internal bool CanYieldScoutToDefense(int unit)=>membership.TryGetValue(unit,out var id)&&
             armies.TryGetValue(id,out var a)&&a.Phase!=AiArmyPhase.Disbanded&&a.Role==AiArmyRole.Scout&&
             a.TacticalOwner==AiScoutPlanner.Policy&&a.Members.Length==1&&a.Members[0]==unit;
-        // Singleton AI scouts may yield to one whole major army or a new
-        // defense slot. Transport and cross-major handoffs remain forbidden.
+        // Only a complete quiet headquarters guard may merge into an active defense.
+        internal static bool HeadquartersGuard(AiArmyState a,int headquartersId)=>
+            AiRepairUsePolicy.QuietGuard(a)&&a.Objective==((int)PlayableRouteTargetKind.FriendlyAnchor)+":"+headquartersId;
+
         internal bool CanAdmitDefense(IEnumerable<int> members)
         {
             var ids=members.Distinct().ToArray();
             var assigned=ids.Select(ArmyFor).Where(id=>id!=0).Distinct().Select(id=>armies[id]).ToArray();
             if(assigned.Any(a=>!a.Major&&!a.Members.All(CanYieldScoutToDefense)))return false;
             var majors=assigned.Where(a=>a.Major).ToArray();
+            if(majors.Length>1)
+                return majors.Count(a=>a.TacticalOwner==AiDefensePlanner.Policy)==1&&
+                    majors.Where(a=>a.TacticalOwner!=AiDefensePlanner.Policy).All(a=>
+                        AiRepairUsePolicy.QuietGuard(a)&&a.Members.All(ids.Contains));
             return majors.Length<=1&&(majors.Length==0?Active.Count(a=>a.Major)<majorCap:
                 majors[0].TacticalOwner==AiDefensePlanner.Policy||majors[0].Members.All(ids.Contains));
         }
@@ -103,6 +109,16 @@ namespace Spacewars.Runtime
         }
         internal void JoinReinforcements(long id,string tacticalOwner,IEnumerable<int> ids)
         {if(armies.TryGetValue(id,out var a)&&a.TacticalOwner==tacticalOwner){a.Reinforcements=a.Reinforcements.Except(ids).ToArray();AssertInvariants();}}
+        internal void SetDispatchCore(long id,string tacticalOwner,IReadOnlyList<int> recipients)
+        {
+            var army=armies[id];
+            if(army.TacticalOwner!=tacticalOwner||recipients.Count==0||recipients.Any(unit=>ArmyFor(unit)!=id))
+                throw new InvalidOperationException("Dispatch core membership");
+            army.Reinforcements=army.Members.Except(recipients).ToArray();
+            if(!recipients.Contains(army.LeaderId))
+                army.LeaderId=recipients[0];
+            AssertInvariants();
+        }
         internal bool BeginRepairReturn(long id,string tacticalOwner,int unit)
         {
             if(!armies.TryGetValue(id,out var a)||a.TacticalOwner!=tacticalOwner||a.Phase==AiArmyPhase.Disbanded||!a.Members.Contains(unit)||a.LeaderId==unit)return false;
@@ -143,6 +159,13 @@ namespace Spacewars.Runtime
             if(progressed)a.ProgressTick=tick;
             AssertInvariants();return true;
         }
+        internal void SetScoutWithdrawalCondition(long id,string condition)
+        {
+            var army=armies[id];
+            if(army.Role!=AiArmyRole.Scout||army.TacticalOwner!=AiScoutPlanner.Policy||army.Phase==AiArmyPhase.Disbanded)
+                throw new InvalidOperationException("Scout combat requires the assigned scout.");
+            army.WithdrawalCondition=condition;
+        }
         // Survival preemption changes the complete group's role/owner in one authority transaction.
         internal bool PreemptDefense(long id,System.Collections.Generic.IEnumerable<int> members)
         {
@@ -158,6 +181,15 @@ namespace Spacewars.Runtime
         {
             if(!Binding(o))throw new ArgumentException("Registry observation identity");
             var live=new HashSet<int>(o.Entities.Where(e=>e.Owner==o.Owner&&e.Health>0).Select(e=>e.Id));
+            ReconcileMembership(live);
+        }
+        internal void ObserveMembership(string ownerId,long generation,HashSet<int> live)
+        {
+            if(ownerId!=OwnerId||generation!=Generation)throw new ArgumentException("Registry observation identity");
+            ReconcileMembership(live);
+        }
+        private void ReconcileMembership(HashSet<int> live)
+        {
             foreach(var a in Active.ToArray())
             {foreach(var id in a.Members.Where(id=>!live.Contains(id)).ToArray())membership.Remove(id);a.Members=a.Members.Where(live.Contains).ToArray();a.Reinforcements=a.Reinforcements.Where(live.Contains).ToArray();if(a.Members.Length==0)Disband(a.Id);else a.LeaderId=a.Members.Contains(a.LeaderId)?a.LeaderId:a.Members[0];}
             AssertInvariants();
@@ -171,7 +203,10 @@ namespace Spacewars.Runtime
             bool micro=intent.Policy==AiCombatMicroPolicy.Policy;
             if(micro&&CombatMicroAuthorization?.Invoke(intent)!=true)return "micro reservation not authorized";
             bool defenseHandoff=intent.Policy==AiDefensePlanner.Policy&&intent.Priority>=2&&
-                intent.Action.Kind==PlayableCommandKind.Attack&&CanAdmitDefense(intent.Action.EntityIds);
+                intent.Action.Kind==PlayableCommandKind.Attack;
+            bool dominationHandoff=intent.Policy==AiRelayObjectives.DominationPolicy&&intent.Priority>=2&&
+                intent.Action.Kind==PlayableCommandKind.AttackMove&&intent.Action.SiteId>0;
+            if(defenseHandoff&&!CanAdmitDefense(intent.Action.EntityIds))return "defense handoff unavailable";
             foreach(var id in intent.Action.EntityIds)
             {
                 if(!membership.TryGetValue(id,out var armyId))continue;
@@ -184,9 +219,9 @@ namespace Spacewars.Runtime
                     a.TacticalOwner==AiDefensePlanner.Policy&&a.Major&&a.Reinforcements.Contains(id)&&intent.Action.EntityIds.All(unit=>membership.TryGetValue(unit,out var assigned)&&assigned==a.Id);
                 bool defenseCoreAttack=intent.Policy==AiDefensePlanner.Policy&&intent.Action.Kind==PlayableCommandKind.Attack&&a.TacticalOwner==AiDefensePlanner.Policy&&a.Major&&
                     a.Members.Contains(id)&&!a.Reinforcements.Contains(id)&&intent.Action.EntityIds.All(unit=>membership.TryGetValue(unit,out var assigned)&&assigned==a.Id&&!a.Reinforcements.Contains(unit));
-                if(a.TacticalOwner!=intent.Policy&&!micro&&!preparationHandoff&&!defenseAssembly&&!defenseCoreAttack&&!defenseHandoff)return "unit tactical owner conflict";
+                if(a.TacticalOwner!=intent.Policy&&!micro&&!preparationHandoff&&!defenseAssembly&&!defenseCoreAttack&&!defenseHandoff&&!dominationHandoff)return "unit tactical owner conflict";
                 if(!a.Major&&intent.Action.Kind!=PlayableCommandKind.Move&&intent.Action.Kind!=PlayableCommandKind.Hold&&intent.Action.Kind!=PlayableCommandKind.Stop&&
-                    !defenseHandoff&&!(a.TacticalOwner==AiScoutPlanner.Policy&&AiRelayObjectives.IsClaim(a)&&intent.Policy==AiScoutPlanner.Policy&&(intent.Action.Kind==PlayableCommandKind.AttackMove||intent.Action.Kind==PlayableCommandKind.Attack)&&a.Objective==AiRelayObjectives.Claim(intent.Action.SiteId))&&!(preparationHandoff&&intent.Action.Kind==PlayableCommandKind.BuildAt)&&!(a.Role==AiArmyRole.Transport&&intent.Action.Kind==PlayableCommandKind.BuildAt))return "scout/transport combat requires major army";
+                    !defenseHandoff&&!dominationHandoff&&!(intent.Policy==AiScoutPlanner.Policy&&AiScoutPlanner.OwnsCombatMission(a,intent.Action))&&!(preparationHandoff&&intent.Action.Kind==PlayableCommandKind.BuildAt)&&!(a.Role==AiArmyRole.Transport&&intent.Action.Kind==PlayableCommandKind.BuildAt))return "scout/transport combat requires major army";
             }
             return null;
         }

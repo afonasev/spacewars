@@ -30,7 +30,7 @@ public sealed class ProvingOrbitalTests
             Assert.True(runtime.IsPrepared,runtime.Latest?.Failure);
             foreach(string owner in new[]{"player-1","enemy-1"}){
                 var state=runtime.ParticipantView(owner).Orbital;
-                CollectionAssert.AreEqual(new[]{1,2,8,3},state.Abilities.Select(a=>a.Id));
+                CollectionAssert.AreEqual(OrbitalAbilities.Implemented,state.Abilities.Select(a=>a.Id));
                 Assert.IsEmpty(state.Options);Assert.Zero(state.PendingLevel);Assert.True(state.Abilities.All(a=>a.Remaining==0));
             }
             runtime.RequestPause(false);
@@ -49,13 +49,28 @@ public sealed class ProvingOrbitalTests
             var root=(VisualElement)type.GetField("root",f).GetValue(hud);var panel=host.GetComponent<UIDocument>().panelSettings;
             target=new RenderTexture(1280,800,24);target.Create();panel.targetTexture=target;
             root.style.width=1280/panel.scale;root.style.height=800/panel.scale;root.style.backgroundColor=OrbitalTheme.Background;
+            Call("CreateProvingGroundUi");
             yield return null;yield return null;Call("UpdateOrbitalHud");yield return null;yield return null;
-            foreach(int id in new[]{1,2,8,3})Assert.NotNull(root.Q<Button>("orbital-slot-"+id));
-            foreach(int id in new[]{4,5,6,7})Assert.IsNull(root.Q<Button>("orbital-slot-"+id));
+            Assert.AreEqual(DisplayStyle.None,root.Q("orbital-panel").resolvedStyle.display);
+            Assert.AreEqual(false,Call("OpenOrbital",true));
+            Assert.NotNull(root.Q<Button>("proving-unit-0-Skat"));
+            Set("provingGroundBattle",true);
+            Call("CreateProvingGroundUi");
+            Call("UpdateOrbitalHud");yield return null;yield return null;
+            Assert.AreEqual(DisplayStyle.Flex,root.Q("orbital-panel").resolvedStyle.display);
+            foreach(int id in OrbitalAbilities.Implemented)Assert.NotNull(root.Q<Button>("orbital-slot-"+id));
+            foreach(int id in Enumerable.Range(1,OrbitalAbilities.Implemented.Max()).Except(OrbitalAbilities.Implemented))Assert.IsNull(root.Q<Button>("orbital-slot-"+id));
             var old=RenderTexture.active;RenderTexture.active=target;var pixels=new Texture2D(1280,800,TextureFormat.RGBA32,false);
             pixels.ReadPixels(new Rect(0,0,1280,800),0,0);pixels.Apply();RenderTexture.active=old;
             var output=Path.GetFullPath(Path.Combine(Application.dataPath,"../../.local/qa/proving-orbital"));Directory.CreateDirectory(output);
-            File.WriteAllBytes(Path.Combine(output,"abilities.png"),pixels.EncodeToPNG());Object.Destroy(pixels);
+            File.WriteAllBytes(Path.Combine(output,"abilities.png"),pixels.EncodeToPNG());
+            Set("provingGroundBattle",false);
+            Call("CreateProvingGroundUi");Call("UpdateOrbitalHud");yield return null;yield return null;
+            Assert.AreEqual(DisplayStyle.None,root.Q("orbital-panel").resolvedStyle.display);
+            Assert.AreEqual(DisplayStyle.None,root.Q("orbital-modal").resolvedStyle.display);
+            old=RenderTexture.active;RenderTexture.active=target;
+            pixels.ReadPixels(new Rect(0,0,1280,800),0,0);pixels.Apply();RenderTexture.active=old;
+            File.WriteAllBytes(Path.Combine(output,"preparation.png"),pixels.EncodeToPNG());Object.Destroy(pixels);
         }finally{runtime.RequestStop();Set("runtime",null);if(target){target.Release();Object.Destroy(target);}Object.Destroy(host);}
     }
     [UnityTest] public IEnumerator CapturedActorsRepaintInProvingGround()

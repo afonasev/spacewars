@@ -82,7 +82,7 @@ namespace Spacewars.Tests.PlayMode
             string output=Environment.GetEnvironmentVariable("SPACEWARS_HEALTH_DIVIDER_OUTPUT");Assert.IsNotEmpty(output);Directory.CreateDirectory(output);
             Assert.AreNotEqual(GraphicsDeviceType.Null,SystemInfo.graphicsDeviceType);
             var baseline=PlayableProfile.Create(Newtonsoft.Json.JsonConvert.DeserializeObject<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text),new AiTestMap());
-            var store=new NativeBalanceStore(baseline,Path.Combine(output,"isolated-balance.json"),false);store.Select(NativeBalanceStore.NewMatchProfileId,NativeBalanceStore.NewMatchProfileVersion);
+            var store=new NativeBalanceStore(baseline,Path.Combine(output,"isolated-balance.json"),false);store.Select(NativeBalanceStore.CorridorExperimentId,NativeBalanceStore.CorridorExperimentVersion);
             var profile=store.Active;var priorDetail=ModelDetailProfile.Current;ModelDetailProfile.UseSession(store.ActiveModelDetail);
             var root=new GameObject("Cycle68 bounded divider mesh control");
             var target=new RenderTexture(768,512,24,RenderTextureFormat.DefaultHDR){antiAliasing=4};target.Create();
@@ -158,7 +158,7 @@ namespace Spacewars.Tests.PlayMode
             Assert.IsNotEmpty(output);Directory.CreateDirectory(output);
             var baseline=PlayableProfile.Create(Newtonsoft.Json.JsonConvert.DeserializeObject<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text),new AiTestMap());
             var store=new NativeBalanceStore(baseline,Path.Combine(output,"isolated-balance.json"),false);
-            store.Select(NativeBalanceStore.NewMatchProfileId,NativeBalanceStore.NewMatchProfileVersion);
+            store.Select(NativeBalanceStore.CorridorExperimentId,NativeBalanceStore.CorridorExperimentVersion);
             var profile=store.Active;var priorDetail=ModelDetailProfile.Current;ModelDetailProfile.UseSession(store.ActiveModelDetail);
             var root=new GameObject("Cycle68 actual health inventory");
             var target=new RenderTexture(768,512,24,RenderTextureFormat.DefaultHDR){antiAliasing=4};target.Create();
@@ -199,7 +199,7 @@ namespace Spacewars.Tests.PlayMode
                         r.allowOcclusionWhenDynamic,r.lightProbeUsage,r.reflectionProbeUsage,bounds=r.bounds.ToString("R"),frustum=GeometryUtility.TestPlanesAABB(planes,r.bounds),
                         position=r.transform.localPosition.ToString("R"),scale=r.transform.localScale.ToString("R"),rotation=r.transform.localRotation.ToString("R")};
                 }).ToArray();
-                File.WriteAllText(Path.Combine(output,"inventory.json"),Json(new{unity=Application.unityVersion,profile=NativeBalanceStore.NewMatchProfileId,version=NativeBalanceStore.NewMatchProfileVersion,
+                File.WriteAllText(Path.Combine(output,"inventory.json"),Json(new{unity=Application.unityVersion,profile=NativeBalanceStore.CorridorExperimentId,version=NativeBalanceStore.CorridorExperimentVersion,
                     profile.HealthBarCells,profile.HealthBarWidth,profile.HealthBarHeight,profile.HealthBarCellGap,quality=QualitySettings.GetQualityLevel(),api=SystemInfo.graphicsDeviceType.ToString(),
                     totalRenderers=all.Length,activeRenderers=all.Count(r=>r.enabled&&r.gameObject.activeInHierarchy),healthRenderers=health.Length,dividerRenderers=dividers.Length,
                     healthFrustum=health.Count(r=>GeometryUtility.TestPlanesAABB(planes,r.bounds)),dividerFrustum=dividers.Count(r=>GeometryUtility.TestPlanesAABB(planes,r.bounds)),

@@ -109,9 +109,17 @@ namespace Spacewars.Tests.EditMode
                 Assert.Fail("Current host did not complete the tick quantum.");
             }
             try{
-            for(int i=0;i<45;i++)Advance(a,host);var checkpoints=a.CaptureDiagnosticCheckpoints();Assert.True(checkpoints.All(p=>p.Knowledge.ObservationTick==a.Tick&&p.Knowledge.Areas.Count>0));
+            for(int i=0;i<45;i++)Advance(a,host);
+            // Knowledge advances on owner observation. The public decision checkpoint
+            // is published on decisions and receipts, which have a separate cadence.
+            foreach(var owner in a.Scheduler.Owners)
+            {
+                var knowledge=owner.CaptureKnowledge();
+                Assert.AreEqual(a.Tick,knowledge.ObservationTick,owner.OwnerId);
+                Assert.IsNotEmpty(knowledge.Areas,owner.OwnerId);
+            }
             var original=a.CaptureBytes();b=PlayableAuthorityTick.RestoreBytes(original,c);CollectionAssert.AreEqual(original,b.CaptureBytes());for(int i=0;i<45;i++){Advance(a,host);Advance(b,coldHost);}CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());
-            var memory=a.CaptureDiagnosticCheckpoints().Select(p=>p.Knowledge).ToArray();for(int i=0;i<60;i++)Assert.True(a.TryAdvance(paused:true));Assert.AreEqual(90,a.Tick);for(int i=0;i<memory.Length;i++)Assert.AreSame(memory[i],a.CaptureDiagnosticCheckpoints()[i].Knowledge);
+            var memory=a.Scheduler.Owners.Select(p=>p.CaptureKnowledge()).ToArray();for(int i=0;i<60;i++)Assert.True(a.TryAdvance(paused:true));Assert.AreEqual(90,a.Tick);for(int i=0;i<memory.Length;i++)Assert.AreSame(memory[i],a.Scheduler.Owners[i].CaptureKnowledge());
             var profile=AiProfile.Initial.CopyData();profile.revision++;profile.fields.Single(p=>p.path=="scouting.contactHalfLifeSeconds").value=120;profile.fields.Single(p=>p.path=="scouting.revisitSeconds").value=90;var next=new AiProfile(profile);Assert.IsNull(a.ApplyProfile(c.Profile,next));
             CollectionAssert.AreEqual(a.CaptureBytes(),PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c,next).CaptureBytes());var fresh=new PlayableAuthorityTick(c,72);Assert.True(fresh.CaptureDiagnosticCheckpoints().All(p=>p.Knowledge.Generation==72&&p.Knowledge.ObservationTick==-1&&p.Knowledge.Contacts.Count==0));fresh.Stop();
             }finally{host.Clear();coldHost.Clear();a.Stop();b?.Stop();}
@@ -203,15 +211,65 @@ namespace Spacewars.Tests.EditMode
             byte[] LoopBytes(object loop){using(var stream=new MemoryStream()){using(var w=new BinaryWriter(stream,System.Text.Encoding.UTF8,true))loopType.GetMethod("WriteState",F).Invoke(loop,new object[]{w});return stream.ToArray();}}
             CollectionAssert.AreEqual(LoopBytes(la),LoopBytes(lb));Assert.Greater(((PlayableAiOwnerCheckpoint)loopType.GetProperty("Checkpoint",F).GetValue(la)).PendingActionId,0);
         }
-        private static PlayableAiObservation ScoutView(long tick=30,int scouts=3,bool seeBase=false,int[] covered=null,double detour=0,bool routes=true)
+        private static PlayableAiObservation ScoutView(long tick=30,int scouts=3,bool seeBase=false,int[] covered=null,double detour=0,bool routes=true,PlayableEntitySnapshot[] contacts=null,int scoutHealth=100,int attackTarget=0,bool retreat=false)
         {
             var targets=new[]{new PlayablePublicScoutObjective(12,new NavPoint(15,0),PlayablePublicScoutObjectiveRole.ExpansionIncome,true),new PlayablePublicScoutObjective(13,new NavPoint(0,15),PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true)};
-            var units=Enumerable.Range(1,scouts).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Explorer,new NavPoint(0,0),100,false,0,0,0)).ToArray();
-            var vision=new PlayableVision(0,32,32,1,1);vision.Refresh(seeBase?new[]{new VisionSource(new NavPoint(15,0),8)}:Array.Empty<VisionSource>(),Array.Empty<KnownBuilding>());
+            var units=Enumerable.Range(1,scouts).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Explorer,new NavPoint(0,0),scoutHealth,false,attackTarget,0,0,
+                attackTarget==0?null:new PlayableTacticalOrderSnapshot(id,PlayableOwner.Player,71,1,tick,PlayableTacticalOrderKind.Attack,default,attackTarget))).ToArray();
+            var vision=new PlayableVision(0,32,32,1,1);vision.Refresh(seeBase?new[]{new VisionSource(new NavPoint(15,0),8)}:contacts!=null?new[]{new VisionSource(new NavPoint(0,0),16)}:Array.Empty<VisionSource>(),Array.Empty<KnownBuilding>());
             var proofs=routes?(from u in units from t in targets select new PlayableRouteProof(u.Id,u.Owner,71,tick,1,u.Position,PlayableProfile.Default.ExplorerCollisionRadius,PlayableRouteTargetKind.PublicObjective,t.SiteId,t.Approach,t.Approach,t.SiteId==12&&detour>0?new[]{new NavPoint(detour,0),t.Approach}:new[]{t.Approach})).ToArray():Array.Empty<PlayableRouteProof>();
-            return PlayableAiObservation.From(new PlayableSnapshot("p",1,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,new NavGeometry(32,Array.Empty<NavObstacle>(),1),units,seeBase?new[]{Building()}:Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision.Snapshot(),publicScoutObjectives:targets,routeProofs:proofs,intelEnvelopes:new[]{Area,new AiIntelEnvelope(13,new[]{new VisionSource(new NavPoint(0,15),4)})}));
+            var home=new NavPoint(-28,0);
+            var safe=new NavPoint(-24,0);
+            var buildings=seeBase?new[]{Building()}:retreat?
+                new[]{new PlayableBuildingSnapshot(92,PlayableOwner.Player,PlayableBuildingKind.Headquarters,home,100,1,0,0,default)}:
+                Array.Empty<PlayableBuildingSnapshot>();
+            if(retreat)proofs=proofs.Append(new PlayableRouteProof(1,PlayableOwner.Player,71,tick,1,units[0].Position,
+                PlayableProfile.Default.ExplorerCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,92,home,safe,new[]{safe})).ToArray();
+            return PlayableAiObservation.From(new PlayableSnapshot("p",1,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,new NavGeometry(32,Array.Empty<NavObstacle>(),1),units.Concat(contacts??Array.Empty<PlayableEntitySnapshot>()).ToArray(),buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision.Snapshot(),publicScoutObjectives:targets,routeProofs:proofs,intelEnvelopes:new[]{Area,new AiIntelEnvelope(13,new[]{new VisionSource(new NavPoint(0,15),4)})}));
         }
         private static AiKnowledgeState ScoutKnowledge(PlayableAiObservation o,params AiVisitedArea[] areas)=>new AiKnowledgeState(o.OwnerId,o.Generation,o.Tick,Array.Empty<AiKnownContact>(),areas);
+        [Test] public void AssignedScoutAttacksWithinBudgetAndAbortsWhenNewFireExceedsIt()
+        {
+            var planner=new AiScoutPlanner();
+            var ai=AiProfile.Initial;
+            var gameplay=PlayableProfile.Default;
+            var registry=new AiArmyRegistry("player-1",71,ai,AiDifficulty.Fighter);
+            var start=ScoutView(scouts:1);
+            var mission=planner.Plan(start,ScoutKnowledge(start),registry,gameplay,ai,1);
+            planner.Commit(start,mission,registry);
+            var weak=new PlayableEntitySnapshot(90,PlayableOwner.Enemy,PlayableEntityKind.Explorer,new NavPoint(3,0),1,false,0,0,0);
+            var contact=ScoutView(tick:31,scouts:1,contacts:new[]{weak});
+            var attack=planner.Plan(contact,ScoutKnowledge(contact),registry,gameplay,ai,1);
+            Assert.NotNull(attack);
+            Assert.AreEqual(PlayableCommandKind.Attack,attack.Kind);
+            Assert.AreEqual(weak.Id,attack.TargetId);
+            Assert.AreEqual(mission.SiteId,attack.SiteId);
+            planner.Commit(contact,attack,registry,ai:ai);
+            Assert.True(planner.CanDeliverAttack(contact,gameplay,ai,registry,attack));
+
+            var tank=new PlayableEntitySnapshot(91,PlayableOwner.Enemy,PlayableEntityKind.Tank,new NavPoint(4,0),100,false,1,0,0);
+            var exposed=ScoutView(tick:32,scouts:1,contacts:new[]{weak,tank},scoutHealth:51,attackTarget:weak.Id,routes:false,retreat:true);
+            using var checkpoint=new MemoryStream();
+            using(var writer=new BinaryWriter(checkpoint,System.Text.Encoding.UTF8,true))registry.WriteState(writer);
+            checkpoint.Position=0;
+            using var reader=new BinaryReader(checkpoint);
+            var restored=AiArmyRegistry.ReadState(reader,ai,AiDifficulty.Fighter,32,registry.OwnerId,registry.Generation);
+            Assert.False(planner.CanDeliverAttack(exposed,gameplay,ai,restored,attack));
+            var disengage=planner.Plan(exposed,ScoutKnowledge(exposed),restored,gameplay,ai,1);
+            Assert.NotNull(disengage);
+            Assert.AreEqual(PlayableCommandKind.Move,disengage.Kind);
+            Assert.AreEqual(new NavPoint(-24,0),disengage.Target);
+            planner.Commit(exposed,disengage,restored,ai:ai);
+            planner.ObserveReceipt(restored,disengage,PlayableAiDeliveryStatus.Applied);
+            Assert.AreEqual(registry.ArmyFor(1),restored.ArmyFor(1));
+
+            var clear=ScoutView(tick:33,scouts:1,contacts:Array.Empty<PlayableEntitySnapshot>(),scoutHealth:51);
+            var resume=planner.Plan(clear,ScoutKnowledge(clear),restored,gameplay,ai,1);
+            Assert.NotNull(resume);
+            Assert.AreEqual(PlayableCommandKind.Move,resume.Kind);
+            Assert.AreEqual(mission.SiteId,resume.SiteId);
+        }
+
         [Test] public void HiddenBase_PublicEconomicQueueRevisitsAndRequiresActualContact()
         {
             var planner=new AiScoutPlanner();var r=new AiArmyRegistry("player-1",71,AiProfile.Initial,AiDifficulty.Fighter);var o=ScoutView();

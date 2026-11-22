@@ -17,8 +17,14 @@ namespace Spacewars.Tests.EditMode
         {var s=Roster(2,1);NativeScreenLayout.Normalize(s);NativeScreenLayout.Assign(s,s.Participants[2],3);NativeScreenLayout.Assign(s,s.Participants[0],2);Assert.IsNull(NativeScreenLayout.Assign(s,s.Participants[2],-1));CollectionAssert.AreEquivalent(new[]{0,1},s.Participants.Where(p=>p.Human).Select(p=>p.ScreenSlot));}
         [Test] public void FifthCameraIsRejectedAndHumansHavePriority()
         {var s=Roster(3,2);NativeScreenLayout.Normalize(s);Assert.IsNull(NativeScreenLayout.Assign(s,s.Participants[3],3));Assert.NotNull(NativeScreenLayout.Assign(s,s.Participants[4],0));s.Participants[4].Human=true;NativeScreenLayout.Normalize(s);Assert.AreEqual(-1,s.Participants[3].ScreenSlot);Assert.AreEqual(4,NativeScreenLayout.Count(s));}
-        [Test] public void SpectatorAlwaysClearsAndRejectsAssignments()
-        {var s=Roster(0,4);s.Participants[0].ScreenSlot=2;NativeScreenLayout.Normalize(s);Assert.True(s.Participants.All(p=>p.ScreenSlot==-1));Assert.AreEqual(0,NativeScreenLayout.Count(s));Assert.NotNull(NativeScreenLayout.Assign(s,s.Participants[0],0));}
+        [Test] public void SpectatorRetainsFourCamerasAndRejectsFifth()
+        {
+            var s=Roster(0,8);NativeScreenLayout.Normalize(s);Assert.AreEqual(0,NativeScreenLayout.Count(s));
+            for(int i=0;i<4;i++)Assert.IsNull(NativeScreenLayout.Assign(s,s.Participants[i],i));
+            NativeScreenLayout.Normalize(s);CollectionAssert.AreEqual(new[]{0,1,2,3},s.Participants.Take(4).Select(p=>p.ScreenSlot));
+            Assert.AreEqual(4,NativeScreenLayout.Count(s));Assert.NotNull(NativeScreenLayout.Assign(s,s.Participants[4],0));
+            Assert.True(s.Spectator);Assert.True(s.Participants.All(p=>!p.Human));
+        }
         [Test] public void ActivityProjectsIssuersNotDistantMovementDestination()
         {
             var p=PlayableProfile.Default;var d=new PlayableDomain(p,1,false);var v=d.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);

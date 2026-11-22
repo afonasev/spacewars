@@ -5,6 +5,7 @@ from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -63,7 +64,10 @@ UI_AFFECTED_METHODS = {
 
 
 def validate_results(path, fixtures=(), ui=False):
-    root = ET.parse(path).getroot()
+    return validate_nunit_run(ET.parse(path).getroot(), fixtures, ui)
+
+
+def validate_nunit_run(root, fixtures=(), ui=False):
     cases = root.findall('.//test-case')
     if root.tag != 'test-run' or root.get('result') != 'Passed' or not cases:
         raise ValueError('Requires a nonempty Passed NUnit test-run')
@@ -98,6 +102,25 @@ def validate_results(path, fixtures=(), ui=False):
         if Counter(methods) != expected:
             raise ValueError('Incomplete or changed UI test contract')
     return {'passed': len(cases), 'test_duration_seconds': float(root.get('duration', '0')), 'tests': names}
+
+
+def record_timings(check, root):
+    duration = None
+    if root is not None and root.tag == 'test-run':
+        try:
+            reported = float(root.get('duration', 'nan'))
+            if math.isfinite(reported) and reported >= 0:
+                duration = reported
+        except ValueError:
+            pass
+    admission = check.get('host_admission_seconds')
+    editor_wall = None if admission is None else check['wall_seconds'] - admission
+    # Includes startup, import and shutdown. Partial results still fail validation.
+    overhead = None
+    if editor_wall is not None and duration is not None and duration <= editor_wall:
+        overhead = editor_wall - duration
+    check.update(test_duration_seconds=duration, editor_wall_seconds=editor_wall,
+                 non_test_wall_seconds=overhead)
 
 
 def plan(scope, platform=None, fixtures=(), affected=()):
@@ -189,26 +212,34 @@ def run():
             record['checks'].append(check)
             print('Running ' + platform + '; evidence: ' + str(evidence), flush=True)
             tick = time.monotonic()
-            with (evidence / (stem + '-host.log')).open('w') as host:
-                process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE,
-                                           stderr=subprocess.STDOUT, text=True)
-                for line in process.stdout:
-                    host.write(line); host.flush()
-                    if line.startswith('unity-run: started '):
-                        check['host_admission_seconds'] = time.monotonic() - tick
-                process.stdout.close()
-                exit_code = process.wait()
-            check.update(exit_code=exit_code, wall_seconds=time.monotonic() - tick)
+            root = None
+            xml_error = None
+            try:
+                with (evidence / (stem + '-host.log')).open('w') as host:
+                    process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE,
+                                               stderr=subprocess.STDOUT, text=True)
+                    with process.stdout:
+                        for line in process.stdout:
+                            host.write(line); host.flush()
+                            if line.startswith('unity-run: started '):
+                                check['host_admission_seconds'] = time.monotonic() - tick
+                    exit_code = process.wait()
+                check['exit_code'] = exit_code
+            finally:
+                check['wall_seconds'] = time.monotonic() - tick
+                try:
+                    root = ET.parse(xml).getroot()
+                except (OSError, ET.ParseError) as error:
+                    xml_error = error
+                record_timings(check, root)
             record['project_settings'] = settings.finish()
             if exit_code: raise ValueError(f'{platform} launcher exit {exit_code}')
-            check.update(validate_results(xml, fixtures, args.scope == 'ui'))
+            if xml_error is not None: raise xml_error
+            validated = validate_nunit_run(root, fixtures, args.scope == 'ui')
+            validated.pop('test_duration_seconds')  # Keep the recorded value, including unknown.
+            check.update(validated)
             if not record['project_settings']['unchanged']:
                 raise ValueError('ProjectSettings changed during QA; inspect preserved evidence')
-            # This includes Editor startup/import/shutdown; it is not pure startup.
-            admission = check.get('host_admission_seconds')
-            check['editor_wall_seconds'] = None if admission is None else check['wall_seconds'] - admission
-            check['non_test_wall_seconds'] = (None if admission is None else
-                                               check['editor_wall_seconds'] - check['test_duration_seconds'])
         record['result'] = 'Passed'
     except (OSError, ValueError, ET.ParseError) as error:
         record['error'] = str(error)

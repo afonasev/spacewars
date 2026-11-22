@@ -223,20 +223,114 @@ public sealed class NullDockArtTests
             File.WriteAllLines(Path.Combine(output,"threat-zone-samples.csv"),rows);
         }finally{world?.Dispose();UnityEngine.Object.Destroy(root);}
     }
-    private static void ConfigureInspectionCamera(Camera camera,Transform root,string mapId)
+    internal static void ConfigureInspectionCamera(Camera camera,Transform root,string mapId)
     {
         camera.gameObject.AddComponent<VisibleShadowCoverage>().Configure(root,IndustrialLightingProfile.Load(mapId));
         camera.gameObject.AddComponent<ContactOcclusionCamera>().Configure(ContactOcclusionProfile.Load());
         camera.gameObject.AddComponent<ActorGlowCamera>().Configure(ActorMaterialProfile.Load());
         camera.gameObject.AddComponent<CameraAntialiasing>().Configure(CameraAntialiasingProfile.Load());
     }
-    private static Color SaveFrame(Camera camera,string output,string name,Vector3 target,float size,Vector3 offset,Action<Texture2D> inspect=null)
+    internal static Color SaveFrame(Camera camera,string output,string name,Vector3 target,float size,Vector3 offset,Action<Texture2D> inspect=null)
     {
         camera.transform.position=target+offset;camera.transform.LookAt(target);camera.orthographicSize=size;
         var rt=new RenderTexture(1600,1200,24);rt.Create();var previous=RenderTexture.active;camera.targetTexture=rt;
         Color sample=Color.clear;try{camera.Render();RenderTexture.active=rt;var frame=new Texture2D(1600,1200,TextureFormat.RGB24,false);try{frame.ReadPixels(new Rect(0,0,1600,1200),0,0);frame.Apply();inspect?.Invoke(frame);sample=frame.GetPixel(800,600);File.WriteAllBytes(Path.Combine(output,name+".png"),frame.EncodeToPNG());}finally{UnityEngine.Object.Destroy(frame);}}
         finally{camera.targetTexture=null;RenderTexture.active=previous;UnityEngine.Object.Destroy(rt);}return sample;
     }
+    [UnityTest] public IEnumerator LowerDeckRelayRingMatchesCaptureRadius()
+    {
+        string output=Environment.GetEnvironmentVariable("NULL_DOCK_ART_EVIDENCE");
+        Assert.IsNotEmpty(output);Directory.CreateDirectory(output);
+        var map=new NullDockMap();
+        var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);
+        var root=new GameObject("Relay capture radius inspection");PlayableWorld world=null;
+        var roster=new[]{new OfflineParticipant("player-1",1,1,OfflineControl.Human),
+            new OfflineParticipant("enemy-1",2,2,OfflineControl.Human)};
+        var authority=new Spacewars.Runtime.PlayableAuthorityTick(map.Configuration(profile,3112026,roster),1);
+        try{
+            world=new PlayableWorld(root.transform,profile,staged:true);yield return world.Preparation;
+            world.Dispose();yield return null;
+            world=new PlayableWorld(root.transform,profile,staged:true);yield return world.Preparation;
+            Assert.True(world.PreparationCacheHit,"Restored station retains its capture markings");
+            var deck=world.GraphicsRoot.Find("Station hull, decks and equipment").GetComponent<MeshRenderer>().sharedMaterial;
+            var relays=map.Sites(profile).Where(s=>s.Kind==PlayableBuildingKind.RelayTower).ToArray();
+            Assert.AreEqual(new Vector4((float)relays[0].Position.X,(float)relays[0].Position.Z,
+                (float)relays[1].Position.X,(float)relays[1].Position.Z),deck.GetVector("_RelayCenters"));
+            Assert.AreEqual((float)profile.RelayCaptureRadius,deck.GetFloat("_RelayCaptureRadius"));
+            world.RenderSites(authority.ParticipantView("player-1"));world.InspectionReveal();
+            var light=new GameObject("Relay inspection sun");light.transform.SetParent(root.transform);
+            IndustrialLightingProfile.Load(map.Id).ApplyScene(light.AddComponent<Light>());
+            var camera=new GameObject("Relay inspection camera").AddComponent<Camera>();
+            camera.transform.SetParent(root.transform);camera.orthographic=true;camera.farClipPlane=900;
+            ConfigureInspectionCamera(camera,root.transform,map.Id);
+            yield return null;
+            SaveFrame(camera,output,"relay-capture-default",Vector3.zero,28,new Vector3(0,180,-60));
+            yield return AssertRelayPavingOnMaps(profile, world.Fog, output, "default");
+            var data=profile.CopyData();data.relayCaptureRadius=4.2;
+            var rebound = PlayableProfile.Create(data,map);
+            world.Rebind(rebound);
+            Assert.AreEqual(4.2f,deck.GetFloat("_RelayCaptureRadius"),"Radius follows the active profile");
+            yield return AssertRelayPavingOnMaps(rebound, world.Fog, output, "rebound");
+            SaveFrame(camera,output,"relay-capture-rebound",Vector3.zero,28,new Vector3(0,180,-60));
+        }finally{authority.Stop();world?.Dispose();UnityEngine.Object.Destroy(root);}
+    }
+    private static IEnumerator AssertRelayPavingOnMaps(
+        PlayableProfile profile, PlayableFogMask fog, string output, string scenario)
+    {
+        using var compact = new PlayableMapTerrain(profile, staged:true);
+        yield return compact.Preparation;
+        compact.ShowPublicTerrain();
+        using var terrain = new PlayableTacticalMapTerrain(profile, staged:true);
+        yield return terrain.Preparation;
+        using var tab = new PlayableTacticalMapFog(profile, terrain.Texture);
+        fog.ShowPublic();
+        tab.Update(fog);
+
+        var active = RenderTexture.active;
+        var image = new Texture2D(tab.Texture.width, tab.Texture.height, TextureFormat.RGB24, false);
+        try
+        {
+            RenderTexture.active = tab.Texture;
+            image.ReadPixels(new Rect(0,0,image.width,image.height),0,0);
+            image.Apply();
+            var relays = profile.AuthoredMap.Sites(profile).Where(site => site.Kind == PlayableBuildingKind.RelayTower);
+            var battle = NullDockArtProfile.Load().Battle;
+            double radius = profile.RelayCaptureRadius;
+            const double tolerance = .025;
+
+            foreach (var relay in relays)
+            {
+                double outward = Math.Sign(relay.Position.X);
+                void Probe(double dx, double dz, Color expected, string role)
+                {
+                    float u = (float)(.5 + (relay.Position.X + dx) / (2 * profile.ArenaHalfExtent));
+                    float v = (float)(.5 + (relay.Position.Z + dz) / (2 * profile.ArenaHalfExtent));
+                    void Match(Color reference, Color actual, string surface, double precision)
+                    {
+                        string note = scenario + " relay " + relay.Id + " " + surface + " " + role;
+                        Assert.AreEqual(reference.r, actual.r, precision, note);
+                        Assert.AreEqual(reference.g, actual.g, precision, note);
+                        Assert.AreEqual(reference.b, actual.b, precision, note);
+                    }
+                    Color ReadTexel(Texture2D texture) =>
+                        texture.GetPixel((int)(u * texture.width), (int)(v * texture.height));
+                    Match(expected, ReadTexel(compact.Texture), "compact", tolerance);
+                    Match(expected * 1.3f, ReadTexel(image), "TAB", tolerance);
+                }
+
+                Probe(outward * radius * .65, 0, new Color(.24f,.28f,.31f), "inside gray deck");
+                Probe(outward * radius * 1.48, 0, battle, "outside deck");
+                Probe(outward * radius * 1.08, radius * 1.08, battle, "outside clipped corner");
+            }
+            File.WriteAllBytes(Path.Combine(output, "relay-tab-" + scenario + ".png"), image.EncodeToPNG());
+        }
+        finally
+        {
+            RenderTexture.active = active;
+            UnityEngine.Object.Destroy(image);
+        }
+    }
+
     [UnityTest] public IEnumerator StationPresentationAndLosslessBatching()
     {
         string output=Environment.GetEnvironmentVariable("NULL_DOCK_ART_EVIDENCE");Assert.IsNotEmpty(output);Directory.CreateDirectory(output);

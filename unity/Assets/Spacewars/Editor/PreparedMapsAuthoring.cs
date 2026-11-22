@@ -10,13 +10,16 @@ using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Object=UnityEngine.Object;
 namespace Spacewars.Editor
 {
     [InitializeOnLoad] public static class PreparedMapsAuthoring
     {
         public const string Folder="Assets/Spacewars/Content/Resources/PreparedMaps";
-        public static readonly string[] Maps={"ThreeCrossings","Foundry","MossHighland","BasaltCrown","WhiteMeridian","CrimsonGrove","AntennaCity","NullDock","AiTest","Campaign","ProvingGround","Diagnostic","Nereida"};
+        public static readonly string[] Maps={"ThreeCrossings","Foundry","MossHighland","BasaltCrown","WhiteMeridian","CrimsonGrove","AntennaCity","DeafMirror","NullDock","AiTest","Campaign","ProvingGround","Diagnostic","Nereida"};
+        const string OverheadStamp = Folder + "/overhead-stamp.txt";
+        static bool CanCaptureOverhead => SystemInfo.graphicsDeviceType != GraphicsDeviceType.Null;
         static string stamp;static PreparedSchema schema;static PlayableProfileData gameplay;static bool baking;static readonly HashSet<string> written=new HashSet<string>();
         static PreparedMapsAuthoring(){PreparedMapCache.EditorStamp=CurrentStamp;PreparedMapCache.EditorResourcePath=ResourcePath;PreparedMapCache.EditorSchema=BuildSchema;}
         public static void Invalidate(){stamp=null;schema=null;gameplay=null;PreparedMapCache.CaptureSchema=null;}
@@ -45,10 +48,28 @@ namespace Spacewars.Editor
             PreparedMapCache.BakeWriter=(group,bytes)=>{File.WriteAllBytes(Folder+"/"+group+".bytes",bytes);written.Add(group);};
         }
         public static void AbortBake(){PreparedMapCache.BakeWriter=null;PreparedMapCache.BypassReads=false;baking=false;}
+        private static IEnumerable<string> ExpectedGroups(bool includeOverhead)
+        {
+            foreach (string key in Maps)
+            {
+                if (key == "Nereida")
+                {
+                    yield return "Preview-" + key;
+                    continue;
+                }
+
+                yield return "World-" + key;
+                yield return "Minimap-" + key;
+                yield return PlayableTacticalMapTerrain.Group(key);
+                if (includeOverhead) yield return PlayableTacticalMapTerrain.OverheadGroup(key);
+            }
+        }
         public static void EndBake()
         {
             if(!baking)return;PreparedMapCache.BakeWriter=null;PreparedMapCache.BypassReads=false;baking=false;
-            if(!Maps.All(k=>written.Contains((k=="Nereida"?"Preview-":"World-")+k)&&(k=="Nereida"||written.Contains("Minimap-"+k))))throw new InvalidOperationException("Incomplete prepared-map bake; source stamp was not published");
+            if (!ExpectedGroups(CanCaptureOverhead).All(written.Contains))
+                throw new InvalidOperationException("Incomplete prepared-map bake; source stamp was not published");
+            if (CanCaptureOverhead) File.WriteAllText(OverheadStamp, CurrentStamp());
             File.WriteAllText(Folder+"/stamp.txt",CurrentStamp());File.WriteAllText(Folder+"/schema.json",JsonUtility.ToJson(BuildSchema()));AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
         }
         static T Data<T>(string name)=>JsonUtility.FromJson<T>(Resources.Load<TextAsset>(name).text);
@@ -60,17 +81,57 @@ namespace Spacewars.Editor
                 var baseline=PlayableProfile.Create(Data<PlayableProfileData>("PlayableProfile"));
                 string absent=Path.GetFullPath(Path.Combine(Application.dataPath,"../..", ".local/prepared-map-authoring",Guid.NewGuid().ToString("N")+".json"));
                 var store=new NativeBalanceStore(baseline,absent,false);
-                if(store.Profiles.Any(p=>(string)p["id"]==NativeBalanceStore.NewMatchProfileId))store.Select(NativeBalanceStore.NewMatchProfileId,NativeBalanceStore.NewMatchProfileVersion);
+                store.ResetRelease();
                 gameplay=store.Active.CopyData();
             }
             return PlayableProfile.Create(gameplay,Map(key));
         }
-        public static IPlayableTerrain Map(string key){switch(key){case "ThreeCrossings":return new ThreeCrossingsMap(Data<ThreeCrossingsProfileData>(key+"Profile"));case "Foundry":return new FoundryMap(Data<FoundryProfileData>(key+"Profile"));case "MossHighland":return new MossHighlandMap(Data<MossHighlandProfileData>(key+"Profile"));case "BasaltCrown":return new BasaltCrownMap();case "WhiteMeridian":return new WhiteMeridianMap(Data<WhiteMeridianProfileData>(key+"Profile"));case "CrimsonGrove":return new CrimsonGroveMap(Data<CrimsonGroveProfileData>(key+"Profile"));case "AntennaCity":return new AntennaCityMap(Data<AntennaCityProfileData>(key+"Profile"));case "NullDock":return new NullDockMap(Data<NullDockProfileData>(key+"Profile"));case "AiTest":return new AiTestMap();case "Campaign":return new CampaignOpeningMap();case "ProvingGround":return new ProvingGroundMap();case "Nereida":return new NereidaMap(NereidaPreview.LoadProfile());default:return null;}}
+        public static IPlayableTerrain Map(string key){switch(key){case "ThreeCrossings":return new ThreeCrossingsMap(Data<ThreeCrossingsProfileData>(key+"Profile"));case "Foundry":return new FoundryMap(Data<FoundryProfileData>(key+"Profile"));case "MossHighland":return new MossHighlandMap(Data<MossHighlandProfileData>(key+"Profile"));case "BasaltCrown":return new BasaltCrownMap();case "WhiteMeridian":return new WhiteMeridianMap(Data<WhiteMeridianProfileData>(key+"Profile"));case "CrimsonGrove":return new CrimsonGroveMap(Data<CrimsonGroveProfileData>(key+"Profile"));case "DeafMirror":return new DeafMirrorMap();case "AntennaCity":return new AntennaCityMap(Data<AntennaCityProfileData>(key+"Profile"));case "NullDock":return new NullDockMap(Data<NullDockProfileData>(key+"Profile"));case "AiTest":return new AiTestMap();case "Campaign":return new CampaignOpeningMap();case "ProvingGround":return new ProvingGroundMap();case "Nereida":return new NereidaMap(NereidaPreview.LoadProfile());default:return null;}}
         [MenuItem("Tools/Spacewars/Prepare map environments")] public static void BakeAll()
         {
-            BeginBake();try{foreach(string key in Maps){var host=new GameObject("Prepare "+key);PlayableWorld world=null;PlayableMapTerrain minimap=null;try{if(key=="Nereida")host.AddComponent<NereidaPreview>().Build(NereidaPreview.LoadProfile());else{var p=Profile(key);world=new PlayableWorld(host.transform,p);minimap=new PlayableMapTerrain(p);}Debug.Log("PREPARED_MAP_BAKED "+key);}finally{minimap?.Dispose();world?.Dispose();Object.DestroyImmediate(host);}}EndBake();}catch{AbortBake();throw;}
+            BeginBake();
+            try
+            {
+                foreach (string key in Maps)
+                {
+                    var host = new GameObject("Prepare " + key);
+                    try
+                    {
+                        if (key == "Nereida") host.AddComponent<NereidaPreview>().Build(NereidaPreview.LoadProfile());
+                        else
+                        {
+                            var profile = Profile(key);
+                            using var world = new PlayableWorld(host.transform, profile);
+                            using var compact = new PlayableMapTerrain(profile);
+                            using var tactical = new PlayableTacticalMapTerrain(profile);
+                            if (CanCaptureOverhead)
+                            {
+                                if (profile.AuthoredMap == null)
+                                    foreach (var obstacle in PlayableMap.SolidObstacles(profile)) world.Obstacle(obstacle);
+                                using var overhead = new PlayableTacticalMapTerrain(profile, overheadSource: world);
+                            }
+                        }
+                        Debug.Log("PREPARED_MAP_BAKED " + key);
+                    }
+                    finally { Object.DestroyImmediate(host); }
+                }
+                EndBake();
+            }
+            catch { AbortBake(); throw; }
         }
-        public static bool Fresh()=>File.Exists(Folder+"/stamp.txt")&&File.ReadAllText(Folder+"/stamp.txt")==CurrentStamp()&&Maps.All(k=>File.Exists(Folder+"/"+(k=="Nereida"?"Preview-":"World-")+k+".bytes")&&(k=="Nereida"||File.Exists(Folder+"/Minimap-"+k+".bytes")));
+
+        public static bool Fresh() =>
+            BaseFresh() &&
+            File.Exists(OverheadStamp) && File.ReadAllText(OverheadStamp) == CurrentStamp() &&
+            ExpectedGroups(true).All(group => File.Exists(Folder + "/" + group + ".bytes"));
+
+        public static bool FreshForBuild() => CanCaptureOverhead ? Fresh() : BaseFresh();
+
+        private static bool BaseFresh() =>
+            File.Exists(Folder + "/stamp.txt") &&
+            File.ReadAllText(Folder + "/stamp.txt") == CurrentStamp() &&
+            ExpectedGroups(false).All(group => File.Exists(Folder + "/" + group + ".bytes"));
+
     }
     public sealed class PreparedMapsPostprocessor : AssetPostprocessor
     {
@@ -80,6 +141,6 @@ namespace Spacewars.Editor
     public sealed class PreparedMapsBuildPreparation : IPreprocessBuildWithReport
     {
         public int callbackOrder=>-1000;
-        public void OnPreprocessBuild(BuildReport report){if(!PreparedMapsAuthoring.Fresh())PreparedMapsAuthoring.BakeAll();}
+        public void OnPreprocessBuild(BuildReport report){if(!PreparedMapsAuthoring.FreshForBuild())PreparedMapsAuthoring.BakeAll();}
     }
 }

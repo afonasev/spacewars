@@ -41,8 +41,8 @@ namespace Spacewars.Presentation
             yield return new WaitForSecondsRealtime(2);yield return Shot("mixed-corners");
             var activity=runtime.BotCameraFocus("foundry-2");File.WriteAllText(Path.Combine(output,"activity.txt"),"owner="+activity.OwnerId+" generation="+activity.Generation+" tick="+activity.Tick+" sequence="+activity.Sequence+" position="+activity.Position.X+","+activity.Position.Z);
             ReturnToLobby();until=Time.realtimeSinceStartup+15;while((returningToLobby||runtime!=null)&&Time.realtimeSinceStartup<until)yield return null;Require(runtime==null,"return to lobby");
-            foreach(var p in lobbySetup.Participants)p.Human=false;RebuildRoster();
-            Require(lobbySetup.Participants.All(p=>p.ScreenSlot==-1),"spectator clears separate screens");yield return Shot("spectator-lobby");
+            foreach(var p in lobbySetup.Participants){p.Human=false;p.ScreenSlot=-1;}RebuildRoster();
+            Require(lobbySetup.Participants.All(p=>p.ScreenSlot==-1),"unassigned spectator defaults to overview");yield return Shot("spectator-lobby");
             LaunchLobbyMatch();yield return Ready();SetSpectatorPerspective(PlayableOwner.Enemy);
             yield return new WaitForSecondsRealtime(2);Require(cameraView.rect==new Rect(0,0,1,1)&&localPresentations.Count==1,"spectator full screen");Require(BotCameraLocked,"spectator bot camera");yield return Shot("spectator-bot");
             SetSpectatorPerspective(PlayableOwner.Enemy);yield return new WaitForSecondsRealtime(.5f);Require(!BotCameraLocked,"free overview");yield return Shot("spectator-overview");

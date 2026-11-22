@@ -227,7 +227,7 @@ namespace Spacewars.Runtime
                 if(center!=null){replacement.Site=center.SiteId;replacement.Slot=center.SlotId;replacement.Parent=center.ParentId;replacement.Center=center.Id;replacement.Phase=Stage.Research;replacement.Progress=center.Progress;}
                 else
                 {
-                    var target=new AiEconomyPlanner().InfrastructureRequests(o,p,plan.FundingGoal).FirstOrDefault(c=>c.Reason==null||c.Reason=="insufficient credits");if(target==null){
+                    var target=new AiEconomyPlanner().InfrastructureRequests(o,p,plan.FundingGoal,ai).FirstOrDefault(c=>c.Reason==null||c.Reason=="insufficient credits");if(target==null){
 #if UNITY_INCLUDE_TESTS
                         diagnosticOutcome="suppressed-no-science-target";
 #endif
@@ -246,7 +246,7 @@ namespace Spacewars.Runtime
             center=Center(m,o);
             if(m.Phase==Stage.Science)
             {
-                var reject=AiEconomyAdmission.Reject(o,p,Desired(m,o,p));if(reject!=null&&reject!="insufficient credits"){
+                var reject=AiEconomicInvestmentPlanner.MixRejection(o,p,ai,PlayableBuildingKind.ScientificCenter,m.Site)??AiEconomyAdmission.Reject(o,p,Desired(m,o,p));if(reject!=null&&reject!="insufficient credits"){
 #if UNITY_INCLUDE_TESTS
                     diagnosticOutcome="suppressed-science-admission:"+reject;
 #endif

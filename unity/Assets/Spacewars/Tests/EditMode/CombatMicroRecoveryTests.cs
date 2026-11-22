@@ -116,7 +116,7 @@ namespace Spacewars.Tests.EditMode
                 queue:new PlayableUnitQueueSnapshot(null,pending,Array.Empty<PlayableQueuedOrderSnapshot>(),null,pendingAiRouteViable:true));
             long tick=changed=="expired"?AiProfile.SecondsToTicks(Ai.DifficultyValue(AiDifficulty.Veteran,"micro.maxPhaseSeconds"),30)+1:1;
             var view=PlayableAiObservation.From(new PlayableSnapshot(P.ProfileId,P.Revision,Gen,7,0,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,new[]{patient}.Concat(raw.Entities.Skip(1)).ToArray(),raw.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:raw.Vision));
-            var recovery=new PlayableAiAction(99,raw.OwnerId,P.ProfileId,P.Revision,Gen,0,PlayableCommandKind.Move,new[]{1},new NavPoint(-20,10),parentId:changed=="other-tower"?201:200,seed:7,sourceIdentity:local.SourceIdentity);
+            var recovery=new PlayableAiAction(99,raw.OwnerId,P.ProfileId,P.Revision,Gen,0,PlayableCommandKind.Move,new[]{1},new NavPoint(-20,10),parentId:changed=="other-tower"?201:200,buildingKind:PlayableBuildingKind.RepairTower,seed:7,sourceIdentity:local.SourceIdentity);
             var before=WorldWire.Pack(micro.Write);
             Assert.AreEqual(expected,micro.CanYieldPendingRepair(view,P,Ai,AiDifficulty.Veteran,registry,AiArmyPlanner.Policy,recovery));
             CollectionAssert.AreEqual(before,WorldWire.Pack(micro.Write),"A handoff eligibility query never retires or rewrites the accepted local job.");

@@ -261,7 +261,21 @@ namespace Spacewars.Presentation
         {
             public readonly TerritorySite Site;
             public readonly NavPoint Connection,Entry;
-            public MineAccess(TerritorySite site,NavPoint connection,NavPoint entry){Site=site;Connection=connection;Entry=entry;}
+            readonly double axisX,axisZ;
+            public MineAccess(TerritorySite site,NavPoint connection,NavPoint entry)
+            {
+                Site=site;Connection=connection;Entry=entry;
+                double x=connection.X-site.Position.X,z=connection.Z-site.Position.Z;
+                double length=Math.Sqrt(x*x+z*z);
+                axisX=x/length;axisZ=z/length;
+            }
+            public float YardDepth(NavPoint point,ThreeCrossingsSurfaceProfile profile,out float along,out float across)
+            {
+                double dx=point.X-Site.Position.X,dz=point.Z-Site.Position.Z;
+                along=(float)(dx*axisX+dz*axisZ);
+                across=(float)(-dx*axisZ+dz*axisX);
+                return Mathf.Min(profile.mineYardRadius-Mathf.Abs(along),profile.mineYardHalfWidth-Mathf.Abs(across));
+            }
         }
         public static MineAccess[] PlanMineAccess(ThreeCrossingsSurfaceProfile p,ThreeCrossingsMap map,PlayableProfile gameplay)
         {
@@ -303,11 +317,8 @@ namespace Spacewars.Presentation
                 }
                 if(map.SupportsFootprint(point,0))foreach(var access in MineAccesses)
                 {
-                    double dx=point.X-access.Site.Position.X,dz=point.Z-access.Site.Position.Z;
-                    double ax=access.Connection.X-access.Site.Position.X,az=access.Connection.Z-access.Site.Position.Z,len=Math.Sqrt(ax*ax+az*az);ax/=len;az/=len;
-                    float along=(float)(dx*ax+dz*az),across=(float)(-dx*az+dz*ax);
                     // Rectangular work apron follows the supported access; soft mineral edges blend into the quarry floor.
-                    float distance=Mathf.Min(Profile.mineYardRadius-Mathf.Abs(along),Profile.mineYardHalfWidth-Mathf.Abs(across));
+                    float distance=access.YardDepth(point,Profile,out float along,out float across);
                     float edgeWidth=Profile.minePadContactWidth;
                     float fill=Mathf.SmoothStep(0,1,Mathf.InverseLerp(0,edgeWidth,distance));yard=Mathf.Max(yard,fill);
                     edge=Mathf.Max(edge,fill*(1-Mathf.SmoothStep(0,1,Mathf.InverseLerp(edgeWidth,edgeWidth*2,distance))));

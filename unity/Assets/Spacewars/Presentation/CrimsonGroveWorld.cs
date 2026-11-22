@@ -34,7 +34,9 @@ namespace Spacewars.Presentation
                 for(int x=0;x<resolution;x++){
                     var p=new NavPoint(((x+.5)/resolution*2-1)*map.HalfExtent,((z+.5)/resolution*2-1)*map.HalfExtent);double distance=rockDistances.Minimum(p);
                     double road=CrimsonGroveSurfaces.RouteDistance(p,routes);float variation=.8f+.4f*Mathf.PerlinNoise((float)p.X/7+11,(float)p.Z/7+29);
-                    float wear=1-Mathf.SmoothStep(0,1,(float)road/(art.roadWidth*variation*.5f));pixels[z*resolution+x]=new Color(Mathf.Clamp01((float)distance/8),wear,0,1);
+                    float wear=1-Mathf.SmoothStep(0,1,(float)road/(art.roadWidth*variation*.5f));
+                    var coverage=CrimsonGroveSurfaces.GroundCoverage(new Vector2((float)p.X,(float)p.Z),art,wear);
+                    pixels[z*resolution+x]=new Color(Mathf.Clamp01((float)distance/8),wear,coverage.x,coverage.y);
                 }
                 if(budget.Expired){yield return null;budget.Restart();}
             }

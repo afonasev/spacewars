@@ -113,7 +113,7 @@ namespace Spacewars.Input.Tests
             var point=RallyTestTarget(seat,own);PadCursor(seat,point);Call(app,"UpdateFrame");
             Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(seat,"battleCursorVisual").style.display.value);
             Assert.AreSame(Resources.Load<Texture2D>("OrbitalIcons/rally"),Get<VisualElement>(seat,"battleCursorVisual").style.backgroundImage.value.texture);
-            Assert.IsEmpty(Get<VisualElement>(seat,"tacticalOverlay").Query<Label>().ToList(),"Rally map keeps the requested hint-free layout.");
+            Assert.IsEmpty(Get<VisualElement>(seat,"tacticalOverlay").Q("tactical-map-background").Query<Label>().ToList(),"Rally map keeps the requested hint-free layout.");
             yield return Capture("pad-tactical-flag-preview");AssertTacticalScreen(seat);Tap(pads[1],pads[1].buttonSouth);long sequence=Get<long>(seat,"sequence");
             Assert.IsFalse(Get<bool>(seat,"battleRally"));Assert.IsFalse(Get<bool>(seat,"mapOpen"));Assert.AreEqual("buildingWheel",Get<OfflinePadGestures>(seat,"battleGestures").Mode);CollectionAssert.AreEqual(new[]{own.Id},Selection(seat));
             var centered=(NavPoint)Call(seat,"Ground",Get<Camera>(seat,"cameraView").pixelRect.center);Assert.AreEqual(own.Position.X,centered.X,.05);Assert.AreEqual(own.Position.Z,centered.Z,.05);

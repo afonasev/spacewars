@@ -15,8 +15,15 @@ public sealed class AiParallelConstructionThreadedTests
 {
     [UnityTest,Timeout(110000)] public IEnumerator OrdinaryOpeningOverlapsBuildingsAndScoutActuallyMoves()
     {
-        const int seed=7;var ai=NativeBalanceFields.InitialAiOpeningProfile();
-        Assert.AreEqual("bf9c04b0adf979abacea2e867c0133e5f7f602e3c6adec8f5ff8429bb8cd98cb",ai.Hash);
+        const int seed=7;
+        // Reconstruct the supported profile observed immediately before the
+        // approved All-In change. Seed 7 selects Safe under the current defaults.
+        // The original Oct 29 hash remains historical evidence of the older schema.
+        var terms=NativeBalanceFields.InitialAiOpeningProfile().CopyData();
+        terms.fields.Single(f=>f.path=="openingsMidgame.opening.allIn").value=10;
+        terms.fields.Single(f=>f.path=="openingsMidgame.allInMax").value=5;
+        var ai=new AiProfile(terms);
+        Assert.AreEqual("a312fbcd55ee40747860818b4f2f96154a2d945c5e3403bfd3ece4fd5a75e1d4",ai.Hash);
         Assert.AreEqual(PlayableAiOpening.BlindRush,PlayableAiOpeningComposition.Initialize(seed,"parallel-owner",aiProfile:ai).Opening);
         var p=PlayableProfile.Create(JsonUtility.FromJson<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text),new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text)));
         Assert.AreEqual(500,p.StartingCredits,"ordinary default bank, no extra funding");
@@ -24,9 +31,15 @@ public sealed class AiParallelConstructionThreadedTests
         Assert.IsNull(lobby.Validate(p,true,true));var basis=NativeLobbyMatch.Create(p,lobby);
         var config=new OfflineMatchConfiguration(p,basis.SourceIdentity,basis.MapIdentity,basis.RouteProvenance,seed,new[]{new OfflineParticipant("parallel-owner",1,1,OfflineControl.Ai),new OfflineParticipant("human-owner",2,2,OfflineControl.Human)},basis.Starts.ToArray(),basis.Sites.ToArray(),basis.Obstacles.ToArray(),new double[basis.Starts.Count,basis.Starts.Count],spectators:new[]{PlayableRuntime.LocalSpectatorId},terrain:p.AuthoredMap.Id);
         string output=Environment.GetEnvironmentVariable("AI_PARALLEL_EVIDENCE");Assert.IsNotEmpty(output);Directory.CreateDirectory(output);
-        var runtime=new PlayableRuntime(config,1,participantDifficulties:new[]{AiDifficulty.Veteran,AiDifficulty.Fighter},spectator:true,aiProfile:ai);var routes=new UnityHostRouteService();
+        using var logs=new TestMatchLogSession(output,new TestMatchLoggingProfile(),new{Fixture=TestContext.CurrentContext.Test.Name,Seed=seed,AiHash=ai.Hash});
+        var previousJournalFactory=PlayableRuntime.JournalFactory;
+        PlayableRuntime.JournalFactory=c=>logs.CreateMatch(c);
+        PlayableRuntime runtime=null;
+        UnityHostRouteService routes=null;
         var events=new List<object>();var scouts=new Dictionary<int,(NavPoint position,NavPoint goal,long action,long tick)>();long overlap=-1,motion=-1,producer=-1;
         try{
+            runtime=new PlayableRuntime(config,1,participantDifficulties:new[]{AiDifficulty.Veteran,AiDifficulty.Fighter},spectator:true,aiProfile:ai);
+            routes=new UnityHostRouteService();
             runtime.SetSpectatorSpeed(PlayableRuntime.LocalSpectatorId,4);float deadline=Time.realtimeSinceStartup+90;
             while(runtime.Latest.Tick<1800&&!runtime.IsStopped&&Time.realtimeSinceStartup<deadline){
                 routes.Service(runtime,p.NavigationRequestsPerFrame);var frame=runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId);var own=frame.Players.Single(v=>v.Owner==PlayableOwner.Player);Assert.IsNull(runtime.Latest.Failure);
@@ -53,6 +66,14 @@ public sealed class AiParallelConstructionThreadedTests
             }
             File.WriteAllText(Path.Combine(output,"ordinary-result.json"),Newtonsoft.Json.JsonConvert.SerializeObject(new{seed,ai.Id,ai.Hash,runtime.Latest.Tick,overlap,motion,producer,failure=runtime.Latest.Failure,projectionFailure=routes.LastProjectionFailure,events},Newtonsoft.Json.Formatting.Indented));
             Assert.IsNull(runtime.Latest.Failure);Assert.IsNull(routes.LastProjectionFailure);Assert.GreaterOrEqual(overlap,0,"two necessary buildings must overlap before first Refinery completes");Assert.GreaterOrEqual(motion,0,"AI scout must physically progress after its real command");Assert.GreaterOrEqual(producer,0,"ordinary factory construction completes");
-        }finally{runtime.RequestStop();Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped,3000));routes.Dispose();runtime.Dispose();}
+        }finally{
+            try{
+                if(runtime!=null){runtime.RequestStop();Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped,3000));}
+            }finally{
+                routes?.Dispose();
+                runtime?.Dispose();
+                PlayableRuntime.JournalFactory=previousJournalFactory;
+            }
+        }
     }
 }

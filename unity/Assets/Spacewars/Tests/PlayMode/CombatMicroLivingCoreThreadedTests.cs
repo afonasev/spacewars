@@ -23,11 +23,27 @@ namespace Spacewars.Tests.PlayMode
         {
             var data=PlayableProfile.Default.CopyData();data.groundRouteBackend=1;Run(false,PlayableProfile.Create(data));
         }
+        [Test,Timeout(90000)] public void ShortWithdrawalRejoinsAndFiresWhileAnAllyTakesTheNextFocus()
+        {
+            var data=PlayableProfile.Default.CopyData();
+            data.groundRouteBackend=1;
+            Run(false,PlayableProfile.Create(data),secondContact:true);
+        }
         [Test,Timeout(90000)] public void RealPendingCurrentSourceRebindsAfterHumanReplacementWithoutPolicyReplay()
         {
             var data=PlayableProfile.Default.CopyData();data.groundRouteBackend=1;Run(false,PlayableProfile.Create(data),true);
         }
-        void Run(bool repairTower,PlayableProfile selectedProfile=null,bool pendingControl=false)
+        [Test,Timeout(90000)] public void PaidGroundProofCommitsAcrossAnIndependentAuthorityAdvance()
+        {
+            var data=PlayableProfile.Default.CopyData();data.groundRouteBackend=1;
+            Run(false,PlayableProfile.Create(data),pendingControl:true,stableCarry:true);
+        }
+        [Test,Timeout(90000)] public void RealPendingEmptyHoldSourceRebindsExactly()
+        {
+            var data=PlayableProfile.Default.CopyData();data.groundRouteBackend=1;
+            Run(false,PlayableProfile.Create(data),pendingControl:true,emptyHold:true);
+        }
+        void Run(bool repairTower,PlayableProfile selectedProfile=null,bool pendingControl=false,bool emptyHold=false,bool stableCarry=false,bool secondContact=false)
         {
             const int seed=7;long generation=repairTower?904:903;var p=selectedProfile??PlayableProfile.Default;var ai=AiProfile.Initial;
             var ownStart=repairTower?new OfflineStart("west",1,new NavPoint(-20,10),new NavPoint(-18,-12),pin:1):new OfflineStart("west",1,new NavPoint(-25,-5),new NavPoint(-20,-5),pin:1);
@@ -52,7 +68,7 @@ namespace Spacewars.Tests.PlayMode
             var coreFrames=new List<object>(2048);int coreDropped=0,coreErrors=0;string coreError=null;
             Action<string,long,PlayableAiObservation,AiArmyRegistryState,PlayableAiAction[]> ownedCoreObserver=null;
             bool coreObserverInstalled=false;int coreThread=Thread.CurrentThread.ManagedThreadId;
-            string coreOutput=System.IO.Path.GetFullPath(System.IO.Path.Combine(UnityEngine.Application.dataPath,"../../.local/ai-combat-attention/applied-preemption/tower-core-attempt-1"));
+            string coreOutput=System.IO.Path.GetFullPath(System.IO.Path.Combine(UnityEngine.Application.dataPath,"../../.local/ai-combat-attention/applied-preemption/tower-core-"+Guid.NewGuid().ToString("N")));
             try
             {
                 var initial=authority.ParticipantView("player-1");var tanks=initial.Entities.Where(u=>u.Owner==initial.Owner&&u.Kind==PlayableEntityKind.Tank).OrderBy(u=>u.Id).ToArray();
@@ -70,7 +86,8 @@ namespace Spacewars.Tests.PlayMode
                 long enemySequence=10;
                 foreach(var enemy in enemies)Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(generation,enemySequence++,"enemy-1",PlayableCommandKind.Attack,new[]{enemy.Id},origin,targetId:victim)).Status);
                 var heldExplorer=initial.Entities.Single(u=>u.Owner==initial.Owner&&u.Kind==PlayableEntityKind.Explorer);
-                Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(generation,2,"player-1",PlayableCommandKind.Hold,new[]{heldExplorer.Id},origin:PlayableOrderOrigin.Human)).Status);
+                var explorerOrder=emptyHold?PlayableCommandKind.Stop:PlayableCommandKind.Hold;
+                Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(generation,2,"player-1",explorerOrder,new[]{heldExplorer.Id},origin:PlayableOrderOrigin.Human)).Status);
                 // This real human job keeps the extra starter from adding hidden HQ
                 // DPS. Native stats, damage and autonomous battle remain unchanged.
                 Assert.AreEqual(400,authority.ParticipantView("enemy-1").Buildings.Single(b=>b.Id==openingAttack.TargetId&&b.Kind==PlayableBuildingKind.Headquarters).Health);
@@ -118,7 +135,7 @@ namespace Spacewars.Tests.PlayMode
                     ownedCoreObserver=(owner,tick,observation,groups,actions)=>RecordCore("pre-decision",observation,groups);
                     PlayableAiOwnerLoop.CurrentOwnerDecisionOwnerFilterForTests="player-1";PlayableAiOwnerLoop.CurrentOwnerDecisionReadbackForTests=ownedCoreObserver;coreObserverInstalled=true;
                 }
-                if(pendingControl){loop.BindExecutionDomain(d);d.BindCombatMotionAuthority(()=>scheduler.Owners);d.CombatMotionAuthority.WorkGrantForTests=_=>0;}
+                if(pendingControl){loop.BindExecutionDomain(d);d.BindCombatMotionAuthority(()=>scheduler.Owners);d.CombatMotionAuthority.WorkGrantForTests=_=>stableCarry?1:0;}
                 worker=new CertifiedRouteWorker(authority.NavigationBinding,p.NavigationRequestsPerFrame);
                 bool applied=false,moved=false,releasedFocus=false,returned=false;long firstApplied=-1,firstMotion=-1;NavPoint withdrawal=origin;
                 var appliedRecords=new Dictionary<long,PlayableAiTraceRecord>();var clock=Stopwatch.StartNew();
@@ -127,11 +144,48 @@ namespace Spacewars.Tests.PlayMode
                     if(!authority.TryAdvance()){Thread.Sleep(1);continue;}
                     Assert.IsNull(worker.Publication.Failure);var view=authority.ParticipantView("player-1");var actor=view.Entities.FirstOrDefault(u=>u.Id==victim);Assert.NotNull(actor,"Focal unit must survive the recovery cycle");
                     if(pendingControl&&d.CombatMotionAuthority.HasPending){
+                        if(stableCarry){
+                            var motion=d.CombatMotionAuthority;
+                            var nav=d.Navigation;
+                            var accepted=nav.MotionOperationWatermark;
+                            var pending=Field(motion,"pending");
+                            var rows=(IList)Field(pending,"Rows");
+                            var submission=(AiCombatMicroExecutionOwner.Submission)Field(rows[0],"Submission");
+                            Assert.Positive(submission.Paths.Sum(path=>path.Consumed),"The accepted proposal already consumed policy work.");
+                            Assert.Positive(accepted);
+                            Assert.Zero(motion.AffectedPublications);
+                            var before=d.CombatExecutionActor(victim);
+                            using(nav.RoutePort.AcquireResultPreparation(null)){
+                                var serial=(long)Field(nav,"authorityOperationIdentity");
+                                nav.ConfigureMarch((double)Field(nav,"marchStretch"),(int)Field(nav,"marchProfileRevision"));
+                                Assert.AreEqual(serial+1,(long)Field(nav,"authorityOperationIdentity"));
+                                motion.WorkGrantForTests=null;
+                                for(int i=0;i<8&&motion.HasPending;i++){
+                                    nav.Step(1d/30d);
+                                    Assert.AreEqual(accepted,nav.MotionOperationWatermark,"The same accepted operation must complete.");
+                                }
+                            }
+                            var after=d.CombatExecutionActor(victim);
+                            Assert.False(motion.HasPending,motion.LastRefusal);
+                            Assert.AreEqual(1,motion.AffectedPublications,motion.LastRefusal);
+                            Assert.AreEqual(AiCombatMicroExecutionStatus.Committed,submission.State);
+                            Assert.True(!before.Location.Equals(after.Location)||before.HullHeading!=after.HullHeading,"The retained operation must change the accepted receiver's pose.");
+                            return;
+                        }
                         // A real producer input is accepted by the actual AI
                         // consumer; refusing private work leaves its physical
                         // publication pending. Human custody changes afterward.
                         Assert.Zero(d.CombatMotionAuthority.AffectedPublications);
                         long operation=d.Navigation.MotionOperationWatermark;Assert.Greater(operation,0);
+                        if(emptyHold){
+                            Assert.True(d.Navigation.TryRetainMotionSource(operation,false,out var pin));
+                            using(pin){
+                                var receivers=((Array)Field(pin.Proposal,"receivers")).Cast<object>();
+                                var receiver=receivers.Single(row=>(int)Field(Field(row,"Before"),"Entity")==victim);
+                                var route=(NavTypedRoute)receiver.GetType().GetProperty("AcceptedRoute",F).GetValue(receiver);
+                                Assert.AreEqual("",route.Subscription.HoldBinding,"Actual Native source must carry an empty HOLD name.");
+                            }
+                        }
                         Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(generation,d.AllocateAiSequence(),"player-1",PlayableCommandKind.Hold,new[]{victim},origin:PlayableOrderOrigin.Human)).Status);
                         var changed=d.CombatExecutionActor(victim);Assert.True(changed.Held);Assert.AreEqual(PlayableOrderOrigin.Human,changed.OrderStamp.Origin);
                         byte[] saved=authority.CaptureBytes();pendingCold=PlayableAuthorityTick.RestoreBytes(saved,config);
@@ -268,6 +322,52 @@ namespace Spacewars.Tests.PlayMode
                 Assert.True(applied,"Observed real focus must issue an Applied micro withdrawal for an army member");
                 Assert.True(moved,"Applied command must cause physical movement away from attackers through the ordinary threaded host");
                 Assert.True(returned,"After focus clears, unit physically returns toward a current viable friendly core");
+                if(secondContact)
+                {
+                    var joined=authority.ParticipantView("player-1");
+                    var patient=joined.Entities.Single(u=>u.Id==victim);
+                    var ally=joined.Entities.Single(u=>u.Id==anchor);
+                    var opponent=authority.ParticipantView("enemy-1").Entities.Where(u=>u.Owner==PlayableOwner.Enemy&&u.Kind==PlayableEntityKind.Tank)
+                        .OrderBy(u=>Distance(u.Position,patient.Position)).First();
+                    // Approach from the flank so the second attacker enters both
+                    // tanks' firing range instead of stopping at the leader's outer edge.
+                    var approach=new NavPoint((patient.Position.X+ally.Position.X)/2+6,
+                        (patient.Position.Z+ally.Position.Z)/2+3);
+                    Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(generation,enemySequence++,"enemy-1",
+                        PlayableCommandKind.Move,new[]{opponent.Id},approach)).Status);
+                    bool tookFocus=false;
+                    long shotTick=-1,allyDamageTick=-1;
+                    var contactFrames=new List<object>();
+                    while(d.Tick<joinTick+360&&clock.Elapsed.TotalSeconds<60&&(shotTick<0||allyDamageTick<0))
+                    {
+                        if(!authority.TryAdvance()){Thread.Sleep(1);continue;}
+                        Assert.IsNull(worker.Publication.Failure);
+                        var contact=authority.ParticipantView("player-1");
+                        if(shotTick<0&&contact.Projectiles.Any(s=>s.OwnerId==victim&&s.TargetId==opponent.Id&&s.DirectLaunchTick>joinTick))shotTick=d.Tick;
+                        var front=contact.Entities.FirstOrDefault(u=>u.Id==anchor);
+                        var recovered=contact.Entities.FirstOrDefault(u=>u.Id==victim);
+                        var hostile=contact.Entities.FirstOrDefault(u=>u.Id==opponent.Id);
+                        if(!tookFocus&&hostile!=null&&front!=null&&recovered!=null&&
+                            Distance(hostile.Position,recovered.Position)<p.TankRange-1&&Distance(hostile.Position,front.Position)<p.TankRange-1)
+                        {
+                            Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(generation,enemySequence++,"enemy-1",
+                                PlayableCommandKind.Attack,new[]{opponent.Id},front.Position,targetId:ally.Id)).Status);
+                            tookFocus=true;
+                        }
+                        if(d.Tick==joinTick+1||d.Tick%10==0||shotTick==d.Tick)
+                            contactFrames.Add(new{d.Tick,Patient=recovered==null?null:new{recovered.Position,recovered.Health,recovered.TargetId,recovered.CurrentOrder,recovered.OrderStamp},
+                                Ally=front==null?null:new{front.Position,front.Health,front.TargetId},
+                                Enemy=hostile==null?null:new{hostile.Position,hostile.Health,hostile.TargetId},Reserved=micro.Reserves(victim),
+                                Army=registry.Capture().Armies.Where(a=>a.Members.Contains(victim)).Select(a=>new{a.Id,a.Phase,a.Objective}).ToArray()});
+                        if(allyDamageTick<0&&(front==null||(front.ExactHealth??front.Health)<(ally.ExactHealth??ally.Health)))allyDamageTick=d.Tick;
+                        Assert.True(contact.Entities.Any(u=>u.Id==victim),"The wounded unit must survive the second contact.");
+                    }
+                    TestContext.WriteLine($"SECOND_CONTACT join={joinTick} shot={shotTick} allyDamage={allyDamageTick}");
+                    TestContext.WriteLine("CONTACT_FRAMES "+Newtonsoft.Json.JsonConvert.SerializeObject(contactFrames));
+                    Assert.True(tookFocus,"The second attacker must apply its focus order inside both firing ranges.");
+                    Assert.Greater(shotTick,joinTick,"After rejoining, the injured tank must fire on the next attacker.");
+                    Assert.Greater(allyDamageTick,joinTick,"The new attacker must actually damage another allied tank.");
+                }
                 int burst=(int)ai.DifficultyValue(AiDifficulty.Veteran,"control.burst");double rate=ai.DifficultyValue(AiDifficulty.Veteran,"control.ordersPerMinute");
                 Assert.LessOrEqual(appliedRecords.Count,burst+Math.Floor(d.Tick*rate/1800));
                 Assert.Greater(worker.Publication.Pumps,0);

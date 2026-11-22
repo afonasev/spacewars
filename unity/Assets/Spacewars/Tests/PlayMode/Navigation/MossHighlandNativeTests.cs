@@ -17,7 +17,7 @@ namespace Spacewars.Tests.PlayMode
     {
         private static PlayableProfile Profile()=>PlayableProfile.Create(JsonUtility.FromJson<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text),new MossHighlandMap(JsonUtility.FromJson<MossHighlandProfileData>(Resources.Load<TextAsset>("MossHighlandProfile").text)));
         [Test] public void AlbedoFamiliesImportsAndNaturalPaintAreValid(){
-            var art=MossHighlandArtProfile.Load();Assert.AreEqual(64,art.Parameters().Count());art.Validate();var invalid=MossHighlandArtProfile.Load();invalid.detailTile=float.NaN;Assert.Throws<ArgumentException>(()=>invalid.Validate());
+            var art=MossHighlandArtProfile.Load();Assert.AreEqual(66,art.Parameters().Count());art.Validate();var invalid=MossHighlandArtProfile.Load();invalid.detailTile=float.NaN;Assert.Throws<ArgumentException>(()=>invalid.Validate());
             foreach(var parameter in art.Parameters()){
                 float original=parameter.Read();
                 foreach(float value in new[]{parameter.Minimum,parameter.Maximum}){parameter.Write(value);Assert.DoesNotThrow(()=>art.Validate(),parameter.Path);}
@@ -32,7 +32,7 @@ namespace Spacewars.Tests.PlayMode
 #endif
             }
             var material=art.Material(Texture2D.blackTexture,new Vector4(64,64,0,0),Color.black);
-            try{Assert.AreSame(Resources.Load<Texture2D>("MossHighlandArt/DrySoil"),material.GetTexture("_SandTex"));Assert.AreSame(Resources.Load<Texture2D>("MossHighlandArt/RockyMoss"),material.GetTexture("_StoneTex"));Assert.AreSame(Resources.Load<Texture2D>("Environment/NaturalFrontier/Concrete"),material.GetTexture("_ConcreteTex"));Assert.AreEqual(art.rockTile,material.GetVector("_RoleDetail").x);Assert.AreEqual(art.cliffFaceContrast,material.GetVector("_CliffVariation").z);}finally{UnityEngine.Object.DestroyImmediate(material);}
+            try{Assert.AreSame(Resources.Load<Texture2D>("MossHighlandArt/DrySoil"),material.GetTexture("_SandTex"));Assert.AreSame(Resources.Load<Texture2D>("MossHighlandArt/RockyMoss"),material.GetTexture("_StoneTex"));Assert.AreSame(Resources.Load<Texture2D>("Environment/NaturalFrontier/Concrete"),material.GetTexture("_ConcreteTex"));Assert.AreEqual(art.rockTile,material.GetVector("_RoleDetail").x);Assert.AreEqual(art.cliffFaceContrast,material.GetVector("_CliffVariation").z);Assert.AreEqual(art.plateauEdgeContrast,material.GetVector("_CliffVariation").w);}finally{UnityEngine.Object.DestroyImmediate(material);}
             var map=new MossHighlandMap();CollectionAssert.AreEquivalent(new[]{"moss-ground","mountain.base-dark","mountain.base-mid","metal-deck"},map.Materials.Select(p=>p.Material).Distinct());
             var masks=PlayableWorld.BuildMossPaintMasks(map,art,Profile());try{
                 var a=masks[0].GetPixels();var b=masks[1].GetPixels();bool feather=false;var maxima=new float[7];
@@ -40,6 +40,14 @@ namespace Spacewars.Tests.PlayMode
                 // Engineered footprint is crisp even though neighbouring natural masks feather.
                 int centre=(int)((-38+map.HalfExtent)/(2*map.HalfExtent)*512);
                 Assert.AreEqual(1,a[centre*512+centre].b);Assert.AreEqual(0,b[centre*512+centre].r);
+                float Rim(float x,float z)=>masks[1].GetPixelBilinear(x/128+.5f,z/128+.5f).a;
+                foreach(int sx in new[]{-1,1})foreach(int sz in new[]{-1,1})
+                    Assert.Greater(Rim(sx*11.625f,sz*9.625f),.5f,"Exposed rock reaches every outer corner");
+                foreach(int side in new[]{-1,1}){
+                    Assert.AreEqual(0,Rim(side*11.625f,0),"Open X ramp mouth");
+                    Assert.AreEqual(0,Rim(0,side*11.625f),"Open Z ramp mouth");
+                }
+                Assert.AreEqual(0,Rim(9.875f,7.875f),"Internal plateau seam stays unpainted");
                 var transitions=masks[2].GetPixels();
                 Assert.True(transitions.Any(t=>t.r>.5f));
                 foreach(var point in new[]{new NavPoint(-12,0),new NavPoint(12,0),new NavPoint(0,-12),new NavPoint(0,12)})Assert.Greater(masks[2].GetPixelBilinear((float)(point.X/128+.5),(float)(point.Z/128+.5)).b,.9f);
@@ -141,16 +149,25 @@ namespace Spacewars.Tests.PlayMode
             cameraObject.AddComponent<VisibleShadowCoverage>().Configure(host.transform,IndustrialLightingProfile.Load(map.Id));
             var sunObject=new GameObject("Highland QA sun");var sun=sunObject.AddComponent<Light>();sun.type=LightType.Directional;var lighting=IndustrialLightingProfile.Load(map.Id);var priorAmbient=RenderSettings.ambientLight;lighting.ApplyScene(sun);
             var image=new RenderTexture(1280,960,24);image.Create();camera.targetTexture=image;PlayableWorld world=null;var mini=new PlayableMapTerrain(p);
-            string folder=Path.Combine(Directory.GetParent(Application.dataPath).Parent.FullName,"artifacts/playtest/moss-highland-borders");Directory.CreateDirectory(folder);
+            string folder=Path.Combine(Directory.GetParent(Application.dataPath).Parent.FullName,".local/moss-centre-cliff/render");Directory.CreateDirectory(folder);
             try{
                 // Render only the current profile; historical baseline PNGs are preserved separately.
                 {
                     world?.Dispose();var art=MossHighlandArtProfile.Load();
-                    world=new PlayableWorld(host.transform,p,art);world.Fog.ShowPublic();mini.ShowPublicTerrain();
+                    world=new PlayableWorld(host.transform,p,art);
+                    world.Dispose();
+                    yield return null;
+                    world=new PlayableWorld(host.transform,p,art);
+                    Assert.True(world.PreparationCacheHit,"The plateau material must be checked after prepared scene restore");
+                    var plateau=world.GraphicsRoot.GetComponentsInChildren<MeshRenderer>().First(r=>r.name=="plateau");
+                    var properties=new MaterialPropertyBlock();
+                    plateau.GetPropertyBlock(properties);
+                    Assert.AreEqual(1f,properties.GetFloat("_PlateauSurface"));
+                    world.Fog.ShowPublic();mini.ShowPublicTerrain();
                     var roster=Enumerable.Range(0,4).Select(i=>new OfflineParticipant("seat-"+i,i+1,i+1,OfflineControl.Human)).ToArray();var config=map.Configuration(p,7108,roster);var authority=new OfflineParticipantAuthority(config,1);
                     foreach(var owner in roster){var v=authority.View(owner.Id);foreach(var b in v.Buildings.Where(b=>b.Owner==v.Owner)){var actor=world.Building(b.Id,"headquarters",b.Owner==PlayableOwner.Player);actor.Root.position=new Vector3((float)b.Position.X,(float)map.SurfaceHeight(b.Position),(float)b.Position.Z);ColorUtility.TryParseHtmlString(NativeLobbyConfiguration.ColorHex[(int)b.Owner],out var color);PlayableWorld.PaintOwner(actor,color);}foreach(var e in v.Entities.Where(e=>e.Owner==v.Owner)){var actor=world.Tank(e.Id,e.Owner==PlayableOwner.Player,e.Kind);actor.Root.position=new Vector3((float)e.Position.X,(float)map.SurfaceHeight(e.Position),(float)e.Position.Z);ColorUtility.TryParseHtmlString(NativeLobbyConfiguration.ColorHex[(int)e.Owner],out var color);PlayableWorld.PaintOwner(actor,color);}}
                     yield return null;
-                    foreach(string pose in new[]{"overview","border-unshadowed","border-nw","border-se","river-west","river-east","border-normal","oblique","edge-decoration","centre-routes","normal-camera","base-close","ramp-close","cliff-close","moss-close","soil-close","orbit","rock-foot","apron-edge","cliff-side","cliff-unshadowed","ridge-se","ridge-ne","ridge-nw","ridge-east-transition"}){
+                    foreach(string pose in new[]{"overview","border-unshadowed","border-nw","border-se","river-west","river-east","border-normal","oblique","edge-decoration","centre-routes","centre-normal","centre-unshadowed","normal-camera","base-close","ramp-close","cliff-close","moss-close","soil-close","orbit","rock-foot","apron-edge","cliff-side","cliff-unshadowed","ridge-se","ridge-ne","ridge-nw","ridge-east-transition"}){
                         var focus=pose=="rock-foot"?new Vector3(-24,0,-34):pose=="apron-edge"?new Vector3(-27,0,-38):pose=="cliff-side"?new Vector3(-20,2,-24):(pose=="normal-camera"||pose=="base-close")?new Vector3(-38,0,-38):pose=="soil-close"?new Vector3(-14,0,-40):pose=="ramp-close"?new Vector3(-12,0,0):(pose=="cliff-close"||pose=="cliff-unshadowed")?new Vector3(-20,0,-20):pose=="moss-close"?new Vector3(-28,0,-10):Vector3.zero;
                         if(pose=="ridge-se")focus=new Vector3(20,2,-24);
                         if(pose=="ridge-ne")focus=new Vector3(20,2,24);
@@ -165,9 +182,14 @@ namespace Spacewars.Tests.PlayMode
                         if(pose=="border-normal")focus=new Vector3(-48,0,45);
                         camera.orthographicSize=pose=="centre-routes"?24:pose=="overview"||pose=="oblique"||pose=="orbit"?66:pose=="normal-camera"?(float)p.CameraOrthoSize:(float)p.CameraMinZoom;
                         camera.transform.position=focus+((pose=="cliff-side"||pose.StartsWith("ridge-"))?new Vector3(-20,16,-32):pose=="overview"?new Vector3(0,140,-.01f):pose=="normal-camera"?new Vector3((float)p.CameraOffsetX,(float)p.CameraHeight,(float)p.CameraOffsetZ):pose=="orbit"?new Vector3(45,80,55):new Vector3(-38,82,-58));camera.transform.LookAt(focus);
+                        if(pose=="centre-normal"||pose=="centre-unshadowed"){
+                            camera.orthographicSize=pose=="centre-normal"?(float)p.CameraOrthoSize:24;
+                            camera.transform.position=new Vector3((float)p.CameraOffsetX,(float)p.CameraHeight,(float)p.CameraOffsetZ);
+                            camera.transform.LookAt(Vector3.zero);
+                        }
                         if(pose.StartsWith("border-")||pose.StartsWith("river-")){camera.orthographicSize=pose=="border-normal"?(float)p.CameraOrthoSize:17;camera.transform.position=focus+new Vector3((float)p.CameraOffsetX,(float)p.CameraHeight,(float)p.CameraOffsetZ);camera.transform.LookAt(focus);}
                         var shadows=sun.shadows;
-                        if(pose=="cliff-unshadowed"||pose=="border-unshadowed")sun.shadows=LightShadows.None;
+                        if(pose=="cliff-unshadowed"||pose=="border-unshadowed"||pose=="centre-unshadowed")sun.shadows=LightShadows.None;
                         Capture(pose);
                         sun.shadows=shadows;
                     }

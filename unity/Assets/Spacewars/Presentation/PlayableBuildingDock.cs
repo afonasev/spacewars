@@ -34,6 +34,7 @@ namespace Spacewars.Presentation
             armyRegion.AddToClassList("soft-building-dock");
             OrbitalPrecision.Frame(armyRegion);
             ConfigureSelectionDock();
+            ConfigureAppliedUpgrades(info);
             armyRegion.style.backgroundColor=Color.clear;
             armyRegion.style.borderTopColor=armyRegion.style.borderBottomColor=armyRegion.style.borderLeftColor=armyRegion.style.borderRightColor=new Color(.59f,.74f,.8f,.30f);
         }
@@ -50,26 +51,27 @@ namespace Spacewars.Presentation
             dockContents.style.borderLeftWidth=0;dockContents.style.paddingLeft=0;
             selectionLabel.style.fontSize=p.selectionFont+2;contextStats.style.fontSize=p.selectionFont;
             contextHealthText.style.fontSize=p.selectionFont;dockQueueCount.style.fontSize=p.selectionFont;
+            LayoutSelectionExpandControl();
             if(!buildingDockVisible){LayoutUnitSelectionDock(available);return;}
             armyRegion.style.width=Mathf.Min(buildingDockHasDetails?p.dockWidth:p.selectionWidth,available);
             dockPortrait.style.width=dockPortrait.style.height=p.dockPortraitSize;
-            var health=armyRegion.Q("context-health");health.style.width=p.dockActiveWidth;
-            health.style.flexWrap=Wrap.NoWrap;health[0].style.flexGrow=1;
+            var health=armyRegion.Q("context-health");health.style.width=StyleKeyword.Auto;
+            health.style.flexWrap=Wrap.NoWrap;health[0].style.flexGrow=1;health[0].style.minWidth=0;
             contextHealthText.style.width=StyleKeyword.Auto;contextHealthText.style.marginLeft=p.selectionGap;contextHealthText.style.marginTop=0;
-            dockContents.style.display=buildingDockHasDetails?DisplayStyle.Flex:DisplayStyle.None;
+            dockContents.style.display=buildingDockHasDetails||inspectionEntityId!=0&&selectionRosterExpanded?DisplayStyle.Flex:DisplayStyle.None;
 
         }
         private void UpdateBuildingDock(PlayableBuildingSnapshot building,PlayableEntitySnapshot entity)
         {
             buildingDockVisible=building!=null;
             dockIdentity.tooltip=building!=null?PlayableMenuDescriptions.Building(profile,building.Kind,building.RefineryUpgraded,freeEconomy:provingGround!=null,maxHealth:TerritoryRules.MaximumHealth(profile,building)):entity!=null?(selectionRosterExpanded?PlayableMenuDescriptions.Unit(profile,entity.Kind,entity.Owner==view.Owner?view.OwnerResearch:null,entity,freeEconomy:provingGround!=null):UnitName(entity.Kind)+" · "+entity.Health+" HP · "+"Развернуть подробности (RT)"):"";
-            string glyph=building!=null?OrbitalPrecision.BuildingArtwork(building):entity==null?null:RadialActionPresentation.UnitArtwork(entity.Kind,entity.Upgraded);
+            string glyph=building!=null?OrbitalPrecision.BuildingArtwork(building):entity==null?null:RadialActionPresentation.UnitArtwork(entity.Kind,entity.Upgraded,entity.RocketLauncher);
             dockPortrait.Set(glyph);var portrait=dockPortrait.Texture;
             dockPortrait.style.display=portrait!=null?DisplayStyle.Flex:DisplayStyle.None;
             contextIcon.style.display=portrait==null?DisplayStyle.Flex:DisplayStyle.None;
             contextIcon.style.position=Position.Relative;contextIcon.style.left=contextIcon.style.top=0;
             int count=(building?.Kind==PlayableBuildingKind.Factory||building?.Kind==PlayableBuildingKind.Hangar)?building.PrivateState?.Orders?.Count??0:building?.Kind==PlayableBuildingKind.ScientificCenter?building.PrivateState?.Research?.Count(o=>!o.Complete&&o.CenterId==building.Id)??0:-1;
-            buildingDockHasDetails=count>=0||building?.Progress<1||building?.PrivateState?.Upgrade?.Active==true||building?.PrivateState?.Lifecycle?.Selling==true||building?.PrivateState?.Lifecycle?.Repairing==true;
+            buildingDockHasDetails=(inspectionEntityId==0||spectatorMode)&&(count>=0||building?.Progress<1||building?.PrivateState?.Upgrade?.Active==true||building?.PrivateState?.Lifecycle?.Selling==true||building?.PrivateState?.Lifecycle?.Repairing==true);
             bool showResearchCount=count>=0&&building?.Kind==PlayableBuildingKind.ScientificCenter;
             dockQueueCount.text=showResearchCount?"ИССЛЕДОВАНИЯ   "+count:"";
             dockQueueCount.style.display=showResearchCount?DisplayStyle.Flex:DisplayStyle.None;

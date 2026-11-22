@@ -68,7 +68,7 @@ namespace Spacewars.Tests.EditMode
             var gauss=new PlayableBuildingSnapshot(31,PlayableOwner.Enemy,PlayableBuildingKind.GaussTower,new NavPoint(-8,0),TerritoryRules.Health(P,PlayableBuildingKind.GaussTower),1,0,0,default,includePrivateState:false);
             Assert.True(AiStaticDefenseSafety.Withdrawal(View(extra:new[]{gauss},units:new[]{hawk}),P,hawk,new[]{new NavPoint(0,0)}));
         }
-        [Test] public void BusyUsefulRepairDoesNotDuplicateButNewFrontCanDevelop()
+        [Test] public void RepairLimitWaitsForDevelopedHomeAndThirdBase()
         {
             var home=TerritoryRules.Sites(P)[0];var pad=home.DefenseSlots(P)[0];
             var healed=new PlayableEntitySnapshot(20,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(pad.Position.X+2,pad.Position.Z),30,false,0,0,0);
@@ -80,9 +80,92 @@ namespace Spacewars.Tests.EditMode
             var center=new PlayableBuildingSnapshot(10,PlayableOwner.Player,PlayableBuildingKind.Outpost,front.Position,TerritoryRules.Health(P,PlayableBuildingKind.Outpost),1,0,0,default,siteId:3);
             var wounded=new PlayableEntitySnapshot(21,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(22,-10),40,false,0,0,0);
             var frontGoal=new NavPoint(20,-16);var frontProof=new PlayableRouteProof(21,PlayableOwner.Player,107,9000,1,wounded.Position,P.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,10,front.Position,frontGoal,new[]{frontGoal});
-            var expanded=View(extra:new[]{repair,center},units:new[]{healed,wounded},proofs:new[]{homeProof,frontProof},additionalSites:new[]{new TerritorySiteSnapshot(front,PlayableOwner.Player,PlayableOwner.Player,1,false,10,true)});
-            Assert.True(AiPositionDevelopmentPlanner.Plan(expanded,P,AiProfile.Initial,opening,null,true).Any(c=>c.Action.BuildingKind==PlayableBuildingKind.RepairTower&&c.Action.SiteId==3));
+            var frontPad=front.DefenseSlots(P)[0];
+            var sentry=new PlayableBuildingSnapshot(34,PlayableOwner.Player,PlayableBuildingKind.SentryTurret,frontPad.Position,
+                TerritoryRules.Health(P,PlayableBuildingKind.SentryTurret),1,0,0,default,siteId:3,slotId:frontPad.Id,parentId:10);
+            var third=new TerritorySite(4,PlayableBuildingKind.Outpost,new NavPoint(-20,20),P);
+            var thirdCenter=new PlayableBuildingSnapshot(35,PlayableOwner.Player,PlayableBuildingKind.Outpost,third.Position,
+                TerritoryRules.Health(P,PlayableBuildingKind.Outpost),1,0,0,default,siteId:4);
+            var homeDevelopment=home.Slots.Skip(1).Take(3).Select(slot=>new PlayableBuildingSnapshot(40+slot.Id,
+                PlayableOwner.Player,PlayableBuildingKind.Refinery,slot.Position,P.RefineryHealth,1,0,0,default,siteId:1,slotId:slot.Id,parentId:1)).ToArray();
+            var frontSite=new TerritorySiteSnapshot(front,PlayableOwner.Player,PlayableOwner.Player,1,false,10,true);
+            var thirdSite=new TerritorySiteSnapshot(third,PlayableOwner.Player,PlayableOwner.Player,1,false,35,true);
+            bool ProposesSecond(bool developed,params TerritorySiteSnapshot[] extraSites)
+            {
+                var extra=new[]{repair,center,sentry,thirdCenter}.Concat(developed?homeDevelopment:Array.Empty<PlayableBuildingSnapshot>()).ToArray();
+                var expanded=View(extra:extra,units:new[]{healed,wounded},proofs:new[]{homeProof,frontProof},additionalSites:extraSites);
+                return AiPositionDevelopmentPlanner.Plan(expanded,P,AiProfile.Initial,opening,null,true)
+                    .Any(c=>c.Action.BuildingKind==PlayableBuildingKind.RepairTower&&c.Action.SiteId==3);
+            }
+            Assert.False(ProposesSecond(false,frontSite,thirdSite));
+            Assert.False(ProposesSecond(true,frontSite));
+            Assert.True(ProposesSecond(true,frontSite,thirdSite));
         }
+
+        [Test]
+        public void AircraftMemoryAndVeteranReservePreventGroundOnlyConversion()
+        {
+            var ai=AiProfile.Initial;
+            var o=View(tick:12000);
+            var oldGround=new AiKnownContact(70,PlayableOwner.Enemy,false,(int)PlayableEntityKind.Tank,new NavPoint(21,0),P.TankHealth,10200,0.5,false);
+            var freshGround=new AiKnownContact(71,PlayableOwner.Enemy,false,(int)PlayableEntityKind.Tank,new NavPoint(21,0),P.TankHealth,o.Tick,1,true);
+            var ground=new AiKnowledgeState(o.OwnerId,o.Generation,o.Tick,new[]{oldGround,freshGround},Array.Empty<AiVisitedArea>());
+            Assert.Zero(AiPositionDevelopmentPlanner.RequiredSentryReserve(o,ai,ground,AiDifficulty.Fighter));
+            Assert.AreEqual(1,AiPositionDevelopmentPlanner.RequiredSentryReserve(o,ai,ground,AiDifficulty.Veteran));
+            var hawk=new AiKnownContact(72,PlayableOwner.Enemy,false,(int)PlayableEntityKind.Hawk,new NavPoint(20,0),(int)P.HawkHealth,11990,0.95,false);
+            var mixed=new AiKnowledgeState(o.OwnerId,o.Generation,o.Tick,new[]{oldGround,freshGround,hawk},Array.Empty<AiVisitedArea>());
+            Assert.AreEqual(1,AiPositionDevelopmentPlanner.RequiredSentryReserve(o,ai,mixed,AiDifficulty.Fighter));
+            var air=new AiKnowledgeState(o.OwnerId,o.Generation,o.Tick,new[]{hawk},Array.Empty<AiVisitedArea>());
+            Assert.True(AiPositionDevelopmentPlanner.PredominantlyAir(o,P,ai,air));
+            Assert.True(AiPositionDevelopmentPlanner.PreferSentry(o,P,ai,air,o.HomeSiteId));
+        }
+
+        [Test]
+        public void LateReplacementRequiresCoverAndKeepsVeteransLastSentry()
+        {
+            const long tick=12000;
+            var site=TerritoryRules.Sites(P)[0];
+            var readyEconomy=site.Slots.Skip(1).Select(slot=>new PlayableBuildingSnapshot(100+slot.Id,
+                PlayableOwner.Player,PlayableBuildingKind.Refinery,slot.Position,P.RefineryHealth,1,0,0,default,
+                siteId:site.Id,slotId:slot.Id,parentId:1)).ToArray();
+            var pads=site.DefenseSlots(P);
+            var life=new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,0,0,false);
+            PlayableBuildingSnapshot Tower(int id,TerritorySlot pad,PlayableBuildingKind kind)=>new PlayableBuildingSnapshot(id,
+                PlayableOwner.Player,kind,pad.Position,TerritoryRules.Health(P,kind),1,0,0,default,siteId:site.Id,
+                slotId:pad.Id,parentId:1,heading:pad.Heading,lifecycle:life);
+            var approachPoints=Enumerable.Range(0,36).Select(i=>i*Math.PI/18)
+                .Select(a=>new NavPoint(site.Position.X+9*Math.Cos(a),site.Position.Z+9*Math.Sin(a))).ToArray();
+            foreach(var sentryPad in pads)
+            foreach(var gaussPad in pads.Where(pad=>pad.Id!=sentryPad.Id))
+            {
+                var sentry=Tower(80,sentryPad,PlayableBuildingKind.SentryTurret);
+                var gauss=Tower(81,gaussPad,PlayableBuildingKind.GaussTower);
+                var o=View(extra:readyEconomy.Concat(new[]{sentry,gauss}).ToArray(),tick:tick);
+                var sharedApproach=approachPoints.Where(at=>
+                    AiPositionDevelopmentPlanner.Covers(o,P,sentry.Position,sentry.Kind,at,sourceId:sentry.Id)&&
+                    AiPositionDevelopmentPlanner.Covers(o,P,sentry.Position,gauss.Kind,at,sourceId:sentry.Id)&&
+                    AiPositionDevelopmentPlanner.Covers(o,P,gauss.Position,gauss.Kind,at,sourceId:gauss.Id))
+                    .Select(at=>(NavPoint?)at).FirstOrDefault();
+                if(!sharedApproach.HasValue)continue;
+                var contacts=new[]
+                {
+                    new AiKnownContact(90,PlayableOwner.Enemy,false,(int)PlayableEntityKind.Tank,sharedApproach.Value,P.TankHealth,tick-1800,0.5,false),
+                    new AiKnownContact(91,PlayableOwner.Enemy,false,(int)PlayableEntityKind.Tank,sharedApproach.Value,P.TankHealth,tick,1,true)
+                };
+                var knowledge=new AiKnowledgeState(o.OwnerId,o.Generation,tick,contacts,Array.Empty<AiVisitedArea>());
+                var ai=AiProfile.Initial;
+                var replacement=AiPositionDevelopmentPlanner.Retrofit(o,P,ai,knowledge,AiDifficulty.Fighter,o.Credits);
+                Assert.IsNotNull(replacement,"a funded safe conversion is available");
+                Assert.AreEqual(PlayableCommandKind.SellBuilding,replacement.Kind);
+                Assert.AreEqual(PlayableBuildingKind.GaussTower,replacement.BuildingKind);
+                CollectionAssert.AreEqual(new[]{sentry.Id},replacement.EntityIds);
+                Assert.IsNull(AiPositionDevelopmentPlanner.Retrofit(o,P,ai,knowledge,AiDifficulty.Veteran,o.Credits));
+                Assert.IsNull(AiPositionDevelopmentPlanner.Retrofit(o,P,ai,knowledge,AiDifficulty.Fighter,0));
+                return;
+            }
+            Assert.Fail("fixture needs a shared legal approach covered by two defense pads");
+        }
+
         [Test] public void StaticCoverageRequiresReadyCompatibleLocalAndSufficientWeapons()
         {
             var enemy=new PlayableEntitySnapshot(100,PlayableOwner.Enemy,PlayableEntityKind.Tank,new NavPoint(-1,0),P.TankHealth,false,0,0,0);

@@ -18,8 +18,11 @@ namespace Spacewars.Runtime
             return length;
         }
         internal static double Project(NavCorridorDescriptor corridor,NavLocation position,double previous)
+            =>Project(corridor,position,previous,out _);
+        private static double Project(NavCorridorDescriptor corridor,NavLocation position,double previous,out double traveled)
         {
-            double traveled=0,bestTravel=0,bestDistance=double.PositiveInfinity;
+            traveled=0;
+            double bestTravel=0,bestDistance=double.PositiveInfinity;
             foreach(var leg in corridor.Legs){
                 double dx=leg.To.Position.X-leg.From.Position.X,dz=leg.To.Position.Z-leg.From.Position.Z;
                 double length=Math.Sqrt(dx*dx+dz*dz);
@@ -45,20 +48,23 @@ namespace Spacewars.Runtime
         }
 
         internal static double ProjectFromOrigin(NavCorridorDescriptor corridor,NavLocation position,double previous,double offset)
-            =>Math.Max(previous,offset+Math.Max(0,Project(corridor,position,double.NegativeInfinity)+Length(corridor)));
+        {
+            double remaining=Project(corridor,position,double.NegativeInfinity,out double length);
+            return Math.Max(previous,offset+Math.Max(0,remaining+length));
+        }
 
         // Shared by movement-only and projected result+movement preparation.
         // Actor rows and installed/group inputs are already private projections.
         internal static NavigationAuthorityGroup PrepareOwned(NavPreparedCrowdStep frame,NavigationAuthorityGroup source,NavigationInstalledExecutionOwner[] installed,bool[] detached,NavigationCommandSlots<int,long> memberGroups,double configuredStretch,int configuredRevision,double dt,INavStorageReservation reservation,bool recast=false,NavigationRetentionBudget projectionBudget=null)
         {
-            frame.AllowRepairCertificateReuse=projectionBudget!=null&&projectionBudget.AllocationAdmission==null;
+            using var phaseTiming=Spacewars.Simulation.PerformanceProfile.Measure(Spacewars.Simulation.ProfileStage.NavMarch);
             var data=source.Data;bool marching=data.Kind==PlayableCommandKind.Move||data.Kind==PlayableCommandKind.AttackMove;
             // An accepted Attack/Follow route still owns a physical Recast
             // cursor and sweep. Group pacing is a separate command policy.
             if(data.MarchVersion!=1&&data.MarchVersion!=2||!marching&&!recast)return null;
             int count=source.Members.Count;using(NavStorageScratch.Reserve(reservation,checked(512L+80L*count))){
-                var unmapped=new bool[count];var sidecars=new RecastMemberProgress[count];var plans=new NavRecastMemberPlan[count];var progress=new double[count];var offsets=new double[count];var requests=new long[count];var active=new bool[count];var rows=new int[count];
-                double anchor=data.MarchAnchor,stretch=data.MarchProfileRevision==configuredRevision?data.MarchStretch:configuredStretch;bool initialized=data.MarchInitialized;int moving=0;double pace=double.PositiveInfinity,minimum=double.PositiveInfinity,minimumStored=double.PositiveInfinity;
+                var sidecars=new RecastMemberProgress[count];var progress=new double[count];var offsets=new double[count];var requests=new long[count];var active=new bool[count];var rows=new int[count];
+                double anchor=0,stretch=data.MarchProfileRevision==configuredRevision?data.MarchStretch:configuredStretch;bool initialized=false;
                 for(int i=0;i<count;i++){
                     var member=((NavigationAuthorityMember)source.Members[i]).Data;sidecars[i]=member.Recast;progress[i]=member.Progress;offsets[i]=member.ProgressOffset;requests[i]=member.ProgressRequest;int row=frame.Find(member.Entity);
                     if(row<0||!InstalledActive(frame.After[row],source,member,installed[row],detached[row],memberGroups,includeReleased:recast))continue;
@@ -67,68 +73,55 @@ namespace Spacewars.Runtime
                     progress[i]=data.MarchVersion==2?ProjectFromOrigin(execution,actor.Location,progress[i],offsets[i]):Project(execution,actor.Location,progress[i]);
                     // Contact releases only formation pacing. The still-owned
                     // installed route must keep its physical cursor and receipt.
-                    if(!member.FormationReleased){active[i]=true;rows[i]=row;moving++;pace=Math.Min(pace,actor.Speed);minimum=Math.Min(minimum,progress[i]);}
-                    if(recast&&execution.RecastPlan!=null&&sidecars[i].Request==execution.Request&&sidecars[i].Phase==RecastMovementPhase.UnmappedProduction){unmapped[i]=true;}
-                    else if(recast&&execution.RecastPlan!=null){plans[i]=execution.RecastPlan;var typed=installed[row].Corridor.TypedRoute;var state=sidecars[i].Request==execution.Request?sidecars[i].ToStep():NavRecastIntervals.Initial(typed);
+                    if(!member.FormationReleased){active[i]=true;rows[i]=row;}
+                    if(recast&&execution.RecastPlan!=null && !(sidecars[i].Request==execution.Request && sidecars[i].Phase==RecastMovementPhase.UnmappedProduction)){var typed=installed[row].Corridor.TypedRoute;var state=sidecars[i].Request==execution.Request?sidecars[i].ToStep():NavRecastIntervals.Initial(typed);
                         // Only the movement owner supplies this ledger. Hooked or other callers
                         // retain the original connection order, including projected Ready work.
                         bool nearestPrecheck=projectionBudget!=null&&reservation is INavStorageLedgerIdentity ledger&&ReferenceEquals(ledger.Identity,projectionBudget)&&frame.Reservation is INavStorageLedgerIdentity frameLedger&&ReferenceEquals(frameLedger.Identity,projectionBudget)&&projectionBudget.AllocationAdmission==null;
-                        if(!NavRecastIntervals.Advance(typed,state,actor.Location,actor.Position,reservation,out var receipt,frame.Working,actor.Id,nearestPrecheck:nearestPrecheck))throw new ArgumentException("Recast current physical binding is invalid.");
-                        // A valid assigned endpoint may be a zero-XZ semantic seam.
-                        // Publish its verified stationary location and cursor together
-                        // in this private frame; the ordinary motor still owns arrival.
-                        if(receipt.Verified&&receipt.PortalCount>0&&receipt.From.Equals(receipt.To)&&receipt.To.Equals(typed.Subscription.AssignedEndpoint.Position)&&receipt.ToSurface==typed.Subscription.AssignedEndpoint.SurfaceId)
-                        {
-                            if(!actor.GoalLocation.HasValue||!actor.GoalLocation.Value.Equals(typed.Subscription.AssignedEndpoint))throw new ArgumentException("Stationary seam has no matching owned actor goal.");
-                            actor.Location=actor.GoalLocation.Value;
-                        }
-                        sidecars[i]=RecastMemberProgress.FromStep(execution.Request,receipt.After);frame.BindRecast(row,typed,receipt.After);}if(active[i])minimumStored=Math.Min(minimumStored,progress[i]);
+                        if(!NavRecastIntervals.Advance(typed,state,actor.Location,actor.Position,reservation,out var receipt,frame.Working,actor.Id,nearestPrecheck:nearestPrecheck))throw new ArgumentException("Recast current physical binding is invalid. actor="+actor.Id+" group="+data.GroupId+" request="+execution.Request+" sidecarRequest="+sidecars[i].Request+" phase="+state.Phase+" cursor="+state.Cursor+" legs="+typed.Legs.Count+" cursorSurface="+(state.Cursor>=0&&state.Cursor<typed.Legs.Count?typed.Legs[state.Cursor].From.SurfaceId:"invalid")+" origin="+typed.Legs[0].From.SurfaceId+":"+typed.Legs[0].From.Position.X+","+typed.Legs[0].From.Position.Z+" "+frame.Working.DescribeRecastBinding(actor.Id,actor.Location,actor.Position,typed.RecastPlan.Spine.Radius));
+                        // Partition traces can cross a seam at the current XZ.
+                        // The typed cursor and physical surface belong to the same receipt.
+                        if(receipt.Verified&&receipt.PortalCount>0&&receipt.From.Equals(receipt.To)&&receipt.ToSurface!=actor.Location.SurfaceId)
+                            actor.Location=frame.Working.OwnedLocation(new NavLocation(actor.Position,receipt.ToSurface));
+                        sidecars[i]=RecastMemberProgress.FromStep(execution.Request,receipt.After);frame.BindRecast(row,typed,receipt.After);}
                 }
-                void ApplyLegacyPace(){
-                if(moving<2){anchor=0;initialized=false;}
-                else{anchor=Anchor(anchor,initialized,pace,dt,minimumStored);initialized=true;for(int i=0;i<count;i++)if(active[i]){int row=rows[i];frame.Preferred[row]=MaxSpeed(frame.After[row].Speed,pace,progress[i],anchor,stretch,dt);}}
-                if(recast)for(int i=0;i<count;i++)if(active[i]&&plans[i]!=null){
-                    double common=double.PositiveInfinity;
-                    for(int j=0;j<count;j++)if(active[j]&&plans[j]!=null&&plans[j].Spine.Binding==plans[i].Spine.Binding&&sidecars[j].Phase!=RecastMovementPhase.Terminal)common=Math.Min(common,sidecars[j].Phase==RecastMovementPhase.Origin?plans[j].Spine.Station(plans[j].Join):sidecars[j].Station);
-                    int row=rows[i];double bound=double.IsPositiveInfinity(pace)?frame.After[row].Speed:Math.Min(pace,frame.After[row].Speed);
-                    frame.RecastReceiver[row]=bound;
-                    frame.Preferred[row]=sidecars[i].Phase==RecastMovementPhase.Shared&&!double.IsPositiveInfinity(common)?MaxSpeed(frame.After[row].Speed,bound,sidecars[i].Station,common,stretch,dt):bound;
-                }
-                // Preserve the SAME still-active installed intent after a special
-                // out-of-plan displacement. Existing own-route sweeps/local repair
-                // continue at current min pace; no fabricated spine ancestry or
-                // new completed-order return intent is introduced.
-                if(recast)for(int i=0;i<count;i++)if(active[i]&&unmapped[i]){int row=rows[i];frame.Preferred[row]=frame.RecastReceiver[row]=Math.Min(pace,frame.After[row].Speed);}
-                }
-                if(marching&&source.Formation==null)ApplyLegacyPace();
                 NavigationAuthorityGroup.Values MarchValues()=>new NavigationAuthorityGroup.Values(data.WorldGeneration,data.GroupId,data.OrderRevision,data.CommandSequence,data.IssuedTick,data.MembershipRevision,data.JobId,data.ActionId,data.MarchVersion,configuredRevision,data.TeamId,data.TargetId,stretch,anchor,initialized,data.Origin,data.Kind,data.OriginalGoal,data.HasLocation,data.Location);
+                if (marching && count > 1 && frame.SourceCrowd.LeadsFormation != null)
+                {
+                    double leadSpeed = double.PositiveInfinity;
+                    for (int i = 0; i < count; i++)
+                        if (active[i] && frame.SourceCrowd.LeadsFormation(frame.After[rows[i]].Id))
+                            leadSpeed = Math.Min(leadSpeed, frame.After[rows[i]].Speed);
+                    if (!double.IsPositiveInfinity(leadSpeed))
+                        for (int i = 0; i < count; i++)
+                            if (active[i])
+                                frame.Preferred[rows[i]] = Math.Min(frame.After[rows[i]].Speed, leadSpeed);
+                }
                 var values=MarchValues();
-                NavigationAuthorityGroup next=null;try{
-                    for(int i=0;i<count;i++){
-                        var before=(NavigationAuthorityMember)source.Members[i];var d=before.Data;var changedValues=new NavigationAuthorityMember.Values(d.Entity,d.Slot,d.Incarnation,d.OrderRevision,d.MobilityRevision,d.Phase,d.Goal,d.Location,d.HasLocation,d.HasGoal,d.FormationReleased,d.Branch,d.Reservation,d.ContactTick,requests[i],progress[i],d.ProgressVersion,offsets[i],sidecars[i]);if(changedValues.BitwiseSame(d))continue;
-                        var changed=NavigationAuthorityMember.CopyWithValuesOwned(before,changedValues,reservation);try{var version=NavigationAuthorityGroup.CopyWithMemberAndMarchOwned(next??source,i,changed,values,reservation);next?.ReleaseStorage();next=version;}finally{changed.ReleaseStorage();}
-                    }
-                    if(next==null&&!values.BitwiseSame(data))next=NavigationAuthorityGroup.CopyWithValuesOwned(source,values,reservation);
-                    if(marching&&recast&&source.Formation!=null){var plan=RecastFormationGuide.Prepare(frame,next??source,installed,detached,memberGroups,dt,reservation,out bool clearCollecting);
-                        try{if(plan!=null||clearCollecting){var version=NavigationAuthorityGroup.CopyWithFormationOwned(next??source,plan,reservation);next?.ReleaseStorage();next=version;}
-                            if(clearCollecting){ApplyLegacyPace();values=MarchValues();var version=NavigationAuthorityGroup.CopyWithValuesOwned(next??source,values,reservation);next?.ReleaseStorage();next=version;}
-                        }finally{plan?.Release();}}
-                    var result=next;next=null;return result;
-                }finally{next?.ReleaseStorage();}
+                var next=NavigationAuthorityGroup.CopyWithMarchBatchOwned(source,values,i=>{
+                    var before=(NavigationAuthorityMember)source.Members[i];var d=before.Data;
+                    var changed=new NavigationAuthorityMember.Values(d.Entity,d.Slot,d.Incarnation,d.OrderRevision,d.MobilityRevision,d.Phase,d.Goal,d.Location,d.HasLocation,d.HasGoal,d.FormationReleased,d.Branch,d.Reservation,d.ContactTick,requests[i],progress[i],d.ProgressVersion,offsets[i],sidecars[i]);
+                    return changed.BitwiseSame(d)?null:NavigationAuthorityMember.CopyWithValuesOwned(before,changed,reservation);
+                },reservation);
+                if(recast&&marching)
+                    for(int i=0;i<count;i++)
+                        if(active[i]&&frame.RecastRoutes[rows[i]]!=null)frame.Formation[rows[i]].SingleMoveDirect=true;
+                return next;
             }
         }
         // Apply actual accepted sweep receipts from the SAME private crowd frame.
         // Neither global routeIndex nor a worker-side cursor grants progress.
         internal static NavigationAuthorityGroup CompleteRecastOwned(NavPreparedCrowdStep frame,NavigationAuthorityGroup source,INavStorageReservation r)
         {
-            NavigationAuthorityGroup next=null;
-            try{for(int i=0;i<source.Members.Count;i++){
-                var member=(NavigationAuthorityMember)(next??source).Members[i];var d=member.Data;int row=frame.Find(d.Entity);if(row<0||frame.RecastRoutes[row]==null||(!frame.RecastReceipts[row].Verified&&!frame.RecastReceipts[row].ProductionUnmapped))continue;
+            using var phaseTiming=Spacewars.Simulation.PerformanceProfile.Measure(Spacewars.Simulation.ProfileStage.NavMarchComplete);
+            return NavigationAuthorityGroup.CopyWithMarchBatchOwned(source,source.Data,i=>{
+                var member=(NavigationAuthorityMember)source.Members[i];var d=member.Data;int row=frame.Find(d.Entity);
+                if(row<0||frame.RecastRoutes[row]==null||(!frame.RecastReceipts[row].Verified&&!frame.RecastReceipts[row].ProductionUnmapped))return null;
                 var route=frame.RecastRoutes[row];if(d.ProgressRequest!=route.Subscription.RequestSequence)throw new ArgumentException("Recast receipt request changed.");
-                var progress=RecastMemberProgress.FromStep(d.ProgressRequest,frame.RecastReceipts[row].After);if(progress.Equals(d.Recast))continue;
+                var progress=RecastMemberProgress.FromStep(d.ProgressRequest,frame.RecastReceipts[row].After);if(progress.Equals(d.Recast))return null;
                 var values=new NavigationAuthorityMember.Values(d.Entity,d.Slot,d.Incarnation,d.OrderRevision,d.MobilityRevision,d.Phase,d.Goal,d.Location,d.HasLocation,d.HasGoal,d.FormationReleased,d.Branch,d.Reservation,d.ContactTick,d.ProgressRequest,d.Progress,d.ProgressVersion,d.ProgressOffset,progress);
-                var changed=NavigationAuthorityMember.CopyWithValuesOwned(member,values,r);try{var version=NavigationAuthorityGroup.CopyWithMemberAndMarchOwned(next??source,i,changed,source.Data,r);next?.ReleaseStorage();next=version;}finally{changed.ReleaseStorage();}
-            }var result=next;next=null;return result;}finally{next?.ReleaseStorage();}
+                return NavigationAuthorityMember.CopyWithValuesOwned(member,values,r);
+            },r);
         }
         // Recast members have distinct origin connectors and terminal branches.
         // Compare physical remaining geometry, never their unrelated traveled totals.
@@ -147,8 +140,20 @@ namespace Spacewars.Runtime
         {
             if(owner==null||detached||member.FormationReleased&&!includeReleased||!actor.Moving||actor.Held)return false;var d=owner.Corridor.Corridor;
             if(actor.InstalledGroupId!=d.Group||actor.InstalledRevision!=d.ActivationRevision||actor.InstalledRequest!=d.Request||actor.InstalledOrder!=d.Order||actor.Incarnation!=d.Incarnation||actor.MobilityRevision!=d.Mobility||!memberGroups.TryGetValue(actor.Id,out var g)||g!=d.Group||group.Data.OrderRevision!=d.RootRevision||member.OrderRevision!=d.ActivationRevision||owner.Route.Count!=actor.route.Length)return false;
+            if (ReferenceEquals(owner.Route.ReadOnlyBacking, actor.route)) return true;
             for(int i=0;i<actor.route.Length;i++)if(!owner.Route[i].Equals(actor.route[i]))return false;return true;
         }
+        internal static bool ShareMarchSection(NavRecastMemberPlan first,RecastMemberProgress firstProgress,
+            NavRecastMemberPlan second,RecastMemberProgress secondProgress)
+        {
+            if(firstProgress.Phase!=RecastMovementPhase.Shared||secondProgress.Phase!=RecastMovementPhase.Shared||
+                first.Spine.Binding!=second.Spine.Binding)return false;
+            int start=Math.Max(first.Join,second.Join),end=Math.Min(first.Exit,second.Exit);
+            int firstLeg=first.Join+firstProgress.Cursor-first.OriginLegs;
+            int secondLeg=second.Join+secondProgress.Cursor-second.OriginLegs;
+            return firstLeg>=start&&firstLeg<end&&secondLeg>=start&&secondLeg<end;
+        }
+
         internal static double Anchor(double previous,bool initialized,double slowest,double dt,double minimumProgress)
             =>initialized?Math.Min(minimumProgress,previous+slowest*dt):minimumProgress;
 
@@ -211,7 +216,6 @@ namespace Spacewars.Runtime
                 if(group.MarchProfileRevision!=marchProfileRevision){
                     group.MarchProfileRevision=marchProfileRevision;group.MarchStretch=marchStretch;
                 }
-                var moving=new List<Tuple<GroupMemberState,NavUnit,NavigationInstalledExecutionState>>();
                 foreach(var member in group.Members){
                     if(member.FormationReleased||!Crowd.TryGet(member.Entity,out var actor)||!actor.Moving||actor.Held||
                         !TryActiveInstalledExecution(member.Entity,out var execution))continue;
@@ -220,15 +224,9 @@ namespace Spacewars.Runtime
                         group.MarchInitialized=false;
                     }
                     member.Progress=group.MarchVersion==2?GroupMarch.ProjectFromOrigin(execution.Corridor,actor.Location,member.Progress,member.ProgressOffset):GroupMarch.Project(execution.Corridor,actor.Location,member.Progress);
-                    moving.Add(Tuple.Create(member,actor,execution));
                 }
-                if(moving.Count<2){group.MarchAnchor=0;group.MarchInitialized=false;continue;}
-                double pace=moving.Min(x=>x.Item2.Speed);
-                double minimum=moving.Min(x=>x.Item1.Progress);
-                group.MarchAnchor=GroupMarch.Anchor(group.MarchAnchor,group.MarchInitialized,pace,dt,moving.Min(x=>x.Item1.Progress));
-                group.MarchInitialized=true;
-                foreach(var row in moving)Crowd.PreferMaxSpeed(row.Item2.Id,
-                    GroupMarch.MaxSpeed(row.Item2.Speed,pace,row.Item1.Progress,group.MarchAnchor,group.MarchStretch,dt));
+                group.MarchAnchor = 0;
+                group.MarchInitialized = false;
             }
         }
     }

@@ -9,15 +9,18 @@ namespace Spacewars.Input
     {
         public double X{get;private set;} public double Z{get;private set;} public double Zoom{get;private set;}
         private readonly double homeX,homeZ,homeZoom;
+        public float YawDegrees{get;private set;}
         public OfflinePadCamera(double x,double z,NativeLocalInputProfile profile){X=homeX=x;Z=homeZ=z;Zoom=homeZoom=profile.cameraDefaultZoom;}
         public void Focus(double x,double z){X=x;Z=z;}
         public void AdjustZoom(double delta,NativeLocalInputProfile profile){Zoom=Math.Clamp(Zoom+delta,profile.cameraMinZoom,profile.cameraMaxZoom);}
-        public void Reset(){X=homeX;Z=homeZ;Zoom=homeZoom;}
+        public void Rotate(float degrees){YawDegrees=Mathf.Repeat(YawDegrees+degrees,360);}
+        public void Reset(){X=homeX;Z=homeZ;Zoom=homeZoom;YawDegrees=0;}
         public void Apply(Camera camera)
         {
             camera.orthographic=false;camera.fieldOfView=48;camera.nearClipPlane=.1f;camera.farClipPlane=700;
-            camera.transform.position=new Vector3((float)X,(float)(Zoom*1.35),(float)(Z-Zoom*.72));
-            camera.transform.rotation=Quaternion.LookRotation(new Vector3((float)X,0,(float)Z)-camera.transform.position,Vector3.up);
+            var pivot=new Vector3((float)X,0,(float)Z);
+            var offset=Quaternion.AngleAxis(YawDegrees,Vector3.up)*new Vector3(0,(float)(Zoom*1.35),(float)(-Zoom*.72));
+            camera.transform.SetPositionAndRotation(pivot+offset,Quaternion.LookRotation(-offset,Vector3.up));
         }
         public static Vector3 ProjectViewport(Camera camera,Vector3 point){var p=camera.WorldToViewportPoint(point);return new Vector3(1-p.x,p.y,p.z);}
         public static Vector3 ProjectScreen(Camera camera,Vector3 point){var p=ProjectViewport(camera,point);var r=camera.pixelRect;return new Vector3(r.x+p.x*r.width,r.y+p.y*r.height,p.z);}

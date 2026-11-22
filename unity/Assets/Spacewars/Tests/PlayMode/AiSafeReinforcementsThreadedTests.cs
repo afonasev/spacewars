@@ -16,6 +16,17 @@ namespace Spacewars.Tests.PlayMode
 {
     public sealed class AiSafeReinforcementsThreadedTests
     {
+        private const BindingFlags RuntimeFields=BindingFlags.Instance|BindingFlags.NonPublic;
+
+        private static void StopRuntimeAndRouteWorker(PlayableRuntime runtime,UnityHostRouteService routes)
+        {
+            var worker=routes==null?null:(CertifiedRouteWorker)typeof(UnityHostRouteService).GetField("worker",RuntimeFields).GetValue(routes);
+            runtime?.RequestStop();
+            routes?.Dispose();
+            runtime?.Dispose();
+            Assert.True(System.Threading.SpinWait.SpinUntil(()=>(runtime==null||runtime.IsStopped)&&(worker==null||worker.IsStopped),5000),
+                "Both the match and certified route worker must stop before releasing navigation storage.");
+        }
         [UnityTest,Timeout(150000)] public IEnumerator ProducedUnitUsesAppliedFollowMovesAndActuallyJoinsBeforeCurrentRestore()
         {
             const int seed=7;const long generation=108;
@@ -24,24 +35,35 @@ namespace Spacewars.Tests.PlayMode
             var home=new TerritorySite(1,PlayableBuildingKind.Headquarters,starts[0].Position,p);var enemy=new TerritorySite(2,PlayableBuildingKind.Headquarters,starts[1].Position,p);
             var kinds=new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Refinery,PlayableBuildingKind.Refinery,PlayableBuildingKind.Refinery};
             var buildings=kinds.Select((kind,i)=>new OfflineScenarioBuilding(1,kind,1,home.Slots[i].Id,home.Slots[i].Position,home.Slots[i].Heading)).ToArray();
-            var units=Enumerable.Range(0,8).Select(i=>new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-14+(i%4)*3,-2+(i/4)*3))).Concat(Enumerable.Range(0,3).Select(i=>new OfflineScenarioUnit(1,PlayableEntityKind.Explorer,new NavPoint(-14+i*3,5)))).ToArray();
-            // A normal second center keeps the ordinary match alive if the first
-            // HQ falls before real factory output finishes joining. Health, force,
-            // production timing and the original witness deadline remain stock.
-            var reserve=new TerritorySite(3,PlayableBuildingKind.Outpost,new NavPoint(25,24),Array.Empty<TerritorySlot>());
-            var config=new OfflineMatchConfiguration(p,"ai-safe-reinforcements-ordinary-v1","flat-public-active-v1","UnityHostRouteService",seed,new[]{new OfflineParticipant("active-owner",1,1,OfflineControl.Ai),new OfflineParticipant("human-owner",2,2,OfflineControl.Human)},starts,new[]{home,enemy,reserve},PlayableMap.StaticObstacles(p),new double[,]{{0,100},{100,0}},scenario:units,scenarioBuildings:buildings.Concat(new[]{new OfflineScenarioBuilding(2,PlayableBuildingKind.Outpost,3,0,reserve.Position)}).ToArray(),spectators:new[]{PlayableRuntime.LocalSpectatorId});
+            // Leave room between the field core and the factory, and keep
+            // remote objectives alive until the reinforcement can join.
+            var units=Enumerable.Range(0,8).Select(i=>new OfflineScenarioUnit(1,PlayableEntityKind.Tank,
+                new NavPoint(7+(i%4)*3,-12+(i/4)*3))).Concat(Enumerable.Range(0,3).Select(i=>
+                new OfflineScenarioUnit(1,PlayableEntityKind.Explorer,new NavPoint(7+i*3,-5)))).ToArray();
+            var reserves=new[]{
+                new TerritorySite(3,PlayableBuildingKind.Outpost,new NavPoint(24,-24),Array.Empty<TerritorySlot>()),
+                new TerritorySite(4,PlayableBuildingKind.Outpost,new NavPoint(-26,24),Array.Empty<TerritorySlot>()),
+                // The opposite side of the northern passage keeps a live
+                // objective when the advancing core has cleared the east.
+                new TerritorySite(5,PlayableBuildingKind.Outpost,new NavPoint(-7,28),Array.Empty<TerritorySlot>())
+            };
+            var config=new OfflineMatchConfiguration(p,"ai-safe-reinforcements-ordinary-v1","flat-public-active-v1",
+                "UnityHostRouteService",seed,new[]{new OfflineParticipant("active-owner",1,1,OfflineControl.Ai),
+                    new OfflineParticipant("human-owner",2,2,OfflineControl.Human)},starts,new[]{home,enemy}.Concat(reserves).ToArray(),
+                PlayableMap.StaticObstacles(p),new double[,]{{0,100},{100,0}},scenario:units,
+                scenarioBuildings:buildings.Concat(reserves.Select(site=>new OfflineScenarioBuilding(2,PlayableBuildingKind.Outpost,
+                    site.Id,0,site.Position))).ToArray(),spectators:new[]{PlayableRuntime.LocalSpectatorId});
             var source=Environment.GetEnvironmentVariable("AI_REINFORCEMENT_SOURCE_SHA");Assert.IsNotEmpty(source);
             var output=Path.GetFullPath(Path.Combine(Application.dataPath,"../../.local/ai-safe-reinforcements/ordinary-"+source+"-"+Guid.NewGuid().ToString("N")));Directory.CreateDirectory(output);
             Assert.IsNull(TestMatchLogSession.CurrentDirectory);TestMatchLogSession.StartDefault(Path.Combine(output,"TestLogs"));
-            var runtime=new PlayableRuntime(config,generation,participantDifficulties:new[]{AiDifficulty.Veteran,AiDifficulty.Fighter},aiProfile:ai);var routes=new UnityHostRouteService();
+            var runtime=PlayableRuntime.CreateWithOpeningForTests(config,generation,AiDifficulty.Veteran,ai,PlayableAiOpening.Safe);
+            var routes=new UnityHostRouteService();
             PlayableRuntime restored=null;PlayableAuthorityTick restoredAuthority=null;UnityHostRouteService restoreRoutes=null;bool originalStopped=false;
             const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
             void StopOriginal()
             {
                 if(originalStopped)return;
-                var worker=(CertifiedRouteWorker)typeof(UnityHostRouteService).GetField("worker",flags).GetValue(routes);
-                runtime.RequestStop();routes.Dispose();runtime.Dispose();
-                Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped&&(worker==null||worker.IsStopped),5000));
+                StopRuntimeAndRouteWorker(runtime,routes);
                 var a=(PlayableAuthorityTick)typeof(PlayableRuntime).GetField("authorityTick",flags).GetValue(runtime);
                 a.Domain.Navigation.ReleaseCommittedHostRoot();a.Domain.DestroyOwnedNavigation();originalStopped=true;
             }
@@ -50,11 +72,15 @@ namespace Spacewars.Tests.PlayMode
             PlayableAiOwnerLoop.CurrentOwnerDecisionReadbackForTests=(owner,tick,o,armies,actions)=>observed.Enqueue((o,armies));
             PlayableAiObservation lastObservation=null;AiArmyRegistryState lastArmies=null;
             var initial=new HashSet<int>();var assigned=new HashSet<int>();var joined=new HashSet<int>();var followMotion=new Dictionary<int,(NavPoint point,long tick,long action)>();var physicallyMoved=new HashSet<int>();
+            var seenFollowReceipts=new HashSet<(int unit,long action)>();
             var motion=new Dictionary<int,(NavPoint point,long tick,long action)>();var moved=new HashSet<int>();bool damage=false;var hostileHealth=new Dictionary<int,int>();
             try
             {
-                runtime.SetSpectatorSpeed(PlayableRuntime.LocalSpectatorId,4);float deadline=Time.realtimeSinceStartup+120;
-                while(runtime.Latest.Tick<3600&&!runtime.IsStopped&&Time.realtimeSinceStartup<deadline)
+                runtime.SetSpectatorSpeed(PlayableRuntime.LocalSpectatorId,4);
+                runtime.RequestPause(false);
+                float deadline=Time.realtimeSinceStartup+120;
+                while(runtime.Latest.Tick<3600&&!runtime.IsStopped&&runtime.Latest.Outcome==PlayableMatchOutcome.Playing&&
+                    Time.realtimeSinceStartup<deadline)
                 {
                     routes.Service(runtime,p.NavigationRequestsPerFrame);var f=runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId);var own=f.Players.Single(v=>v.Owner==PlayableOwner.Player);
                     Assert.IsNull(runtime.Latest.Failure);Assert.IsNull(routes.LastProjectionFailure);
@@ -69,11 +95,27 @@ namespace Spacewars.Tests.PlayMode
                             if(assigned.Contains(u.Id)&&!a.Reinforcements.Contains(u.Id))joined.Add(u.Id);
                             if(u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Follow&&u.OrderStamp?.Origin==PlayableOrderOrigin.Ai&&u.OrderStamp.Kind==PlayableCommandKind.Follow)
                             {
-                                Assert.True(a.Members.Contains(u.CurrentOrder.TargetId)&&!a.Reinforcements.Contains(u.CurrentOrder.TargetId),"Follows its live core, never the enemy objective");
-                                if(!followMotion.TryGetValue(u.Id,out var before)||before.action!=u.OrderStamp.ActionId)followMotion[u.Id]=(u.Position,o.Tick,u.OrderStamp.ActionId);
-                                else if(o.Tick>before.tick&&AiOpponentSelector.Distance(before.point,u.Position)>PlayableUnitRules.Radius(p,u.Kind))physicallyMoved.Add(u.Id);
+                                var action=u.OrderStamp.ActionId;
+                                bool liveCore=a.Members.Contains(u.CurrentOrder.TargetId)&&!a.Reinforcements.Contains(u.CurrentOrder.TargetId);
+                                if(seenFollowReceipts.Add((u.Id,action)))
+                                    Assert.True(liveCore,"A newly applied Follow targets its live core, never an enemy objective.");
+                                if(!liveCore)
+                                {
+                                    followMotion.Remove(u.Id);
+                                    physicallyMoved.Remove(u.Id);
+                                    continue;
+                                }
+                                if(!followMotion.TryGetValue(u.Id,out var before)||before.action!=action)
+                                {
+                                    followMotion[u.Id]=(u.Position,o.Tick,action);
+                                    physicallyMoved.Remove(u.Id);
+                                }
+                                else if(o.Tick>before.tick&&AiOpponentSelector.Distance(before.point,u.Position)>PlayableUnitRules.Radius(p,u.Kind))
+                                    physicallyMoved.Add(u.Id);
                             }
                         }
+                        // Capture the first proved join before a later army reshuffle.
+                        if(joined.Any(physicallyMoved.Contains))break;
                     }
                     foreach(var b in f.Overview.Buildings.Where(b=>b.Owner==PlayableOwner.Enemy&&b.Health>0))
                     {if(hostileHealth.TryGetValue(b.Id,out var previous)&&b.Health<previous&&moved.Count>0)damage=true;hostileHealth[b.Id]=b.Health;}
@@ -86,6 +128,8 @@ namespace Spacewars.Tests.PlayMode
                 }
                 TestContext.WriteLine("POSITIVE_CAPTURE_PREMISE "+Newtonsoft.Json.JsonConvert.SerializeObject(new{runtime.Latest.Tick,runtime.IsStopped,runtime.Latest.Outcome,assigned=assigned.ToArray(),joined=joined.ToArray(),physicallyMoved=physicallyMoved.ToArray()}));
                 Assert.False(runtime.IsStopped,"The positive scenario must keep its ordinary match running through actual physical joining and capture");
+                Assert.True(joined.Any(physicallyMoved.Contains),
+                    "A newly produced follower must physically move and join its army before the match ends or the fixture budget expires.");
                 var capture=runtime.RequestCaptureBytes();while(!capture.IsCompleted&&Time.realtimeSinceStartup<deadline){routes.Service(runtime,p.NavigationRequestsPerFrame);yield return null;}
                 Assert.True(capture.IsCompleted,"Fixed wall deadline includes capture");Assert.False(capture.IsFaulted,capture.Exception?.ToString());File.WriteAllBytes(Path.Combine(output,"current.bin"),capture.Result);
                 long tick;using(var envelope=PlayableWorldState.Decode(capture.Result)){tick=envelope.Tick;Assert.Greater(envelope.RuntimeTransport.Length,0);}
@@ -111,8 +155,13 @@ namespace Spacewars.Tests.PlayMode
                 PlayableAiOwnerLoop.CurrentOwnerDecisionReadbackForTests=null;PlayableAiOwnerLoop.CurrentOwnerDecisionOwnerFilterForTests=null;
                 if(!originalStopped)StopOriginal();
                 if(lastObservation!=null)File.WriteAllText(Path.Combine(output,"observer.json"),Newtonsoft.Json.JsonConvert.SerializeObject(new{initial=initial.ToArray(),assigned=assigned.ToArray(),joined=joined.ToArray(),physicallyMoved=physicallyMoved.ToArray(),lastObservation.Tick,lastArmies,units=lastObservation.Entities.Where(u=>u.Owner==lastObservation.Owner),routes=lastObservation.RouteProofs,diagnostic=lastArmies.Armies.Where(a=>a.Phase!=AiArmyPhase.Disbanded&&AiArmyPlanner.IsArmyPolicy(a.TacticalOwner)).Select(a=>new{a.Id,core=AiReinforcementPolicy.ReceivingCore(lastObservation,a,p,ai).Select(u=>u.Id),ready=AiTacticalExecutor.Ready(lastObservation,a,p).Select(u=>u.Id),proposal=AiTacticalExecutor.Propose(lastObservation,a,p,999999,ai:ai)})},Newtonsoft.Json.Formatting.Indented));
-                if(restored!=null){restored.RequestStop();restored.Dispose();Assert.True(System.Threading.SpinWait.SpinUntil(()=>restored.IsStopped,5000));}
-                routes.Dispose();restoreRoutes?.Dispose();restoredAuthority?.Domain.Navigation.ReleaseCommittedHostRoot();restoredAuthority?.Domain.DestroyOwnedNavigation();TestMatchLogSession.Shutdown();
+                try
+                {
+                    StopRuntimeAndRouteWorker(restored,restoreRoutes);
+                    restoredAuthority?.Domain.Navigation.ReleaseCommittedHostRoot();
+                    restoredAuthority?.Domain.DestroyOwnedNavigation();
+                }
+                finally { TestMatchLogSession.Shutdown(); }
             }
         }
         [UnityTest,Timeout(150000)] public IEnumerator InterceptedCoreRedirectsEnRouteProductionWithAppliedMoveAndCurrentRestore()
@@ -139,19 +188,20 @@ namespace Spacewars.Tests.PlayMode
             // movement profile changes are used to create the interception.
             double interceptionSpacing=2*PlayableUnitRules.Radius(p,PlayableEntityKind.Tank)+2*p.Navigation.ArrivalTolerance;
             double interceptionOrigin=p.ArenaHalfExtent-PlayableUnitRules.Radius(p,PlayableEntityKind.Tank)-2*interceptionSpacing-p.Navigation.ArrivalTolerance;
-            var config=new OfflineMatchConfiguration(p,"ai-safe-reinforcements-ordinary-v1","flat-public-active-v1","UnityHostRouteService",seed,new[]{new OfflineParticipant("active-owner",1,1,OfflineControl.Ai),new OfflineParticipant("human-owner",2,2,OfflineControl.Human)},starts,new[]{home,enemy,reserve},PlayableMap.StaticObstacles(p),new double[,]{{0,100},{100,0}},scenario:units.Concat(Enumerable.Range(0,18).Select(i=>new OfflineScenarioUnit(2,PlayableEntityKind.Tank,new NavPoint(interceptionOrigin+(i%3)*interceptionSpacing,6-(i/3)*interceptionSpacing)))).ToArray(),scenarioBuildings:buildings.Concat(new[]{new OfflineScenarioBuilding(2,PlayableBuildingKind.Outpost,3,0,reserve.Position)}).ToArray(),spectators:new[]{PlayableRuntime.LocalSpectatorId});
+            var config=new OfflineMatchConfiguration(p,"ai-safe-reinforcements-ordinary-v1","flat-public-active-v1","UnityHostRouteService",seed,new[]{new OfflineParticipant("active-owner",1,1,OfflineControl.Ai),new OfflineParticipant("human-owner",2,2,OfflineControl.Human)},starts,new[]{home,enemy,reserve},PlayableMap.StaticObstacles(p),new double[,]{{0,100},{100,0}},scenario:units.Concat(Enumerable.Range(0,18).Select(i=>new OfflineScenarioUnit(2,PlayableEntityKind.Tank,new NavPoint(interceptionOrigin+(i%3)*interceptionSpacing,2-(i/3)*interceptionSpacing)))).ToArray(),scenarioBuildings:buildings.Concat(new[]{new OfflineScenarioBuilding(2,PlayableBuildingKind.Outpost,3,0,reserve.Position)}).ToArray(),spectators:new[]{PlayableRuntime.LocalSpectatorId});
             var source=Environment.GetEnvironmentVariable("AI_REINFORCEMENT_SOURCE_SHA");Assert.IsNotEmpty(source);
             var output=Path.GetFullPath(Path.Combine(Application.dataPath,"../../.local/ai-safe-reinforcements/ordinary-loss-"+source+"-"+Guid.NewGuid().ToString("N")));Directory.CreateDirectory(output);
             Assert.IsNull(TestMatchLogSession.CurrentDirectory);TestMatchLogSession.StartDefault(Path.Combine(output,"TestLogs"));
-            var runtime=new PlayableRuntime(config,generation,participantDifficulties:new[]{AiDifficulty.Veteran,AiDifficulty.Fighter},aiProfile:ai);var routes=new UnityHostRouteService();
+            // The interception scenario requires this exact opening core. Binding the
+            // opening through the match setup keeps it stable across profile revisions.
+            var runtime=PlayableRuntime.CreateWithOpeningForTests(config,generation,AiDifficulty.Veteran,ai,PlayableAiOpening.Safe);
+            var routes=new UnityHostRouteService();
             PlayableRuntime restored=null;PlayableAuthorityTick restoredAuthority=null;UnityHostRouteService restoreRoutes=null;bool originalStopped=false;
             const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
             void StopOriginal()
             {
                 if(originalStopped)return;
-                var worker=(CertifiedRouteWorker)typeof(UnityHostRouteService).GetField("worker",flags).GetValue(routes);
-                runtime.RequestStop();routes.Dispose();runtime.Dispose();
-                Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped&&(worker==null||worker.IsStopped),5000));
+                StopRuntimeAndRouteWorker(runtime,routes);
                 var a=(PlayableAuthorityTick)typeof(PlayableRuntime).GetField("authorityTick",flags).GetValue(runtime);
                 a.Domain.Navigation.ReleaseCommittedHostRoot();a.Domain.DestroyOwnedNavigation();originalStopped=true;
             }
@@ -166,7 +216,8 @@ namespace Spacewars.Tests.PlayMode
             try
             {
                 var initialView=PlayableAiObservation.From(runtime.ParticipantView("active-owner"));
-                var initialOpening=PlayableAiOpeningComposition.Initialize(seed,"active-owner",aiProfile:ai);
+                var authority=(PlayableAuthorityTick)typeof(PlayableRuntime).GetField("authorityTick",flags).GetValue(runtime);
+                var initialOpening=authority.CaptureDiagnosticCheckpoints().Single(c=>c.OwnerId=="active-owner").Opening;
                 Assert.AreEqual(PlayableAiOpening.Safe,initialOpening.Opening,"Fixed seed/profile ordinary opening premise");
                 var initialExecutor=new AiOpeningExecutor(initialOpening,generation);initialExecutor.Observe(initialView,null,null,ai);
                 Assert.AreEqual(4,typeof(AiOpeningExecutor).GetProperty("RequiredForce",flags).GetValue(initialExecutor),"One ordinary opening core");
@@ -177,7 +228,9 @@ namespace Spacewars.Tests.PlayMode
                 foreach(var u in initialInterceptors)foreach(var peer in initialInterceptors.Where(v=>v.Id>u.Id))
                     Assert.GreaterOrEqual(AiOpponentSelector.Distance(u.Position,peer.Position),2*PlayableUnitRules.Radius(p,PlayableEntityKind.Tank),"The actual interceptor bodies must not overlap");
                 TestContext.WriteLine("INTERCEPTION_PREMISE "+Newtonsoft.Json.JsonConvert.SerializeObject(new{seed,ai.Id,ai.Hash,interceptionSpacing,InitialCore=initialView.Entities.Where(u=>u.Owner==initialView.Owner).Select(u=>new{u.Id,u.Kind,u.Position}),Interceptors=initialInterceptors.Select(u=>new{u.Id,u.Position,u.Health,u.HullHeading})}));
-                runtime.SetSpectatorSpeed(PlayableRuntime.LocalSpectatorId,4);float deadline=Time.realtimeSinceStartup+120;
+                runtime.SetSpectatorSpeed(PlayableRuntime.LocalSpectatorId,4);
+                runtime.RequestPause(false);
+                float deadline=Time.realtimeSinceStartup+120;
                 while(runtime.Latest.Tick<3600&&!runtime.IsStopped&&Time.realtimeSinceStartup<deadline)
                 {
                     routes.Service(runtime,p.NavigationRequestsPerFrame);var f=runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId);var own=f.Players.Single(v=>v.Owner==PlayableOwner.Player);
@@ -196,12 +249,11 @@ namespace Spacewars.Tests.PlayMode
                             // The actual healthy receiver and its travelling client
                             // are latched before the same opposing human input.
                             if(intrusionCandidate==0&&a.Reinforcements.Contains(u.Id)&&u.Moving&&
-                                (u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move||u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Follow)&&
+                                u.CurrentOrder?.Kind is (PlayableTacticalOrderKind.Move or PlayableTacticalOrderKind.Follow or PlayableTacticalOrderKind.AttackMove)&&
                                 u.OrderStamp?.Origin==PlayableOrderOrigin.Ai&&u.OrderStamp.Generation==o.Generation&&u.OrderStamp.Owner==o.Owner&&
                                 u.OrderStamp.Source==PlayableAiOpeningComposition.SourceIdentity&&u.OrderStamp.Sequence==u.CurrentOrder.CommandSequence&&u.OrderStamp.Tick==u.CurrentOrder.IssuedTick&&u.OrderStamp.JobId==u.OrderStamp.ActionId)
                             {
-                                var core=AiReinforcementPolicy.ReceivingCore(o,a,p,ai).Where(c=>o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready)
-                                    .All(b=>AiOpponentSelector.Distance(b.Position,c.Position)>(b.Kind==PlayableBuildingKind.Headquarters?p.HeadquartersVisionRange:p.OutpostVisionRange)))
+                                var core=AiReinforcementPolicy.ReceivingCore(o,a,p,ai)
                                     .OrderBy(c=>AiOpponentSelector.Distance(u.Position,c.Position)).ThenBy(c=>c.Id).FirstOrDefault();
                                 if(core!=null){intrusionCandidate=enRoute=u.Id;receiver=a.Id;receiverAnchor=core.Id;receiverPoint=core.Position;
                                     triggerAction=u.OrderStamp.ActionId;triggerSequence=u.OrderStamp.Sequence;triggerTick=u.OrderStamp.Tick;triggerKind=u.OrderStamp.Kind;}
@@ -209,8 +261,11 @@ namespace Spacewars.Tests.PlayMode
                             if(enRoute==u.Id&&receiver==a.Id&&(a.Phase==AiArmyPhase.Regrouping||a.Phase==AiArmyPhase.Retreating||a.Phase==AiArmyPhase.Recovering))
                             {
                                 regroupSeen=true;
-                                if(u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack||u.CurrentOrder?.Kind==PlayableTacticalOrderKind.AttackMove)soloAttack=true;
-                                if(u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&u.OrderStamp?.Origin==PlayableOrderOrigin.Ai)
+                                if(u.CurrentOrder?.Kind is (PlayableTacticalOrderKind.Attack or PlayableTacticalOrderKind.AttackMove)&&
+                                    u.OrderStamp?.Kind is (PlayableCommandKind.Attack or PlayableCommandKind.AttackMove)&&
+                                    u.OrderStamp.Sequence==u.CurrentOrder.CommandSequence&&u.OrderStamp.Tick>triggerTick)soloAttack=true;
+                                if(u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&u.OrderStamp?.Origin==PlayableOrderOrigin.Ai&&
+                                    u.OrderStamp.ActionId!=triggerAction&&u.OrderStamp.Tick>triggerTick)
                                 {
                                     if(fallbackAction!=u.OrderStamp.ActionId){fallbackAction=u.OrderStamp.ActionId;fallbackTick=o.Tick;fallbackOrigin=u.Position;}
                                     else if(o.Tick>fallbackTick&&AiOpponentSelector.Distance(fallbackOrigin,u.Position)>PlayableUnitRules.Radius(p,u.Kind))fallbackMoved=true;
@@ -225,11 +280,21 @@ namespace Spacewars.Tests.PlayMode
                             }
                         }
                     }
-                    if(humanAttackSent&&runtime.ParticipantView("human-owner").Entities.Any(u=>humanOrigins.TryGetValue(u.Id,out var origin)&&u.CurrentOrder?.CommandSequence==1&&AiOpponentSelector.Distance(origin,u.Position)>PlayableUnitRules.Radius(p,u.Kind)))humanMoved=true;
+                    if(humanAttackSent&&runtime.ParticipantView("human-owner").Entities.Any(u=>humanOrigins.TryGetValue(u.Id,out var origin)&&u.CurrentOrder?.CommandSequence is >=1 and <=3&&AiOpponentSelector.Distance(origin,u.Position)>PlayableUnitRules.Radius(p,u.Kind)))humanMoved=true;
                     if(intrusionCandidate!=0&&!humanAttackSent)
                     {
-                        var attackers=f.Overview.Entities.Where(u=>u.Owner==PlayableOwner.Enemy&&u.Health>0&&u.Kind==PlayableEntityKind.Tank).Select(u=>u.Id).ToArray();Assert.AreEqual(18,attackers.Length);foreach(var u in runtime.ParticipantView("human-owner").Entities.Where(u=>attackers.Contains(u.Id)))humanOrigins[u.Id]=u.Position;
-                        Assert.AreEqual(PlayableCommandStatus.Accepted,runtime.TrySubmit(new PlayableCommand(generation,1,"human-owner",PlayableCommandKind.AttackMove,attackers,receiverPoint)).Status);humanAttackSent=true;
+                        var attackers=f.Overview.Entities.Where(u=>u.Owner==PlayableOwner.Enemy&&u.Health>0&&u.Kind==PlayableEntityKind.Tank).Select(u=>u.Id).OrderBy(id=>id).ToArray();
+                        Assert.AreEqual(18,attackers.Length);
+                        foreach(var u in runtime.ParticipantView("human-owner").Entities.Where(u=>attackers.Contains(u.Id)))humanOrigins[u.Id]=u.Position;
+                        // Three columns converge through distinct ground slots. One 18-unit
+                        // command to one point kept most of the formation behind its own tanks.
+                        for(int column=0;column<3;column++)
+                        {
+                            var squad=attackers.Where((_,index)=>index%3==column).ToArray();
+                            var intercept=new NavPoint(receiverPoint.X,receiverPoint.Z+(column-1)*2*interceptionSpacing);
+                            Assert.AreEqual(PlayableCommandStatus.Accepted,runtime.TrySubmit(new PlayableCommand(generation,column+1,"human-owner",PlayableCommandKind.AttackMove,squad,intercept)).Status);
+                        }
+                        humanAttackSent=true;
                     }
                     foreach(var b in f.Overview.Buildings.Where(b=>b.Owner==PlayableOwner.Enemy&&b.Health>0))
                     {if(hostileHealth.TryGetValue(b.Id,out var previous)&&b.Health<previous&&moved.Count>0)damage=true;hostileHealth[b.Id]=b.Health;}
@@ -267,8 +332,13 @@ namespace Spacewars.Tests.PlayMode
                 PlayableAiOwnerLoop.CurrentOwnerDecisionReadbackForTests=null;PlayableAiOwnerLoop.CurrentOwnerDecisionOwnerFilterForTests=null;
                 if(!originalStopped)StopOriginal();
                 if(lastObservation!=null)File.WriteAllText(Path.Combine(output,"observer.json"),Newtonsoft.Json.JsonConvert.SerializeObject(new{initial=initial.ToArray(),assigned=assigned.ToArray(),joined=joined.ToArray(),physicallyMoved=physicallyMoved.ToArray(),lastObservation.Tick,lastArmies,units=lastObservation.Entities.Where(u=>u.Owner==lastObservation.Owner),routes=lastObservation.RouteProofs,diagnostic=lastArmies.Armies.Where(a=>a.Phase!=AiArmyPhase.Disbanded&&AiArmyPlanner.IsArmyPolicy(a.TacticalOwner)).Select(a=>new{a.Id,core=AiReinforcementPolicy.ReceivingCore(lastObservation,a,p,ai).Select(u=>u.Id),ready=AiTacticalExecutor.Ready(lastObservation,a,p).Select(u=>u.Id),proposal=AiTacticalExecutor.Propose(lastObservation,a,p,999999,ai:ai)})},Newtonsoft.Json.Formatting.Indented));
-                if(restored!=null){restored.RequestStop();restored.Dispose();Assert.True(System.Threading.SpinWait.SpinUntil(()=>restored.IsStopped,5000));}
-                routes.Dispose();restoreRoutes?.Dispose();restoredAuthority?.Domain.Navigation.ReleaseCommittedHostRoot();restoredAuthority?.Domain.DestroyOwnedNavigation();TestMatchLogSession.Shutdown();
+                try
+                {
+                    StopRuntimeAndRouteWorker(restored,restoreRoutes);
+                    restoredAuthority?.Domain.Navigation.ReleaseCommittedHostRoot();
+                    restoredAuthority?.Domain.DestroyOwnedNavigation();
+                }
+                finally { TestMatchLogSession.Shutdown(); }
             }
         }
     }

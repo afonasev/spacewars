@@ -24,7 +24,7 @@ namespace Spacewars.Tests.EditMode
             var baseline=PlayableProfile.Create(data,new AiTestMap());
             var fixtureRoot=System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(),"../.local/cycle60"));System.IO.Directory.CreateDirectory(fixtureRoot);
             var store=new Spacewars.Presentation.NativeBalanceStore(baseline,System.IO.Path.Combine(fixtureRoot,"native-balance-cost.json"),false);
-            store.Select(Spacewars.Presentation.NativeBalanceStore.NewMatchProfileId,Spacewars.Presentation.NativeBalanceStore.NewMatchProfileVersion);
+            store.Select(Spacewars.Presentation.NativeBalanceStore.CorridorExperimentId,Spacewars.Presentation.NativeBalanceStore.CorridorExperimentVersion);
             var profile=store.Active;var aiProfile=store.ActiveAiProfile;Assert.AreEqual(2,profile.Revision);
             System.IO.File.WriteAllText(System.IO.Path.Combine(fixtureRoot,"bound-profile.json"),Newtonsoft.Json.JsonConvert.SerializeObject(profile.CopyData(),Newtonsoft.Json.Formatting.Indented));
             System.IO.File.WriteAllText(System.IO.Path.Combine(fixtureRoot,"bound-ai-profile.json"),Newtonsoft.Json.JsonConvert.SerializeObject(aiProfile.CopyData(),Newtonsoft.Json.Formatting.Indented));

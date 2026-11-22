@@ -12,11 +12,12 @@ namespace Spacewars.Runtime
             if(profile.AuthoredMap is ThreeCrossingsMap crossings){
                 int seed=setup.ResolveSeed();
                 var roster=setup.Participants.Select((p,i)=>new OfflineParticipant(i==0?"player-1":"foundry-"+(i+1),i+1,p.Team,p.Human?OfflineControl.Human:OfflineControl.Ai)).ToArray();
-                return crossings.Configuration(profile,seed,roster);
+                return crossings.Configuration(profile,seed,roster,setup.Domination);
             }
             var authored=CreateAuthored(profile,setup);
             // Only ordinary lobby matches replace authored pins. Campaigns and direct
             // diagnostic configurations keep their intentional start bindings.
+            if(profile.AuthoredMap is DeafMirrorMap)return authored;
             var assignment=OfflineStartAssignment.ResolveLobby(authored.Starts,authored.Roster,authored.Seed);
             var starts=authored.Starts.Select((s,i)=>{
                 int player=Array.IndexOf(assignment,i);
@@ -26,12 +27,24 @@ namespace Spacewars.Runtime
             var costs=new double[starts.Length,starts.Length];
             for(int a=0;a<starts.Length;a++)for(int b=0;b<starts.Length;b++)costs[a,b]=authored.RouteCost(a,b);
             return new OfflineMatchConfiguration(profile,authored.SourceIdentity,authored.MapIdentity,authored.RouteProvenance,
-                authored.Seed,authored.Roster.ToArray(),starts,authored.Sites.ToArray(),authored.Obstacles.ToArray(),costs,terrain:profile.AuthoredMap.Id);
+                authored.Seed,authored.Roster.ToArray(),starts,authored.Sites.ToArray(),authored.Obstacles.ToArray(),costs,terrain:profile.AuthoredMap.Id,domination:setup.Domination);
         }
         private static OfflineMatchConfiguration CreateAuthored(PlayableProfile profile, NativeLobbyConfiguration setup)
         {
             int seed=setup.ResolveSeed();
             var roster=setup.Participants.Select((p,i)=>new OfflineParticipant(i==0?"player-1":"foundry-"+(i+1),i+1,p.Team,p.Human?OfflineControl.Human:OfflineControl.Ai)).ToArray();
+            if(profile.AuthoredMap is DeafMirrorMap mirror){
+                var homeIds=mirror.StartingSites(roster,seed);
+                var sitesForMatch=mirror.Sites(profile).Where(s=>s.Kind!=PlayableBuildingKind.Headquarters||homeIds.Contains(s.Id)).ToArray();
+                var seats=sitesForMatch.Where(s=>s.Kind==PlayableBuildingKind.Headquarters).Select(site=>{
+                    int inward=site.Position.X<0?1:-1;
+                    int player=Array.IndexOf(homeIds,site.Id);
+                    return new OfflineStart("mirror-"+site.Id,site.Id,site.Position,
+                        new NavPoint(site.Position.X+inward*16,site.Position.Z),inward==1?0:Math.PI,roster[player].LogicalPlayer);
+                }).ToArray();
+                return new OfflineMatchConfiguration(profile,"native-mirror-lobby-v4",mirror.Id,"observatory-homelands-v2",
+                    seed,roster,seats,sitesForMatch,mirror.MovementBlockers.ToArray(),new double[seats.Length,seats.Length],terrain:mirror.Id,domination:setup.Domination);
+            }
             if(profile.AuthoredMap is AntennaCityMap city)return city.Configuration(profile,seed,roster);
             if(profile.AuthoredMap is NullDockMap dock)return dock.Configuration(profile,seed,roster);
             if(profile.AuthoredMap is CrimsonGroveMap grove)return grove.Configuration(profile,seed,roster);

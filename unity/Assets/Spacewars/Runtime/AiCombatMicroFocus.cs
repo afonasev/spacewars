@@ -11,20 +11,35 @@ namespace Spacewars.Runtime
         static bool ReachableShot(PlayableAiObservation o,PlayableProfile p,PlayableEntitySnapshot u,PlayableEntitySnapshot enemy)=>
             enemy!=null&&o.IsHostile(enemy.Owner)&&enemy.Health>0&&o.Vision?.IsVisible(enemy.Position)==true&&
             AiRosterCatalog.Initial.Targets(u.Kind,enemy.Kind==PlayableEntityKind.Hawk?"air":"ground")&&Distance(u.Position,enemy.Position)<=PlayableUnitRules.Range(p,u.Kind,u.Upgraded)&&AiCombatMicroSafety.FireClear(o,p,u,enemy);
-        static double Pulse(PlayableProfile p,PlayableEntitySnapshot u)=>u.Kind==PlayableEntityKind.Hawk?p.HawkDamage*2:u.Kind==PlayableEntityKind.Tank?p.TankWeaponDamage:u.Kind==PlayableEntityKind.Explorer?p.ExplorerDamage:p.ShkvalDamage;
+        static double Pulse(PlayableProfile p,PlayableEntitySnapshot u)=>u.Kind==PlayableEntityKind.Hawk?p.HawkDamage*2:u.Kind==PlayableEntityKind.Tank?p.TankWeaponDamage:u.Kind==PlayableEntityKind.Explorer?p.ExplorerDamage:u.Kind==PlayableEntityKind.Igla?p.IglaDamage:p.ShkvalDamage;
         bool FocusCertificate(PlayableAiObservation o,PlayableEntitySnapshot u)=>certificates.TryGetValue(u.Id,out var c)&&c.Kind==PlayableCommandKind.Attack&&Matches(c,o,u);
+        internal bool IsAppliedFocus(PlayableOrderStamp stamp,int target)=>
+            stamp?.Origin==PlayableOrderOrigin.Ai&&stamp.Kind==PlayableCommandKind.Attack&&
+            certificates.TryGetValue(stamp.UnitId,out var certificate)&&certificate.Kind==PlayableCommandKind.Attack&&
+            certificate.Target==target&&certificate.Generation==stamp.Generation&&certificate.Sequence==stamp.Sequence&&
+            certificate.ActionId==stamp.ActionId&&certificate.ActionId==stamp.JobId&&certificate.Tick==stamp.Tick&&certificate.Source==stamp.Source;
         static PlayableEntitySnapshot[] Assigned(PlayableAiObservation o,PlayableProfile p,AiArmyState army,PlayableEntitySnapshot[] own,PlayableEntitySnapshot enemy)=>own.Where(u=>army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&
             (u.TargetId==enemy.Id||u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack&&u.CurrentOrder.TargetId==enemy.Id)&&ReachableShot(o,p,u,enemy)).ToArray();
         static bool SupportedShot(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d,AiArmyState army,PlayableEntitySnapshot[] own,PlayableEntitySnapshot u,PlayableEntitySnapshot enemy)=>ReachableShot(o,p,u,enemy)&&
             (u.Kind!=PlayableEntityKind.Hawk||own.Any(a=>a.Id!=u.Id&&army.Members.Contains(a.Id)&&PlayableUnitRules.HealthRatio(p,a)>=V(ai,d,"returnCoreHealth")&&Distance(a.Position,u.Position)<=V(ai,d,"supportRadius"))&&
              !AiCombatMicroSafety.Towers(o).Any(t=>AiCombatMicroSafety.Covers(o,p,t,u,u.Position)));
+        bool FocusMayReplaceOrder(PlayableAiObservation o,PlayableProfile p,PlayableEntitySnapshot unit,long army)
+        {
+            if(unit.CurrentOrder?.Kind!=PlayableTacticalOrderKind.Follow)return true;
+            // Only a completed return issued by this micro policy may yield to
+            // local focus. A unit still returning keeps its Follow.
+            if(Reserves(unit.Id)||!certificates.TryGetValue(unit.Id,out var certificate)||
+                certificate.Army!=army||certificate.Kind!=PlayableCommandKind.Follow||!Matches(certificate,o,unit))return false;
+            var leader=o.Entities.FirstOrDefault(e=>e.Id==certificate.Target&&e.Owner==o.Owner&&e.Health>0);
+            return leader!=null&&ReturnJoined(p,unit,leader);
+        }
         bool FocusCurrent(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty difficulty,AiArmyRegistry registry,AiCombatMicroPlan plan,PlayableAiAction action)
         {
             var army=registry.Capture().Armies.FirstOrDefault(a=>a.Id==plan.Army&&a.OwnerId==o.OwnerId&&a.Major&&a.Phase!=AiArmyPhase.Disbanded&&a.Phase!=AiArmyPhase.Retreating&&a.Phase!=AiArmyPhase.Recovering);
             if(army==null)return false;
             var enemy=o.Entities.FirstOrDefault(u=>u.Id==action.TargetId);var own=o.Entities.Where(u=>u.Owner==o.Owner&&Eligible(u)).ToArray();
             var selected=own.Where(u=>action.EntityIds.Contains(u.Id)).OrderBy(u=>u.Id).ToArray();
-            if(selected.Length!=action.EntityIds.Count||selected.Any(u=>u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Follow||u.Queue?.Pending!=null||u.Queue!=null&&u.Queue.Deferred.Count!=0||!SupportedShot(o,p,ai,difficulty,army,own,u,enemy)))return false;
+            if(selected.Length!=action.EntityIds.Count||selected.Any(u=>!FocusMayReplaceOrder(o,p,u,army.Id)||u.Queue?.Pending!=null||u.Queue!=null&&u.Queue.Deferred.Count!=0||!SupportedShot(o,p,ai,difficulty,army,own,u,enemy)))return false;
             // Other assignments may have changed during the reaction window.
             // Selected recipients replace their old assignment; count them once.
             var assigned=Assigned(o,p,army,own,enemy).Where(u=>!action.EntityIds.Contains(u.Id)).ToArray();int count=assigned.Length;double damage=assigned.Sum(u=>Pulse(p,u));
@@ -56,7 +71,8 @@ namespace Spacewars.Runtime
                         var selected=new List<PlayableEntitySnapshot>();
                         foreach(var u in watching.OrderBy(u=>u.Id))
                         {
-                            if(count>=(int)V(ai,d,"focusGroupSize")||count>0&&damage+Pulse(p,u)>Health(alternative)*V(ai,d,"overkillRatio"))break;
+                            if(count>=(int)V(ai,d,"focusGroupSize"))break;
+                            if(count>0&&damage+Pulse(p,u)>Health(alternative)*V(ai,d,"overkillRatio"))continue;
                             selected.Add(u);count++;damage+=Pulse(p,u);
                         }
                         if(selected.Count>0)return new AiCombatMicroPlan{Action=Action(o,PlayableCommandKind.Attack,selected.Select(u=>u.Id),alternative.Position,alternative.Id),Phase=AiCombatMicroPhase.Focus,Army=army.Id};
@@ -70,10 +86,13 @@ namespace Spacewars.Runtime
         }
         AiCombatMicroPlan Focus(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDifficulty d,AiArmyRegistry armies,PlayableEntitySnapshot[] own)
         {
+            AiCombatMicroPlan best=null;
+            double bestHealth=double.PositiveInfinity;
             foreach(var army in armies.Capture().Armies.Where(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded&&a.Phase!=AiArmyPhase.Retreating&&a.Phase!=AiArmyPhase.Recovering).OrderBy(a=>a.Id))
             {
-                var shooters=own.Where(u=>army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&!clients.ContainsKey(u.Id)&&u.Queue?.Pending==null&&
-                    (u.Queue==null||u.Queue.Deferred.Count==0)&&u.CurrentOrder?.Kind!=PlayableTacticalOrderKind.Follow&&Attention(o,u.Id,ai,d)&&
+                var shooters=own.Where(u=>u.Kind!=PlayableEntityKind.Igla&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&
+                    (!clients.TryGetValue(u.Id,out var client)||client.Phase==AiCombatMicroPhase.Return&&JoinedReturn(u.Id,client))&&u.Queue?.Pending==null&&
+                    (u.Queue==null||u.Queue.Deferred.Count==0)&&FocusMayReplaceOrder(o,p,u,army.Id)&&Attention(o,u.Id,ai,d)&&
                     (u.Kind==PlayableEntityKind.Hawk?V(ai,d,"airFocusEnabled"):V(ai,d,"focusEnabled"))>0).ToArray();
                 var enemies=o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&o.Vision?.IsVisible(e.Position)==true).OrderBy(e=>Health(e)).ThenBy(e=>e.Id).ToArray();
                 foreach(var enemy in enemies)
@@ -88,13 +107,21 @@ namespace Spacewars.Runtime
                     var chosen=new List<PlayableEntitySnapshot>();
                     foreach(var u in available)
                     {
-                        if(count>=(int)V(ai,d,"focusGroupSize")||count>0&&damage+Pulse(p,u)>Health(enemy)*V(ai,d,"overkillRatio"))break;
+                        if(count>=(int)V(ai,d,"focusGroupSize"))break;
+                        if(count>0&&damage+Pulse(p,u)>Health(enemy)*V(ai,d,"overkillRatio"))continue;
                         chosen.Add(u);count++;damage+=Pulse(p,u);
                     }
-                    if(chosen.Count>0)return new AiCombatMicroPlan{Action=Action(o,PlayableCommandKind.Attack,chosen.Select(u=>u.Id),enemy.Position,enemy.Id),Phase=AiCombatMicroPhase.Focus,Army=army.Id};
+                    if(chosen.Count==0)continue;
+                    if(chosen.Count==1&&damage>=Health(enemy))
+                        return new AiCombatMicroPlan{Action=Action(o,PlayableCommandKind.Attack,chosen.Select(u=>u.Id),enemy.Position,enemy.Id),Phase=AiCombatMicroPhase.Focus,Army=army.Id};
+                    int bestCount=best?.Action.EntityIds.Count??0;
+                    if(chosen.Count<bestCount||chosen.Count==bestCount&&Health(enemy)>=bestHealth)continue;
+                    best=new AiCombatMicroPlan{Action=Action(o,PlayableCommandKind.Attack,chosen.Select(u=>u.Id),enemy.Position,enemy.Id),Phase=AiCombatMicroPhase.Focus,Army=army.Id};
+                    bestHealth=Health(enemy);
+                    if(chosen.Count>=V(ai,d,"focusGroupSize"))break;
                 }
             }
-            return null;
+            return best;
         }
     }
 }

@@ -24,6 +24,12 @@ namespace Spacewars.Simulation
         public IReadOnlyList<TerritorySlot> Slots{get;}
         readonly System.Runtime.CompilerServices.ConditionalWeakTable<PlayableProfile,System.Collections.ObjectModel.ReadOnlyCollection<TerritorySlot>> defenseSlots=new System.Runtime.CompilerServices.ConditionalWeakTable<PlayableProfile,System.Collections.ObjectModel.ReadOnlyCollection<TerritorySlot>>();
         public IReadOnlyList<TerritorySlot> DefenseSlots(PlayableProfile profile)=>defenseSlots.GetValue(profile,p=>Array.AsReadOnly(SentryPadLayout.Create(this,p)));
+        public bool TryDefenseSlots(PlayableProfile profile,out IReadOnlyList<TerritorySlot> slots)
+        {
+            if(defenseSlots.TryGetValue(profile,out var cached)){slots=cached;return true;}
+            if(!SentryPadLayout.TryCreate(this,profile,out var created)){slots=Array.Empty<TerritorySlot>();return false;}
+            slots=defenseSlots.GetValue(profile,_=>Array.AsReadOnly(created));return true;
+        }
 
     }
     public sealed class TerritorySlot
@@ -33,13 +39,24 @@ namespace Spacewars.Simulation
     }
     public sealed class TerritorySiteSnapshot
     {
-        public TerritorySiteSnapshot(TerritorySite site,PlayableOwner? claimant,PlayableOwner? owner,double progress,bool contested,int centerId,bool ready,double controlledSeconds=0)
-        {Site=site;Claimant=claimant;Owner=owner;Progress=progress;Contested=contested;CenterId=centerId;Ready=ready;ControlledSeconds=controlledSeconds;}
+        public TerritorySiteSnapshot(TerritorySite site,PlayableOwner? claimant,PlayableOwner? owner,double progress,bool contested,int centerId,bool ready,double controlledSeconds=0,
+            double? mineReserve=null,double mineReserveCapacity=0,bool mineDepleted=false)
+        {Site=site;Claimant=claimant;Owner=owner;Progress=progress;Contested=contested;CenterId=centerId;Ready=ready;ControlledSeconds=controlledSeconds;
+            MineReserve=mineReserve;MineReserveCapacity=mineReserveCapacity;MineDepleted=mineDepleted;}
         public TerritorySite Site{get;} public PlayableOwner? Claimant{get;} public PlayableOwner? Owner{get;}
         public double Progress{get;} public bool Contested{get;} public int CenterId{get;} public bool Ready{get;} public double ControlledSeconds{get;}
+        public double? MineReserve{get;} public double MineReserveCapacity{get;} public bool MineDepleted{get;}
     }
     public static class TerritoryRules
     {
+        public static double MineIncome(PlayableProfile profile,double? reserve,double seconds)
+        {
+            double full=profile.MineIncomePerPeriod/profile.IncomePeriodSeconds*seconds;
+            if(!reserve.HasValue)return full;
+            double extracted=Math.Min(reserve.Value,full);
+            return extracted+(full-extracted)*profile.MineDepletedIncomePercent/100;
+        }
+
         // World south is a product invariant, independent of camera and radial pad layout.
         public const double BuildingHeading=-Math.PI/2;
         // A disjoint authority ID namespace preserves every existing ordinary slot ID.
@@ -121,9 +138,20 @@ namespace Spacewars.Simulation
         public static bool Center(PlayableBuildingKind k)=>k==PlayableBuildingKind.Headquarters||k==PlayableBuildingKind.Outpost;
         public static double Radius(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.RelayTower?p.RelayFootprintRadius:Defensive(k)?p.TurretFootprintRadius:k==PlayableBuildingKind.Hangar?p.HangarFootprintRadius:k==PlayableBuildingKind.ScientificCenter?p.ScienceFootprintRadius:k==PlayableBuildingKind.Headquarters?p.HeadquartersFootprintRadius:k==PlayableBuildingKind.Factory?p.FactoryFootprintRadius:k==PlayableBuildingKind.Refinery?p.RefineryFootprintRadius:k==PlayableBuildingKind.Outpost?p.OutpostFootprintRadius:p.MineFootprintRadius;
         public static double MaximumHealth(PlayableProfile p,PlayableBuildingSnapshot building)=>building.MaxHealth>0?building.MaxHealth:PlayableStatRounding.MaximumHealth(p,Health(p,building.Kind));
-        public static int Health(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.GaussTower?p.TurretHealth*p.GaussHealthMultiplier:Defensive(k)?p.TurretHealth:k==PlayableBuildingKind.Hangar?p.HangarHealth:k==PlayableBuildingKind.ScientificCenter?p.ScienceHealth:k==PlayableBuildingKind.Headquarters?p.HeadquartersHealth:k==PlayableBuildingKind.Factory?p.FactoryHealth:k==PlayableBuildingKind.Refinery?p.RefineryHealth:k==PlayableBuildingKind.Outpost?p.OutpostHealth:p.MineHealth);
-        public static double Duration(PlayableProfile p,PlayableBuildingKind k)=>Defensive(k)?p.TurretBuildSeconds:k==PlayableBuildingKind.Hangar?p.HangarBuildSeconds:k==PlayableBuildingKind.ScientificCenter?p.ScienceBuildSeconds:k==PlayableBuildingKind.Headquarters?p.HeadquartersBuildSeconds:k==PlayableBuildingKind.Factory?p.FactoryBuildSeconds:k==PlayableBuildingKind.Refinery?p.RefineryBuildSeconds:k==PlayableBuildingKind.Outpost?p.OutpostBuildSeconds:p.MineBuildSeconds;
-        public static int Cost(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.RelayTower?0:k==PlayableBuildingKind.GaussTower?p.TurretCreditCost*p.GaussCostMultiplier:Defensive(k)?p.TurretCreditCost:k==PlayableBuildingKind.Hangar?p.HangarCreditCost:k==PlayableBuildingKind.ScientificCenter?p.ScienceCreditCost:k==PlayableBuildingKind.Headquarters?p.HeadquartersCreditCost:k==PlayableBuildingKind.Factory?p.FactoryCreditCost:k==PlayableBuildingKind.Refinery?p.RefineryCreditCost:k==PlayableBuildingKind.Outpost?p.OutpostCreditCost:p.MineCreditCost);
+        public static double DefenseRange(PlayableProfile p,PlayableBuildingKind kind)=>kind switch
+        {
+            PlayableBuildingKind.GaussTower=>p.GaussRange,
+            PlayableBuildingKind.SentryTurret=>p.TurretRange,
+            PlayableBuildingKind.RepairTower=>p.RepairTowerRange,
+            _=>0
+        };
+        public static double AiDefenseRange(PlayableProfile p,PlayableBuildingKind kind)=>
+            p.UsesIndependentLabStats||kind==PlayableBuildingKind.GaussTower
+                ? DefenseRange(p,kind)
+                : p.ExplorerRange*p.TurretRangeMultiplier;
+        public static int Health(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.GaussTower?p.GaussHealth:k==PlayableBuildingKind.RepairTower?p.RepairTowerHealth:k==PlayableBuildingKind.SentryTurret?p.TurretHealth:k==PlayableBuildingKind.Hangar?p.HangarHealth:k==PlayableBuildingKind.ScientificCenter?p.ScienceHealth:k==PlayableBuildingKind.Headquarters?p.HeadquartersHealth:k==PlayableBuildingKind.Factory?p.FactoryHealth:k==PlayableBuildingKind.Refinery?p.RefineryHealth:k==PlayableBuildingKind.Outpost?p.OutpostHealth:p.MineHealth);
+        public static double Duration(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.GaussTower?p.GaussBuildSeconds:k==PlayableBuildingKind.RepairTower?p.RepairTowerBuildSeconds:k==PlayableBuildingKind.SentryTurret?p.TurretBuildSeconds:k==PlayableBuildingKind.Hangar?p.HangarBuildSeconds:k==PlayableBuildingKind.ScientificCenter?p.ScienceBuildSeconds:k==PlayableBuildingKind.Headquarters?p.HeadquartersBuildSeconds:k==PlayableBuildingKind.Factory?p.FactoryBuildSeconds:k==PlayableBuildingKind.Refinery?p.RefineryBuildSeconds:k==PlayableBuildingKind.Outpost?p.OutpostBuildSeconds:p.MineBuildSeconds;
+        public static int Cost(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.RelayTower?0:k==PlayableBuildingKind.GaussTower?p.GaussCreditCost:k==PlayableBuildingKind.RepairTower?p.RepairTowerCreditCost:k==PlayableBuildingKind.SentryTurret?p.TurretCreditCost:k==PlayableBuildingKind.Hangar?p.HangarCreditCost:k==PlayableBuildingKind.ScientificCenter?p.ScienceCreditCost:k==PlayableBuildingKind.Headquarters?p.HeadquartersCreditCost:k==PlayableBuildingKind.Factory?p.FactoryCreditCost:k==PlayableBuildingKind.Refinery?p.RefineryCreditCost:k==PlayableBuildingKind.Outpost?p.OutpostCreditCost:p.MineCreditCost);
         public static double Income(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.RelayTower?p.RelayIncomePerPeriod:k==PlayableBuildingKind.Headquarters?p.HeadquartersIncomePerPeriod:k==PlayableBuildingKind.Refinery?p.RefineryIncomePerPeriod:k==PlayableBuildingKind.Outpost?p.OutpostIncomePerPeriod:k==PlayableBuildingKind.Mine?p.MineIncomePerPeriod:0;
         public static double CaptureRadius(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.RelayTower?p.RelayCaptureRadius:k==PlayableBuildingKind.Headquarters?p.HeadquartersCaptureRadius:k==PlayableBuildingKind.Outpost?p.OutpostCaptureRadius:p.MineCaptureRadius;
         public static double CaptureSeconds(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.RelayTower?p.RelayCaptureSeconds:k==PlayableBuildingKind.Headquarters?p.HeadquartersCaptureSeconds:k==PlayableBuildingKind.Outpost?p.OutpostCaptureSeconds:p.MineCaptureSeconds;

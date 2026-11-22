@@ -8,7 +8,7 @@ namespace Spacewars.Presentation
     public static class NativeControlsHelp
     {
         private static readonly string[] Titles = { "Поле", "Здания", "Группы", "Карта", "Клавиатура и мышь" };
-        private static readonly string[] Images = { "field", "buildings", "groups", "map", "keyboard" };
+        private static readonly string[] Images = { "field-events-up", "buildings", "groups", "map", "keyboard" };
 
         public static VisualElement Open(VisualElement root, NativeMenuNavigation navigation, Action closed)
         {

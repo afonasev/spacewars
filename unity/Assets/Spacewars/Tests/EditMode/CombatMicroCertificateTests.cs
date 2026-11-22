@@ -35,7 +35,8 @@ namespace Spacewars.Tests.EditMode
             micro.Applied(actual,12,0,receipt);micro.Receipt(new PlayableAiTraceRecord(initial.Identity,1,0,12,0,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"control",local.PlayerId,local.SourceIdentity,receipt,AiCombatMicroPolicy.Policy,local.Kind));
             var stamp=new PlayableOrderStamp(1,PlayableOwner.Player,Gen,1,12,0,PlayableOrderOrigin.Ai,PlayableCommandKind.Attack,local.SourceIdentity,88,88);
             var order=new PlayableTacticalOrderSnapshot(1,PlayableOwner.Player,Gen,12,0,PlayableTacticalOrderKind.Attack,goal,101);
-            micro.Observe(View(0,100,stamp,order,false),P,Ai,AiDifficulty.Veteran,registry);var damaged=View(30,60,stamp,order);micro.Observe(damaged,P,Ai,AiDifficulty.Veteran,registry);
+            micro.Observe(View(0,100,stamp,order,false),P,Ai,AiDifficulty.Veteran,registry);
+            micro.Observe(View(15,84,stamp,order),P,Ai,AiDifficulty.Veteran,registry);var damaged=View(30,59,stamp,order);micro.Observe(damaged,P,Ai,AiDifficulty.Veteran,registry);
             var withdrawal=micro.Plan(damaged,P,Ai,AiDifficulty.Veteran,registry);Assert.NotNull(withdrawal);Assert.AreEqual(AiCombatMicroPhase.Withdraw,withdrawal.Phase);Assert.AreEqual(PlayableCommandKind.Move,withdrawal.Action.Kind);CollectionAssert.AreEqual(new[]{1},withdrawal.Action.CopyEntityIds());
             micro.Commit(withdrawal,Gen,30);Assert.True(micro.Reserves(1));
         }
@@ -45,7 +46,8 @@ namespace Spacewars.Tests.EditMode
             var initial=View(0,100,shots:false);var registry=new AiArmyRegistry("player-1",Gen,Ai,AiDifficulty.Veteran);
             Assert.True(registry.TryCreate(initial,AiArmyRole.Attack,AiArmyPlanner.Policy,new[]{1,2,3},out var army));
             var micro=new AiCombatMicroPolicy();micro.Observe(initial,P,Ai,AiDifficulty.Veteran,registry);
-            var observed=View(30,60);micro.Observe(observed,P,Ai,AiDifficulty.Veteran,registry);var plan=micro.Plan(observed,P,Ai,AiDifficulty.Veteran,registry);
+            micro.Observe(View(15,84),P,Ai,AiDifficulty.Veteran,registry);
+            var observed=View(30,59);micro.Observe(observed,P,Ai,AiDifficulty.Veteran,registry);var plan=micro.Plan(observed,P,Ai,AiDifficulty.Veteran,registry);
             Assert.NotNull(plan);Assert.AreEqual(AiCombatMicroPhase.Withdraw,plan.Phase);
             micro.Commit(plan,Gen,30);
             var actual=new PlayableAiAction(88,"player-1",P.ProfileId,P.Revision,Gen,30,plan.Action.Kind,plan.Action.CopyEntityIds(),plan.Action.Target,seed:7,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
@@ -62,7 +64,15 @@ namespace Spacewars.Tests.EditMode
             foreign=group.Copy();foreign.Members=new[]{2,3};Assert.False(clone.CurrentOverride(current,foreign,actor));
             var human=View(41,60,Stamp(PlayableOrderOrigin.Human),order);clone.Observe(human,P,Ai,AiDifficulty.Veteran,registry);Assert.False(clone.CurrentOverride(current,group,actor),"Observed human replacement revokes the saved certificate");
             clone=Clone(micro,40);clone.Preempt(new[]{1});Assert.False(clone.CurrentOverride(current,group,actor));Assert.False(clone.Reserves(1));
+            // The order stamp survives, but the current Move no longer matches the
+            // certified destination. Revocation must also retire the applied client.
+            var changedOrder=new PlayableTacticalOrderSnapshot(1,PlayableOwner.Player,Gen,12,40,PlayableTacticalOrderKind.Move,new NavPoint(99,99),0);
+            clone=Clone(micro,40);
+            clone.Observe(View(41,60,Stamp(),changedOrder),P,Ai,AiDifficulty.Veteran,registry);
+            Assert.False(Clone(clone,41).Reserves(1),"An applied client cannot outlive a revoked certificate.");
+
             clone=Clone(micro,40);registry.Disband(army);clone.Observe(current,P,Ai,AiDifficulty.Veteran,registry);Assert.False(clone.CurrentOverride(current,group,actor),"A previous group cannot authorize a future override");
+            Assert.False(Clone(clone,40).Reserves(1));
         }
         [TestCase(PlayableEntityKind.Tank,PlayableBuildingKind.SentryTurret)]
         [TestCase(PlayableEntityKind.Hawk,PlayableBuildingKind.SentryTurret)]

@@ -21,29 +21,55 @@ namespace Spacewars.Runtime
             public int SpeedRevision;
         }
         private bool UpgradeCenterReady(PlayableOwner owner)=>buildings.Values.Any(b=>b.Owner==owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Ready&&b.Health>0&&b.Sale==null);
-        private bool UnitPrerequisite(PlayableOwner owner,PlayableEntityKind kind)=>kind!=PlayableEntityKind.Shkval||UpgradeCenterReady(owner);
+        private bool UnitPrerequisite(PlayableOwner owner,PlayableEntityKind kind)=>kind==PlayableEntityKind.Cerberus?buildings.Values.Any(b=>b.Owner==owner&&b.Ready&&b.Health>0&&b.Sale==null&&CenterUpgraded(b.Id)):(kind!=PlayableEntityKind.Igla&&kind!=PlayableEntityKind.Shkval&&kind!=PlayableEntityKind.Skat)||UpgradeCenterReady(owner);
         private string ProducerUpgradeBlocked(Building b)
         {
+            if(BoostRemaining(b.Id)>0)return BoostBlockedMessage;
             if(!b.Ready||b.Health<=0||b.Sale!=null)return "Нужно готовое собственное здание";
             if(b.ProducerUpgrade!=null)return "Здание уже улучшено";
             if(b.Orders.Any(o=>o.IsUpgrade))return "Улучшение уже в очереди";
             if(!UpgradeCenterReady(b.Owner))return "Нужен готовый собственный Научный центр";
             return b.Orders.Count>=MaximumProductionOrders?"Очередь заполнена":null;
         }
-        private PlayableCommandStatus QueueProducerUpgrade(int id,PlayableOwner owner,out string message)
+        private PlayableCommandStatus QueueProducerUpgrade(int id,PlayableOwner owner,out string message,bool requireImmediatePayment=false)
         {
             var b=Producer(id,owner);message="Выберите собственную фабрику или ангар";
             if(b==null)return PlayableCommandStatus.InvalidEntity;
             // Capacity and prerequisite are admission gates; payment is deferred until head activation.
             if(b.Orders.Count>=MaximumProductionOrders){message="Очередь заполнена";return PlayableCommandStatus.Overflow;}
             message=ProducerUpgradeBlocked(b);if(message!=null)return PlayableCommandStatus.Rejected;
-            b.Orders.Add(new ProductionOrder{Id=nextProductionSequence++,IsUpgrade=true,Kind=b.Kind==PlayableBuildingKind.Hangar?PlayableEntityKind.Hawk:PlayableEntityKind.Tank});
+            if(requireImmediatePayment)
+            {
+                // The AI purchases only an idle upgrade it can settle under
+                // its current receipt. Player orders retain normal deferred payment.
+                if(b.Orders.Count!=0||b.LaunchPhase!=0||SystemsDisabled(b.Id))
+                {message="Производитель занят";return PlayableCommandStatus.Rejected;}
+                if(!CanAfford(owner,profile.ProducerUpgradeCost(b.Kind)))
+                {message="Недостаточно кредитов";return PlayableCommandStatus.InsufficientCredits;}
+            }
+            var order=new ProductionOrder{Id=nextProductionSequence++,IsUpgrade=true,Kind=b.Kind==PlayableBuildingKind.Hangar?PlayableEntityKind.Hawk:PlayableEntityKind.Tank};
+            b.Orders.Add(order);
             Sound(PlayableSoundKind.ResearchQueued,b.Position,PlayableEntityKind.Tank,owner,true);
+            if(requireImmediatePayment)StartProducerUpgrade(b,order);
             message="Улучшение добавлено в очередь";return PlayableCommandStatus.Applied;
         }
+        internal const string ProducerExitObstructed="Выход производителя занят";
+        internal const string ProducerPopulationExceeded="Превышен лимит армии";
         private string ProductionWaitReason(Building b,ProductionOrder o)
         {
-            if(o.Active){var p=Population(b.Owner);return !o.IsUpgrade&&p.Living+p.Reserved>p.Capacity?"Превышен лимит армии":null;}
+            if(o.Active)
+            {
+                if(!o.IsUpgrade){
+                    var p=ProjectionPopulation(b.Owner);
+                    if(p.Living+p.Reserved>p.Capacity)return ProducerPopulationExceeded;
+                }
+                // The paid order lives through normal gate opening and rollout.
+                // Only a currently obstructed ground corridor is reported as blocked.
+                if(!o.IsUpgrade&&o.Remaining<=0&&b.Kind==PlayableBuildingKind.Factory&&
+                    (b.LaunchPhase==FactoryReleaseRules.Closed||
+                     b.LaunchPhase==FactoryReleaseRules.Driving&&!FactoryCorridorFree(b,o.Kind,out _)))return ProducerExitObstructed;
+                return null;
+            }
             if(b.LaunchPhase!=0)return "Ожидает завершения выпуска";
             if(!o.IsUpgrade)return "Ожидает места в армии или своей очереди";
             if(b.Orders[0]!=o)return "Ожидает своей очереди";
@@ -53,7 +79,7 @@ namespace Spacewars.Runtime
         private void StartProducerUpgrade(Building b,ProductionOrder o)
         {
             int cost=profile.ProducerUpgradeCost(b.Kind);
-            if(!UpgradeCenterReady(b.Owner)||!CanAfford(b.Owner,cost))return;
+            if(BoostRemaining(b.Id)>0||!UpgradeCenterReady(b.Owner)||!CanAfford(b.Owner,cost))return;
             o.TermsRevision=profile.Revision;o.PaidCost=cost;o.Duration=ActionDuration(profile.ProducerUpgradeSeconds(b.Kind));o.Remaining=o.Duration;o.Active=true;
             AddCredits(b.Owner,-cost);Fact(b.Owner,MatchFactKind.RefineryUpgradeOrdered,cost,(int)b.Kind);Sound(PlayableSoundKind.UpgradeStarted,b.Position,o.Kind,b.Owner,true);
         }
@@ -79,13 +105,62 @@ namespace Spacewars.Runtime
         private PlayableCommandStatus QueueUnit(int id,PlayableOwner owner,PlayableEntityKind kind,out string message)
         {
             var b=Producer(id,owner);message="Select a ready factory.";
-            if(b==null||!PlayableUnitRules.Supported(kind)||(b.Kind==PlayableBuildingKind.Hangar)!=(kind==PlayableEntityKind.Hawk))return PlayableCommandStatus.InvalidEntity;
-            if(!UnitPrerequisite(owner,kind)){message="Нужен готовый собственный Научный центр";return PlayableCommandStatus.Rejected;}
+            if(b==null||!PlayableUnitRules.Supported(kind)||(b.Kind==PlayableBuildingKind.Hangar)!=PlayableUnitRules.Aircraft(kind))return PlayableCommandStatus.InvalidEntity;
+            if(!UnitPrerequisite(owner,kind)){message=kind==PlayableEntityKind.Cerberus?"Нужен готовый улучшенный Научный центр":"Нужен готовый собственный Научный центр";return PlayableCommandStatus.Rejected;}
+            if (kind == PlayableEntityKind.Cerberus && AiCerberusOrderRejection(owner) is string rejection)
+            {
+                message = rejection;
+                return PlayableCommandStatus.Rejected;
+            }
+            if (kind == PlayableEntityKind.Igla && IsAiOwner(owner))
+            {
+                if (!AiIglaCoverAllowsOrder(owner))
+                {
+                    message = "AI Igla requires more live ground cover";
+                    return PlayableCommandStatus.Rejected;
+                }
+                if (!units.Values.Any(unit => unit.Health > 0 && Hostile(owner, unit.Owner) &&
+                    (unit.Kind is PlayableEntityKind.Tank or PlayableEntityKind.Cerberus) && VisibleTarget(owner, unit.Id)))
+                {
+                    message = "AI Igla requires observed enemy armor";
+                    return PlayableCommandStatus.Rejected;
+                }
+            }
             if(b.Orders.Count>=MaximumProductionOrders){message="Production queue is full.";return PlayableCommandStatus.Overflow;}
             if(!CanAfford(owner,PlayableUnitRules.Cost(profile,kind))){message="Insufficient credits.";return PlayableCommandStatus.InsufficientCredits;}
             var order=NewOrder(kind,false);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);Fact(owner,MatchFactKind.UnitOrdered,order.PaidCost,(int)order.Kind,order.Kind.ToString());
             Sound(PlayableSoundKind.ProductionQueued,b.Position,kind,owner,true);message=kind+" ordered.";return PlayableCommandStatus.Applied;
         }
+        private bool IsAiOwner(PlayableOwner owner) => offline != null && offline.Roster[(int)owner].Control == OfflineControl.Ai;
+
+        private bool AiIglaCoverAllowsOrder(PlayableOwner owner)
+        {
+            var own = units.Values.Where(unit => unit.Owner == owner && unit.Health > 0);
+            int cover = own.Where(unit => !Materializing(unit) && TryActor(unit.Id, out var actor) &&
+                !actor.Held && unit.LastOrder?.Origin != PlayableOrderOrigin.Human)
+                .Sum(unit => AiEconomyAdmission.IglaCover(unit.Kind));
+            int committed = own.Count(unit => unit.Kind == PlayableEntityKind.Igla) +
+                buildings.Values.Where(building => building.Owner == owner)
+                    .Sum(building => building.Orders.Count(order => !order.IsUpgrade && order.Kind == PlayableEntityKind.Igla));
+            return AiEconomyAdmission.IglaCoverAllowsOrder(cover, committed);
+        }
+
+        private string AiCerberusOrderRejection(PlayableOwner owner)
+        {
+            if (!IsAiOwner(owner)) return null;
+            int committed = 0, supportingPopulation = 0;
+            foreach (var unit in units.Values)
+            {
+                if (unit.Owner != owner || unit.Health <= 0) continue;
+                if (unit.Kind == PlayableEntityKind.Cerberus) committed++;
+                else supportingPopulation += PlayableUnitRules.Population(profile, unit.Kind);
+            }
+            committed += buildings.Values.Where(building => building.Owner == owner)
+                .Sum(building => building.Orders.Count(order => !order.IsUpgrade && order.Kind == PlayableEntityKind.Cerberus));
+            return AiEconomyAdmission.CerberusOrderRejection(offline.Seed, offline.Roster[(int)owner].Id,
+                committed, supportingPopulation);
+        }
+
         private PlayableCommandStatus CancelProduction(int id,long orderId,PlayableOwner owner,out string message)
         {
             var b=Producer(id,owner);message="Order no longer exists.";
@@ -101,11 +176,13 @@ namespace Spacewars.Runtime
         private PlayableCommandStatus ToggleRepeat(int id,PlayableOwner owner,out string message,PlayableEntityKind kind=PlayableEntityKind.Tank)
         {
             var b=Producer(id,owner);message="Select a ready factory.";
-            if(b==null||!PlayableUnitRules.Supported(kind)||(b.Kind==PlayableBuildingKind.Hangar)!=(kind==PlayableEntityKind.Hawk))return PlayableCommandStatus.InvalidEntity;
+            if(b==null||!PlayableUnitRules.Supported(kind)||(b.Kind==PlayableBuildingKind.Hangar)!=PlayableUnitRules.Aircraft(kind))return PlayableCommandStatus.InvalidEntity;
             if(b.RepeatTank&&b.RepeatKind==kind)b.RepeatTank=false;
             else
             {
-                if(!UnitPrerequisite(owner,kind)){message="Нужен готовый собственный Научный центр";return PlayableCommandStatus.Rejected;}
+                if(!UnitPrerequisite(owner,kind)){message=kind==PlayableEntityKind.Cerberus?"Нужен готовый улучшенный Научный центр":"Нужен готовый собственный Научный центр";return PlayableCommandStatus.Rejected;}
+                if(kind==PlayableEntityKind.Igla&&IsAiOwner(owner))
+                {message="AI Igla orders require individual admission";return PlayableCommandStatus.Rejected;}
                 // Repeat is an unpaid tail intent; existing paid work keeps its order and progress.
                 b.RepeatTank=true;b.RepeatKind=kind;
             }
@@ -113,13 +190,26 @@ namespace Spacewars.Runtime
         }
         private PlayablePopulationSnapshot Population(PlayableOwner owner)
         {
-            int living=0,reserved=0;
+            int living=0,reserved=ReinforcementPopulation(owner);
             foreach(var u in units.Values)if(u.Owner==owner&&u.Health>0)living+=PlayableUnitRules.Population(profile,u.Kind);
             foreach(var b in buildings.Values)if(b.Owner==owner)foreach(var o in b.Orders)if(o.Active&&!o.IsUpgrade)reserved+=PlayableUnitRules.Population(profile,o.Kind);
             return new PlayablePopulationSnapshot(living,reserved,profile.ArmyCapacity);
         }
         private PlayableProductionOrderSnapshot[] ProductionSnapshot(Building b)
             =>b.Orders.Select(o=>new PlayableProductionOrderSnapshot(o.Id,o.Kind,o.PaidCost,o.PopulationCost,o.Duration,o.Remaining,o.Active,o.IsUpgrade,ProductionWaitReason(b,o))).ToArray();
+        // null withdraws a repeat choice when the owning AI has changed its production plan.
+        private Func<PlayableOwner,int,PlayableEntityKind,bool?> aiProductionRepeat;
+        internal void ConfigureAiProductionRepeat(Func<PlayableOwner,int,PlayableEntityKind,bool?> admission)=>aiProductionRepeat=admission;
+        internal void SetAiProductionRepeat(int producerId,string ownerId,PlayableEntityKind kind)
+        {
+            var owner=OwnerFor(ownerId);
+            var producer=Producer(producerId,owner);
+            if(producer==null||aiProductionRepeat==null)return;
+            foreach(var building in buildings.Values)
+                if(building.Owner==owner&&building.RepeatTank&&building!=producer)building.RepeatTank=false;
+            producer.RepeatTank=true;
+            producer.RepeatKind=kind;
+        }
         private void AdvanceProduction(double dt)
         {
             var factories=buildings.Values.Where(b=>(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)&&b.Ready&&b.Sale==null&&!SystemsDisabled(b.Id)&&!eliminated.Contains(b.Owner)).OrderBy(b=>b.Id).ToArray();
@@ -137,6 +227,10 @@ namespace Spacewars.Runtime
                 foreach(var b in factories)
                 {
                     if(b.Owner!=owner||!b.RepeatTank||b.Orders.Count!=0||b.LaunchPhase!=0||usage+PlayableUnitRules.Population(profile,b.RepeatKind)>profile.ArmyCapacity||!CanAfford(owner,PlayableUnitRules.Cost(profile,b.RepeatKind))||!UnitPrerequisite(owner,b.RepeatKind))continue;
+                    if (b.RepeatKind == PlayableEntityKind.Cerberus && AiCerberusOrderRejection(owner) != null) continue;
+                    bool? repeat=aiProductionRepeat==null?true:aiProductionRepeat(owner,b.Id,b.RepeatKind);
+                    if(repeat==null)b.RepeatTank=false;
+                    if(repeat!=true)continue;
                     var order=NewOrder(b.RepeatKind,false);ActivateUnitOrder(b,order);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);Fact(owner,MatchFactKind.UnitOrdered,order.PaidCost,(int)order.Kind,order.Kind.ToString());usage+=PlayableUnitRules.Population(profile,order.Kind);
                     Sound(PlayableSoundKind.ProductionQueued,b.Position,order.Kind,owner,true);
                     Sound(PlayableSoundKind.ProductionStarted,b.Position,order.Kind,owner,true);
@@ -151,7 +245,7 @@ namespace Spacewars.Runtime
                 if(b.Kind==PlayableBuildingKind.Factory&&b.LaunchPhase!=0){AdvanceFactoryRelease(b,dt);continue;}
                 if(b.Kind==PlayableBuildingKind.Hangar&&b.LaunchPhase!=0){AdvanceHangar(b,dt);continue;}
                 if(b.Orders.Count==0||!b.Orders[0].Active)continue;
-                var order=b.Orders[0];order.Remaining=Math.Max(0,order.Remaining-dt);
+                var order=b.Orders[0];order.Remaining=Math.Max(0,order.Remaining-BoostedWork(b.Id,dt));
                 if(order.Remaining>1e-9)continue;
                 order.Remaining=0;
                 if(order.IsUpgrade)

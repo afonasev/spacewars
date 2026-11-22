@@ -17,11 +17,16 @@ namespace Spacewars.Presentation
             if(NativeSilentStartup.IsSilent||localCoordinator!=null||gameplayAudio)return;
             gameplayAudio=gameObject.AddComponent<GameplayAudioPlayer>();gameplayAudio.Initialize();
         }
-        private void AudioCommand(PlayableCommand command,bool accepted)=>SharedAudio?.Command(command,accepted);
+        private void AudioCommand(PlayableCommand command,bool accepted,GameplayAudioPlayer.RadioOrder order)=>SharedAudio?.Command(command,accepted,order);
         private void UpdateGameplayAudio()
         {
             if(localCoordinator!=null||!gameplayAudio)return;
-            if(!ReferenceEquals(audioRuntime,runtime)){gameplayAudio.ResetAudio();audioRuntime=runtime;}
+            BindGameplayAudioRuntime();
+            if(inLobby||preparing||returningToLobby||restarting||quitting||ResultsVisible)
+            {
+                if(gameplayAudio.Speech?.FarewellPlaying(Time.unscaledTimeAsDouble)==true)
+                    gameplayAudio.Speech.ResetSpeech();
+            }
             bool active=!inLobby&&!preparing&&!returningToLobby&&!restarting&&!quitting&&!paused&&runtime!=null&&!runtime.IsStopped&&runtime.Result==null&&view!=null&&!view.Paused&&string.IsNullOrEmpty(view.Failure);
             audioScreens.Clear();
             if(active)
@@ -30,8 +35,16 @@ namespace Spacewars.Presentation
                 else foreach(var seat in localPresentations)AddAudioScreen(seat);
             }
             gameplayAudio.Tick(audioScreens,active,Time.unscaledDeltaTime);
-            gameplayAudio.PresentationState(view?.Generation??generation,active,paused||view?.Paused==true,runtime?.Result!=null);
+            gameplayAudio.PresentationState(view?.Generation??generation,active,paused||view?.Paused==true,
+                runtime?.Result!=null&&(campaignConfiguration!=null||ResultsVisible||resultOverview));
         }
+        private void BindGameplayAudioRuntime()
+        {
+            if(!gameplayAudio||ReferenceEquals(audioRuntime,runtime))return;
+            gameplayAudio.ResetAudio();
+            audioRuntime=runtime;
+        }
+
         private void AddAudioScreen(PlayableBootstrap seat)
         {
             if(seat.view==null||!seat.cameraView)return;

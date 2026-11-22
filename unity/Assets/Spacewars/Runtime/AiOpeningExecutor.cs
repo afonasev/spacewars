@@ -19,19 +19,20 @@ namespace Spacewars.Runtime
     }
     internal sealed partial class PlayableDomain
     {
-        internal Func<PlayableOwner,int> ProtectedAiCapturer;
         internal string FinancialOwnerId(PlayableOwner owner)=>offline!=null&&((int)owner)<offline.Roster.Count?offline.Roster[(int)owner].Id:owner==PlayableOwner.Player?PlayerId:"enemy-1";
-        private bool IsProtectedAiCapturer(int id,PlayableOwner owner)=>ProtectedAiCapturer?.Invoke(owner)==id;
     }
     // Produces ordinary economy/army requests. World facts, not command receipts, fulfil production.
     public sealed class AiOpeningExecutor
     {
+        internal const string IncomeChoiceClaim="opening-income";
         private readonly PlayableAiOpeningCompositionState opening;
         private readonly long generation;
         private readonly HashSet<string> completed=new HashSet<string>();
         private long started=-1,progress=-1,secondIncome=-1;
         private bool producerChosen,air,initialForceFulfilled;
-        private int requiredForce,refineries,outpostThreshold,capturer;
+        private int requiredForce,refineries,capturer;
+        // Retain the existing wire field so loaded checkpoints round-trip exactly.
+        private int outpostThreshold;
         private bool teamResolved;
         private string teamAirWinner;
         private bool mixedForce;
@@ -51,9 +52,27 @@ namespace Spacewars.Runtime
         private int Range(AiProfile p,string min,string max,string key)=>(int)V(p,min)+(int)Math.Floor(Sample(key)*(V(p,max)-V(p,min)+1));
         public AiScoutPlan ScoutPlan=>AiScoutPlan.Standard;
         public bool AllowsExpansion=>true;
-        internal bool AllowsOutposts=>refineries>=outpostThreshold&&outpostThreshold>0;
-        public bool AllowsPressure=>completed.Contains("force")||phase!=PlayableAiOpeningPhase.Active;
+        internal bool AllowsOutposts(PlayableAiObservation o,AiProfile ai)=>initialForceFulfilled&&HomeEconomyReady(o,ai)&&
+            ReadyHomeBuildings(o)>=V(ai,"outpostHomeBuildings");
+        internal static int ReadyHomeBuildings(PlayableAiObservation o)
+        {
+            var home=o.Sites.FirstOrDefault(s=>s.Site.Id==o.HomeSiteId&&s.Owner==o.Owner&&s.Ready);
+            return home==null?0:o.Buildings.Count(b=>b.Owner==o.Owner&&b.SiteId==home.Site.Id&&Live(b)&&
+                b.Phase==ConstructionPhase.Ready&&home.Site.Slots.Any(slot=>slot.Id==b.SlotId));
+        }
+        internal bool PrefersTwoProducers(AiProfile ai,bool outpostProspect)=>
+            Sample("midgame-two-producers")<V(ai,outpostProspect?"outpostTwoProducerShare":"noOutpostTwoProducerShare");
+        public bool AllowsPressure=>initialForceFulfilled;
+        internal bool InitialAttackPending=>!completed.Contains("pressure");
         internal bool Air=>air;
+        private bool GroundRush=>!air&&(opening.Opening==PlayableAiOpening.BlindRush||opening.Opening==PlayableAiOpening.ExplorerAllIn);
+        internal bool EarlyGroundPending=>GroundRush&&(producerChosen||teamResolved&&teamAirWinner!=opening.OwnerId)&&phase==PlayableAiOpeningPhase.Active&&InitialAttackPending;
+        // Keep the starter out of automatic reinforcement after the first field
+        // order. A scout or mine worker must not turn into the first assault's filler.
+        internal int GroundScout=>GroundRush?capturer:0;
+        internal bool PreferOpeningMine(PlayableAiObservation o,AiProfile ai)=>GroundRush&&initialForceFulfilled&&
+            HomeEconomyReady(o,ai)&&(InitialAttackPending||HasContinuationCommitment(ai))&&
+            !o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Mine&&Live(b));
         internal bool ProducerChosen=>producerChosen;
         internal int RequiredForce=>requiredForce;
         internal bool HasContinuationCommitment(AiProfile p)=>reinforceChosen&&refineries<V(p,"doubleIncome");
@@ -89,18 +108,31 @@ namespace Spacewars.Runtime
         public void Observe(PlayableAiObservation o,AiKnowledgeState knowledge,AiArmyDeployment deployment,AiProfile p)
         {
             if(o.OwnerId!=opening.OwnerId||o.Generation!=generation)throw new ArgumentException("Opening observation binding");
+            if(knowledge!=null&&(knowledge.OwnerId!=o.OwnerId||knowledge.Generation!=generation||knowledge.ObservationTick!=o.Tick))throw new ArgumentException("Opening knowledge binding");
+            if(deployment!=null&&(deployment.OwnerId!=o.OwnerId||deployment.Generation!=generation||deployment.Seed!=o.Seed||deployment.ProfileId!=o.ProfileId||deployment.ProfileRevision!=o.ProfileRevision||deployment.ObservedTick!=o.Tick||deployment.StartedTick>o.Tick||deployment.ArmyId<=0))throw new ArgumentException("Opening deployment binding");
+            int previousMilestones=completed.Count;
             if(started<0)
             {
-                started=progress=o.Tick;outpostThreshold=Range(p,"outpostMin","outpostMax","outpost-threshold");
+                started=progress=o.Tick;
                 if(!teamResolved){teamAirWinner=TeamAirOwner(o,p,opening.ProfileIdentity);teamResolved=true;}
                 bool airIntent=opening.Opening==PlayableAiOpening.Air||teamAirWinner==o.OwnerId;
-                if(airIntent)capturer=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer).OrderBy(u=>u.Id).Select(u=>u.Id).FirstOrDefault();
+                if(airIntent||GroundRush)capturer=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer).OrderBy(u=>u.Id).Select(u=>u.Id).FirstOrDefault();
                 greedyAir=!o.Participants.Any(x=>x.Team==o.Team&&x.Id!=o.OwnerId)&&opening.Opening==PlayableAiOpening.Air&&Sample("solo-air-income")<V(p,"greedyAirShare");
                 forceKind=Sample("opening-force-kind")<V(p,"openingExplorerShare")?PlayableEntityKind.Explorer:PlayableEntityKind.Tank;
-                mixedForce=Sample("mixed-opening")<V(p,"openingExplorerShare")||opening.Opening==PlayableAiOpening.ExplorerAllIn&&forceKind==PlayableEntityKind.Tank;
+                mixedForce=Sample("mixed-opening")<V(p,"openingExplorerShare");
+                if(opening.Opening==PlayableAiOpening.BlindRush)
+                {
+                    mixedForce|=forceKind==PlayableEntityKind.Explorer;
+                    forceKind=PlayableEntityKind.Tank;
+                }
+                if(opening.Opening==PlayableAiOpening.ExplorerAllIn)
+                {
+                    mixedForce=false;
+                    forceKind=PlayableEntityKind.Explorer;
+                }
             }
             // Relay openings use the first unit for useful field work, including contest combat.
-            if(AiRelayObjectives.HasRelays(o))capturerReleased=true;
+            if(!o.Domination.HasValue&&AiRelayObjectives.HasRelays(o))capturerReleased=true;
             if(capturer>0&&!capturerReleased&&ReplacementAvailable(o,PlayableProfileForObservation??PlayableProfile.ThreeCrossingsDefault,SpendableCredits))capturerReleased=true;
             refineries=Income(o);
             int requested=RequiredHomeRefineryCount(p);
@@ -130,6 +162,12 @@ namespace Spacewars.Runtime
                     opening.Opening==PlayableAiOpening.ExplorerAllIn?Range(p,"allInMin","allInMax","all-in-size"):Range(p,"reinforcedMin","reinforcedMax","opening-size");
             }
             if(refineries>=requested)completed.Add("income");
+            bool lostProducer=phase==PlayableAiOpeningPhase.Active&&completed.Contains("factory")&&!Ready(o,Producer);
+            if(lostProducer)
+            {
+                completed.Remove("factory");completed.Remove("force");completed.Remove("pressure");
+                progress=o.Tick;
+            }
             if(completed.Contains("income")&&producerChosen&&Ready(o,Producer))completed.Add("factory");
             int protect=ProtectedUnit;
             if(air&&producerChosen)
@@ -139,6 +177,9 @@ namespace Spacewars.Runtime
                     (o.Entities.Any(u=>u.Id==r.TargetId&&o.IsHostile(u.Owner)&&u.Health>0)||o.Buildings.Any(b=>b.Id==r.TargetId&&o.IsHostile(b.Owner)&&b.Health>0))).GroupBy(r=>r.TargetId).Any(g=>g.Select(r=>r.UnitId).Distinct().Count()>=V(p,"airFirst"));
                 requiredForce=(int)V(p,suitable?"airFirst":"airCalm");
             }
+            if(EarlyGroundPending&&(capturer>0||o.HomeSiteId>0)&&!o.Entities.Any(u=>u.Id==capturer&&u.Owner==o.Owner&&u.Health>0))
+                capturer=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer)
+                    .OrderBy(u=>u.Id).Select(u=>u.Id).FirstOrDefault();
             var wave=DesiredForce(p,requiredForce);
             if(producerChosen&&completed.Contains("factory")&&wave.All(x=>AvailableFighters(o,x.Key)>=x.Value))
             {initialForceFulfilled=true;completed.Add("force");}
@@ -146,21 +187,37 @@ namespace Spacewars.Runtime
             {
                 reinforceChosen=true;reinforcementTarget=Range(p,"reinforcedMin","reinforcedMax","aggressive-reinforcement-size");
                 bool contact=o.Entities.Any(u=>o.IsHostile(u.Owner)&&u.Health>0);
-                reinforce=AggressivePersonality||o.OwnCenterDamage.Count>0||contact&&o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0)>=o.Entities.Count(u=>o.IsHostile(u.Owner)&&u.Health>0)||Sample("aggressive-continuation")<V(p,"reinforceShare");
+                bool incomeFirst=p.DifficultyValue(o.Difficulty,"opening.incomeBeforeReinforcement")>0;
+                reinforce=o.OwnCenterDamage.Count>0||(!incomeFirst||refineries>=V(p,"doubleIncome"))&&
+                    (AggressivePersonality||contact&&o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0)>=o.Entities.Count(u=>o.IsHostile(u.Owner)&&u.Health>0)||Sample("aggressive-continuation")<V(p,"reinforceShare"));
             }
             if(reinforceChosen&&reinforce&&!reinforcementFulfilled&&DesiredForce(p,reinforcementTarget).All(x=>AvailableFighters(o,x.Key)>=x.Value))reinforcementFulfilled=true;
-            if(deployment!=null&&initialForceFulfilled){completed.Add("pressure");phase=PlayableAiOpeningPhase.Complete;}
+            // Keep observing the historical first force after fallback. A deadline
+            // releases opening execution, not its unpaid recovery/force obligations.
+            if(deployment!=null&&initialForceFulfilled&&completed.Contains("factory"))
+            {completed.Add("pressure");if(phase==PlayableAiOpeningPhase.Active)phase=PlayableAiOpeningPhase.Complete;}
+            if(phase==PlayableAiOpeningPhase.Aborted)return;
+            if(phase==PlayableAiOpeningPhase.Active&&o.Tick-started>=AiProfile.SecondsToTicks(p.Value("opening.deadlineSeconds"),30))
+            {phase=PlayableAiOpeningPhase.Aborted;reason="opening deadline reached; fallback ordinary-macro-army";return;}
+            bool needsBuilding=CommittedIncome(o)<requested||producerChosen&&!o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==Producer&&Live(b));
+            bool openSlot=o.Sites.Any(s=>s.Owner==o.Owner&&s.Ready&&!s.Contested&&s.Site.Slots.Any(slot=>!o.Buildings.Any(b=>b.SiteId==s.Site.Id&&b.SlotId==slot.Id)));
+            if(phase==PlayableAiOpeningPhase.Active&&needsBuilding&&!openSlot)
+            {phase=PlayableAiOpeningPhase.Aborted;reason="opening has no free building slot; fallback ordinary-macro-army";return;}
+            if(completed.Count>previousMilestones)progress=o.Tick;
             reason=producerChosen?(air?"air producer selected":"ground producer selected"):"waiting for income/allied visible production";
+            if(lostProducer)reason="replan: producer lost";
         }
         internal PlayableProfile PlayableProfileForObservation{get;set;}
         internal int RequiredHomeRefineryCount(AiProfile p)=>opening.Opening==PlayableAiOpening.GreedySafe||greedyAir?(int)V(p,"greedyIncome"):teamAirWinner==opening.OwnerId||opening.Opening==PlayableAiOpening.Safe||opening.Opening==PlayableAiOpening.Air?(int)V(p,"doubleIncome"):1;
+        internal int OpeningIncomeShortfall(PlayableAiObservation o,AiProfile ai)=>
+            Math.Max(0,RequiredHomeRefineryCount(ai)-CommittedIncome(o));
         // A new strategic savings clock starts only after the actual chosen
         // home producer and required income are ready (Hangar for Air).
         internal bool CanFundIncomeCapture(PlayableAiObservation o,AiProfile p)=>HomeEconomyReady(o,p);
         internal bool HomeEconomyReady(PlayableAiObservation o,AiProfile p)=>producerChosen&&Ready(o,Producer)&&Income(o)>=RequiredHomeRefineryCount(p);
         public bool MissingEssentialEconomy(PlayableAiObservation o,AiProfile p)=>!HomeEconomyReady(o,p)||!initialForceFulfilled||ReinforcementPending(o);
         internal bool InitialGrowthCommitmentPending(PlayableAiObservation o,AiProfile p)=>HomeEconomyReady(o,p)&&(!initialForceFulfilled||ReinforcementPending(o));
-        private int AvailableFighters(PlayableAiObservation o,PlayableEntityKind kind)=>o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==kind&&u.Id!=ProtectedUnit&&(CombatAvailable==null||CombatAvailable(u.Id)));
+        private int AvailableFighters(PlayableAiObservation o,PlayableEntityKind kind)=>o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==kind&&u.Id!=ProtectedUnit&&u.Id!=GroundScout&&(!EarlyGroundPending||!u.Held&&!u.Departing&&!(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human))&&(CombatAvailable==null||CombatAvailable(u.Id)));
         internal IReadOnlyDictionary<PlayableEntityKind,int> DesiredForce(AiProfile p,int size)
         {
             var result=new Dictionary<PlayableEntityKind,int>();
@@ -172,18 +229,27 @@ namespace Spacewars.Runtime
         }
         internal int[] InitialMembers(PlayableAiObservation o,AiProfile p)
         {
-            if(phase!=PlayableAiOpeningPhase.Active)return null;
-            return DesiredForce(p,requiredForce).SelectMany(x=>o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==x.Key&&u.Id!=ProtectedUnit&&(CombatAvailable==null||CombatAvailable(u.Id))).OrderBy(u=>u.Id).Take(x.Value).Select(u=>u.Id)).OrderBy(x=>x).ToArray();
+            if(!InitialAttackPending)return null;
+            // A wounded oldest body must not permanently pin a fulfilled opening
+            // at home while healthy replacements of the required kind exist.
+            return DesiredForce(p,requiredForce).SelectMany(x=>o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==x.Key&&u.Id!=ProtectedUnit&&u.Id!=GroundScout&&!u.Held&&!u.Departing&&!(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human)&&(CombatAvailable==null||CombatAvailable(u.Id)))
+                .OrderByDescending(u=>PlayableUnitRules.HealthRatio(PlayableProfileForObservation??PlayableProfile.Default,u)).ThenBy(u=>u.Id).Take(x.Value).Select(u=>u.Id)).OrderBy(x=>x).ToArray();
         }
         private int Committed(PlayableAiObservation o,PlayableEntityKind kind,AiBudgetState budget=null)=>AvailableFighters(o,kind)+o.Buildings.Where(b=>b.Owner==o.Owner&&b.PrivateState!=null).SelectMany(b=>b.PrivateState.Orders).Count(q=>q.Kind==kind)+(budget?.Unpaid??Array.Empty<AiBudgetEntry>()).Count(e=>e.Action.Kind==PlayableUnitRules.ProductionCommand(kind));
         internal int InitialForceFundingProtection(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState budget)
         {
-            if(!InitialGrowthCommitmentPending(o,ai))return 0;
+            if(!InitialGrowthCommitmentPending(o,ai)&&!(EarlyGroundPending&&!initialForceFulfilled))return 0;
             return DesiredForce(ai,ReinforcementPending(o)?reinforcementTarget:requiredForce).Sum(x=>Math.Max(0,Math.Max(0,x.Value-Committed(o,x.Key,budget))*PlayableUnitRules.Cost(p,x.Key)-(budget?.Reserved??Array.Empty<AiBudgetEntry>()).Where(e=>e.Purpose=="factory-startup"&&e.Action.UnitKind==x.Key).Sum(e=>e.Amount)));
         }
+        internal bool AllowsNormalProductionFunding(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiEconomyCandidate candidate,bool initialGrowthCommitmentPending=false)
+            =>candidate!=null&&MacroRequests(o,p,ai,new[]{candidate},initialGrowthCommitmentPending).Any(c=>
+                c.Policy=="production"&&AiEconomyAdmission.IntentId(c.Policy,c.Action)==AiEconomyAdmission.IntentId(candidate.Policy,candidate.Action));
         internal int HomeEconomyQuote(PlayableAiObservation o,PlayableProfile p,AiProfile ai,IEnumerable<AiEconomyCandidate> normal)=>MacroRequests(o,p,ai,normal).Where(c=>c.Policy=="economy"&&(c.Legal||c.Reason=="insufficient credits")).Select(c=>TerritoryRules.Cost(p,c.Action.BuildingKind)).DefaultIfEmpty(0).Min();
         internal int HomeEconomyFundingProtection(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState ledger)
+            =>HomeEconomyFundingProtection(o,p,ai,ledger,out _);
+        internal int HomeEconomyFundingProtection(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState ledger,out int refineryQuote)
         {
+            refineryQuote=0;
             var goals=MacroRequests(o,p,ai,Array.Empty<AiEconomyCandidate>()).Where(c=>c.Action.Kind==PlayableCommandKind.BuildAt&&(c.Legal||c.Reason=="insufficient credits")).GroupBy(c=>c.Action.BuildingKind);
             int quote=0;
             foreach(var g in goals)
@@ -192,7 +258,9 @@ namespace Spacewars.Runtime
                 // true building holds cover only the matching goal; startup cycles cover units.
                 if((ledger?.Unpaid??Array.Empty<AiBudgetEntry>()).Any(e=>e.Action.Kind==PlayableCommandKind.BuildAt&&e.Action.BuildingKind==g.Key))continue;
                 int held=(ledger?.Reserved??Array.Empty<AiBudgetEntry>()).Where(e=>e.Purpose!="factory-startup"&&e.Action.Kind==PlayableCommandKind.BuildAt&&e.Action.BuildingKind==g.Key).Sum(e=>e.Amount);
-                quote+=Math.Max(0,TerritoryRules.Cost(p,g.Key)-held);
+                int unheld=Math.Max(0,TerritoryRules.Cost(p,g.Key)-held);
+                if(g.Key==PlayableBuildingKind.Refinery)refineryQuote=unheld;
+                quote+=unheld;
             }
             return quote;
         }
@@ -218,8 +286,15 @@ namespace Spacewars.Runtime
             }
             int requested=RequiredHomeRefineryCount(ai);
             int committedIncome=CommittedIncome(o);
+            bool missingProducer=producerChosen&&!o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==Producer&&Live(b));
+            // A completed opening must not repeatedly spend the last producer's
+            // rebuilding funds on cheaper income. Illegal rebuilds own no quote.
+            if(initialForceFulfilled&&missingProducer&&o.IncomePerSecond>0)
+            {
+                Build(Producer);
+            }
             if(committedIncome<requested)Build(PlayableBuildingKind.Refinery);
-            if(producerChosen&&!o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==Producer&&Live(b)))Build(Producer);
+            if(missingProducer&&(!initialForceFulfilled||o.IncomePerSecond<=0))Build(Producer);
             bool lostCapturer=!o.Entities.Any(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer);
             bool solo=!o.Participants.Any(x=>x.Team==o.Team&&x.Id!=o.OwnerId);
             bool threat=o.Entities.Any(u=>o.IsHostile(u.Owner)&&u.Health>0)||o.OwnCenterDamage.Count>0;
@@ -233,7 +308,12 @@ namespace Spacewars.Runtime
             if((!initialForceFulfilled||ReinforcementPending(o))&&producerChosen)
             {
                 var goal=DesiredForce(ai,ReinforcementPending(o)?reinforcementTarget:requiredForce);
-                foreach(var wanted in goal.Where(x=>Committed(o,x.Key)<x.Value).OrderBy(x=>(double)Committed(o,x.Key)/Math.Max(1,x.Value)).ThenBy(x=>x.Key))
+                // Do not let a cheaper combat Explorer consume the first Tank's
+                // bank or queue slot while the aggressive opening is saving for it.
+                bool firstTank=EarlyGroundPending&&!initialForceFulfilled&&goal.ContainsKey(PlayableEntityKind.Tank)&&
+                    Committed(o,PlayableEntityKind.Tank)==0;
+                foreach(var wanted in goal.Where(x=>(!firstTank||x.Key==PlayableEntityKind.Tank)&&Committed(o,x.Key)<x.Value)
+                    .OrderBy(x=>(double)Committed(o,x.Key)/Math.Max(1,x.Value)).ThenBy(x=>x.Key))
                 {
                     var kind=wanted.Key;
                     foreach(var b in AiEconomyAdmission.Producers(o,AiRosterCatalog.Initial.For(kind)))
@@ -248,14 +328,23 @@ namespace Spacewars.Runtime
             {if(committedIncome<V(ai,"doubleIncome"))Build(PlayableBuildingKind.Refinery);}
             else if(initialForceFulfilled&&!reserveFactory)result.AddRange(normal.Where(c=>c.Policy=="production"||c.Action.BuildingKind!=PlayableBuildingKind.Factory&&c.Action.BuildingKind!=PlayableBuildingKind.Hangar));
             // Recover capturers through a real Factory. Existing research/repair/infrastructure is retained after the opening force.
-            if(lostCapturer&&Ready(o,PlayableBuildingKind.Factory))
+            if(lostCapturer&&Ready(o,PlayableBuildingKind.Factory)&&(!EarlyGroundPending||!result.Any(c=>c.Policy=="production"&&(c.Legal||c.Reason=="insufficient credits"))))
                 foreach(var b in AiProductionDemand.Lines(o))
                 {var a=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.QueueExplorer,new[]{b.Id},unitKind:PlayableEntityKind.Explorer,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);result.Add(new AiEconomyCandidate("production",a,AiEconomyAdmission.Reject(o,p,a,true),1));}
+            // A producer already present in the observation can spend a useful
+            // idle cycle while the opening still waits for its income milestone.
+            // These candidates already include live admission and ledger holds.
+            if(!producerChosen)result.AddRange(normal.Where(c=>c.Policy=="production"));
             // Opening recovery owns an overlapping producer obligation. Doctrine contributes
             // complementary requests before canonical request admission, not a second intent.
             // The existing identity retains different types, sites and slots; opening priority wins.
             if(doctrineProducers!=null)result.AddRange(doctrineProducers);
-            return result.GroupBy(c=>AiEconomyAdmission.IntentId(c.Policy,c.Action)).Select(g=>g.First()).ToArray();
+            var requiredProducers=result.Where(c=>c.Policy=="economy"&&c.Action.Kind==PlayableCommandKind.BuildAt&&
+                (c.Action.BuildingKind==PlayableBuildingKind.Factory||c.Action.BuildingKind==PlayableBuildingKind.Hangar)&&
+                (c.Legal||c.Reason=="insufficient credits")).Select(c=>c.Action.BuildingKind).Distinct().ToArray();
+            bool recoverProduction=initialForceFulfilled&&o.IncomePerSecond>0&&requiredProducers.Length>0;
+            return result.Where(c=>!recoverProduction||c.Policy!="economy"||requiredProducers.Contains(c.Action.BuildingKind))
+                .GroupBy(c=>AiEconomyAdmission.IntentId(c.Policy,c.Action)).Select(g=>g.First()).ToArray();
         }
         internal void WriteState(BinaryWriter w)
         {w.Write(teamResolved);WorldWire.String(w,teamAirWinner);w.Write(mixedForce);w.Write(reinforcementFulfilled);w.Write(greedyAir);w.Write(reinforceChosen);w.Write(reinforce);w.Write(reinforcementTarget);w.Write(capturer);w.Write(capturerReleased);w.Write(started);w.Write(progress);w.Write(secondIncome);w.Write(producerChosen);w.Write(air);w.Write(initialForceFulfilled);w.Write(requiredForce);w.Write(refineries);w.Write(outpostThreshold);w.Write((int)forceKind);w.Write((int)phase);WorldWire.String(w,reason);WorldWire.Array(w,completed.OrderBy(x=>x).ToArray(),x=>WorldWire.String(w,x));}

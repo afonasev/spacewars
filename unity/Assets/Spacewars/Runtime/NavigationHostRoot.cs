@@ -139,11 +139,64 @@ namespace Spacewars.Runtime
                 fork.Projection=NavPhysicalMacro.Acquire(fork,Projection.ForkOwned(reservation));fork.Projection.Release();
                 fork.Completion=NavPhysicalMacro.Acquire(fork,Completion.ForkOwned(reservation));fork.Completion.Release();
                 fork.AuthorityGeometry=NavPhysicalMacro.Acquire(fork,AuthorityGeometry);
-                fork.Frontier=Frontier;fork.Epoch=Epoch;fork.Progress=Progress;fork.NextProviderIdentity=NextProviderIdentity;
-                fork.TickQuantum=TickQuantum;fork.QuantumGeneration=QuantumGeneration;fork.QuantumTick=QuantumTick;fork.QuantumSerial=QuantumSerial;fork.ConsumedQuantum=ConsumedQuantum;fork.AdmissionPrefix=AdmissionPrefix;fork.QuantumBudget=QuantumBudget;fork.QuantumCompleted=QuantumCompleted;
-                if(AccruedCredits)fork.lifecycle|=32;fork.fairArrivalPolicy=fairArrivalPolicy;if(ReplayOnlyProjection)fork.lifecycle|=16;fork.LastServedArrival=LastServedArrival;fork.ArrivalRoundEnd=ArrivalRoundEnd;
+                CopyPublicationStateTo(fork);
                 fork.SetOperation(Operation);return fork;
             }catch{fork.ReleaseStorage();throw;}
+        }
+        private void CopyPublicationStateTo(NavigationHostRoot destination)
+        {
+            destination.Frontier=Frontier;
+            destination.Epoch=Epoch;
+            destination.Progress=Progress;
+            destination.NextProviderIdentity=NextProviderIdentity;
+            destination.TickQuantum=TickQuantum;
+            destination.QuantumGeneration=QuantumGeneration;
+            destination.QuantumTick=QuantumTick;
+            destination.QuantumSerial=QuantumSerial;
+            destination.ConsumedQuantum=ConsumedQuantum;
+            destination.AdmissionPrefix=AdmissionPrefix;
+            destination.QuantumBudget=QuantumBudget;
+            destination.QuantumCompleted=QuantumCompleted;
+            if(AccruedCredits)destination.lifecycle|=32;
+            destination.fairArrivalPolicy=fairArrivalPolicy;
+            if(ReplayOnlyProjection)destination.lifecycle|=16;
+            destination.LastServedArrival=LastServedArrival;
+            destination.ArrivalRoundEnd=ArrivalRoundEnd;
+        }
+        internal void PreparePumpStage(CertifiedRouteKernel.PumpFrontier frontier,long epoch,long progress)
+        {
+            SetFrontier(frontier,epoch,progress);
+            if(QuantumRunnable&&frontier.Stage==CertifiedRouteKernel.PumpStage.Idle)CompleteQuantum();
+            SetOperation(new OperationDescriptor(frontier.Stage,frontier.PhaseUsed,false,false,default));
+        }
+        // A stage boundary changes only the scalar frontier. Pin every sealed
+        // child in the same paid ledger and expose only a sealed new root.
+        // A later working operation still forks its own mutable children.
+        internal NavigationHostRoot WithPumpFrontier(CertifiedRouteKernel.PumpFrontier frontier,long epoch,long progress,INavStorageReservation reservation)
+        {
+            using var measured=PerformanceProfile.Measure(ProfileStage.HostFork);
+            NavStorageAdmission.RequireOwned(reservation,this);
+            if(!IsImmutableCaptureRoot)throw new InvalidOperationException("Host frontier needs a sealed source.");
+            var next=Allocate(reservation);
+            try{
+                next.AuthorityGeometry=NavPhysicalMacro.Acquire(next,AuthorityGeometry);
+                next.Scheduler=NavPhysicalMacro.Acquire(next,Scheduler);
+                next.Requests=NavPhysicalMacro.Acquire(next,Requests);
+                next.ArrivalIntentSets=NavPhysicalMacro.Acquire(next,ArrivalIntentSets);
+                next.ArrivalHistory=NavPhysicalMacro.Acquire(next,ArrivalHistory);
+                next.ArrivalIntents=NavPhysicalMacro.Acquire(next,ArrivalIntents);
+                next.ArrivalWork=NavPhysicalMacro.Acquire(next,ArrivalWork);
+                next.Providers=NavPhysicalMacro.Acquire(next,Providers);
+                next.Rows=NavPhysicalMacro.Acquire(next,Rows);
+                next.Delivered=NavPhysicalMacro.Acquire(next,Delivered);
+                next.Scan=NavPhysicalMacro.Acquire(next,Scan);
+                next.Projection=NavPhysicalMacro.Acquire(next,Projection);
+                next.Completion=NavPhysicalMacro.Acquire(next,Completion);
+                CopyPublicationStateTo(next);
+                next.PreparePumpStage(frontier,epoch,progress);
+                next.sealedRoot=true;
+                return next;
+            }catch{next.ReleaseStorage();throw;}
         }
         internal void SetFrontier(CertifiedRouteKernel.PumpFrontier frontier,long epoch,long progress)
         {if(sealedRoot||epoch<0||progress<0)throw new ArgumentException("Invalid prepared host frontier.");Frontier=frontier;Epoch=epoch;Progress=progress;}
@@ -311,7 +364,7 @@ namespace Spacewars.Runtime
         }
         // The final answer is built from the retained prefix; a caller cannot
         // inject a fresh route array or skip an admitted leg/replay step.
-        internal void StageReady(NavNameKey key,INavStorageReservation reservation)
+        internal void StageReady(NavNameKey key,INavStorageReservation reservation,IPlayableTerrain terrain=null)
         {
             if(sealedRoot||faulted||reservation==null||
                 !Rows.TryGetValue(key,out var entry)||!(entry is NavigationHostRow row)||
@@ -339,6 +392,7 @@ namespace Spacewars.Runtime
                     corridor=NavigationHostCorridor.CreateOwned(row.RequestOwner,row.ProviderOwner,
                         row.Scheduled,row.Solved.Route,reservation);
                     answer=NavigationHostAnswer.CreateReady(row.RequestOwner,corridor,points,reservation);
+                    answer.QualifyBeforePublication(reservation,terrain);
                 }
                 next=row.WithAnswer(answer,reservation);
                 Projection.RemoveFirst();Rows[key]=next;Completion.AddLast(key);
@@ -638,6 +692,7 @@ namespace Spacewars.Runtime
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostProvider))?NavigationHostProvider.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostRow))?NavigationHostRow.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostAnswer))?NavigationHostAnswer.ReadPhysicalBody(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostAnswer,value:NavPhysicalValueKind.ReadyExecutionPointsV1))?NavigationHostAnswer.ReadPhysicalBody(reader,execution:true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostAnswer,value:NavPhysicalValueKind.HostPartialAnswerV1))?NavigationHostAnswer.ReadPhysicalBody(reader,partial:true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostCorridor))?NavigationHostCorridor.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostProjection))?NavigationHostProjection.ReadPhysicalBody(reader):

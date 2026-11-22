@@ -100,7 +100,7 @@ namespace Spacewars.Input.Tests
             {
                 var seat=Seats[i];Assert.True(Get<PlayableInput>(seat,"input").CommandInputEnabled,"ready seat command eligibility");
                 Put(seat,"padCursorInitialized",false);Set(pads[i].leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");
-                Tap(pads[i],pads[i].rightStickButton);Assert.True(Get<bool>(seat,"signalWheelOpen"),"R3 opens signal wheel for seat "+i);
+                Tap(pads[i],pads[i].dpad.down);Assert.True(Get<bool>(seat,"signalWheelOpen"),"D-pad down opens signal wheel for seat "+i);
             }
             void SignalContext()
             {
@@ -112,10 +112,16 @@ namespace Spacewars.Input.Tests
             });
             foreach(var seat in Seats)Call(seat,"CancelTeamSignal");
             var last=Seats.Last();var pad=pads.Last();var before=Selection(last).ToArray();long sequence=Get<long>(last,"sequence");
-            Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");Tap(pad,pad.rightStickButton);Assert.True(Get<bool>(last,"signalWheelOpen"));
+            Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");Tap(pad,pad.dpad.down);Assert.True(Get<bool>(last,"signalWheelOpen"));
             Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");Tap(pad,pad.buttonSouth);Assert.False(Get<bool>(last,"signalWheelOpen"));Assert.AreEqual(sequence+1,Get<long>(last,"sequence"));CollectionAssert.AreEquivalent(before,Selection(last));
             yield return Wait(()=>{Call(app,"UpdateFrame");return Get<PlayableSnapshot>(last,"view").TeamSignals.Count>0;},"team signal receipt");
             Assert.AreEqual(TeamSignalKind.Attack,Get<PlayableSnapshot>(last,"view").TeamSignals.Last().Kind);
+            Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");
+            Tap(pad,pad.selectButton);Assert.True(Get<bool>(last,"mapOpen"));
+            var target=new NavPoint(12,15);PadCursor(last,target);
+            Tap(pad,pad.dpad.down);Assert.True(Get<bool>(last,"signalWheelOpen"));
+            Assert.AreEqual(target,Get<NavPoint>(last,"signalPoint"),"The signal uses the tactical map cursor");
+            Tap(pad,pad.buttonEast);Assert.False(Get<bool>(last,"signalWheelOpen"));Assert.True(Get<bool>(last,"mapOpen"));
         }
         [UnityTest]public IEnumerator AuxiliaryWheelsSingleMatch()=>AuxiliaryWheels(1);
         [UnityTest]public IEnumerator AuxiliaryWheelsSplitMatch()=>AuxiliaryWheels(2);

@@ -8,6 +8,30 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class AiReviewBudgetTests
     {
+        [Test] public void ReviewBufferMatchesWireAndHonorsExposedStreamBounds()
+        {
+            Action<System.IO.BinaryWriter> write=w=>{WorldWire.String(w,"ёж / scout");WorldWire.String(w,null);w.Write(73);};
+            var expected=WorldWire.Pack(write);var buffer=WorldWire.PackReviewBuffer(write);
+            CollectionAssert.AreEqual(expected,buffer.ToArray());
+            var offsetBytes=new byte[expected.Length+19];System.Array.Copy(expected,0,offsetBytes,7,expected.Length);
+            using(var stream=new System.IO.MemoryStream(offsetBytes,7,expected.Length,false,true))
+            using(var reader=new System.IO.BinaryReader(stream)){
+                Assert.AreEqual("ёж / scout",WorldWire.String(reader));Assert.IsNull(WorldWire.String(reader));
+                Assert.AreEqual(73,reader.ReadInt32());Assert.AreEqual(stream.Length,stream.Position);
+            }
+        }
+        [Test] public void ReviewBufferRejectsTruncatedAndInvalidUtf8Strings()
+        {
+            foreach(bool exposed in new[]{false,true}){
+                using(var stream=new System.IO.MemoryStream(new byte[]{2,0,0,0,0xff,0xff},0,6,false,exposed))
+                using(var reader=new System.IO.BinaryReader(stream)){
+                    Assert.Throws<System.Text.DecoderFallbackException>(()=>WorldWire.String(reader));Assert.AreEqual(6,stream.Position);
+                }
+                // Bytes outside the segment cannot satisfy the declared length.
+                using(var stream=new System.IO.MemoryStream(new byte[]{9,2,0,0,0,65,66},1,5,false,exposed))
+                using(var reader=new System.IO.BinaryReader(stream))Assert.Throws<ArgumentException>(()=>WorldWire.String(reader));
+            }
+        }
         private static AiBudgetEntry Entry(string id,int amount,bool payment=false,double settled=0)
         {
             var p=PlayableProfile.Default;
@@ -54,7 +78,7 @@ namespace Spacewars.Tests.EditMode
                     Review();Assert.True(entered.Wait(5000));
                     // Work is incomplete at delivery, then settles before this tick's review.
                     scheduler.Deliver(domain,_=>0,false);if(invalidate)scheduler.Rebind(config.Profile);
-                    release.Set();Assert.True(System.Threading.SpinWait.SpinUntil(()=>scheduler.ReviewWorkerStopped,5000));
+                    release.Set();Assert.True(System.Threading.SpinWait.SpinUntil(()=>scheduler.ReviewIdle,5000));
                     Review();
                     var work=typeof(AiAuthorityScheduler).GetField("reviewWork",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
                     Assert.IsNull(work.GetValue(scheduler),"Completion at the review phase must leave one authority delivery opportunity before launching another detached review.");
@@ -62,7 +86,7 @@ namespace Spacewars.Tests.EditMode
                     scheduler.Deliver(domain,_=>0,false);
                     Review();Assert.NotNull(work.GetValue(scheduler),"The delivery opportunity does not stop subsequent ordinary reviews.");
                 }finally{
-                    release.Set();Assert.True(System.Threading.SpinWait.SpinUntil(()=>scheduler.ReviewWorkerStopped,5000));
+                    release.Set();Assert.True(System.Threading.SpinWait.SpinUntil(()=>scheduler.ReviewIdle,5000));
                     domain.BeforeOwnerReviewForTests=null;scheduler.Stop(domain.Tick);domain.StopObservedPaths();
                     Assert.True(System.Threading.SpinWait.SpinUntil(()=>domain.ObservedPathWorkerStopped,5000));
                     domain.Navigation.DestroyNavigationAuthority();

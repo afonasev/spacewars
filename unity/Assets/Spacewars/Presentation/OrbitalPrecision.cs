@@ -57,6 +57,16 @@ namespace Spacewars.Presentation
             artwork.style.display=model||isEmblem?DisplayStyle.None:DisplayStyle.Flex;
             Tint=tint;emblem.Set(kind,tint!=OrbitalTheme.Muted);
         }
+        internal void FitEventContent(float inset)
+        {
+            if (portrait.Texture!=null)
+            {
+                portrait.FilterOutlineForResults();
+                portrait.FitSquareContent(inset);
+            }
+            else if (artwork.image!=null) SetFallbackFrame(PortraitFraming.SquareUvFor(kind));
+        }
+        internal void SetFallbackFrame(Rect uv) => artwork.uv=uv;
         public void Set(string kind,Color tint,double progress=-1){Kind=kind;Tint=tint;Progress=progress;MarkDirtyRepaint();}
         void Draw(MeshGenerationContext ctx)
         {
@@ -99,6 +109,7 @@ namespace Spacewars.Presentation
             Spacewars.Simulation.PlayableResearchKind.ShkvalGuidance=>"guidance",
             Spacewars.Simulation.PlayableResearchKind.ReinforcedConcrete=>"reinforced-concrete",
             Spacewars.Simulation.PlayableResearchKind.AdvancedReinforcedConcrete=>"reinforced-concrete-2",
+            Spacewars.Simulation.PlayableResearchKind.ExplorerRocketLauncher=>ModelPortrait.RocketLauncherArtwork,
             Spacewars.Simulation.PlayableResearchKind.HawkSalvoSystems=>"hawk-salvo",
             Spacewars.Simulation.PlayableResearchKind.ImprovedWeaponSystems=>"weapon-systems-1",
             Spacewars.Simulation.PlayableResearchKind.AdvancedWeaponSystems=>"weapon-systems-2",
@@ -116,8 +127,8 @@ namespace Spacewars.Presentation
             if(id.StartsWith("build:",StringComparison.Ordinal)&&Enum.TryParse<Spacewars.Simulation.PlayableBuildingKind>(suffix,out var building))return BuildingGlyph(building);
             return suffix switch {
                 "rally"=>"rally", "sale"=>"sale", "repair"=>"repair", "upgrade"=>"upgrade", "producer-upgrade"=>"upgrade",
-                "tank"=>"tank", "explorer"=>"explorer", "shkval"=>"shkval", "hawk"=>"hawk",
-                "tank-chassis"=>"chassis", "explorer-assault-guns"=>"assault", "shkval-guidance"=>"guidance", "HawkSalvoSystems"=>"hawk-salvo", "ReinforcedConcrete"=>"reinforced-concrete", "AdvancedReinforcedConcrete"=>"reinforced-concrete-2",
+                "igla"=>"igla", "tank"=>"tank", "explorer"=>"explorer", "shkval"=>"shkval", "hawk"=>"hawk",
+                "tank-chassis"=>"chassis", "explorer-assault-guns"=>"assault", "shkval-guidance"=>"guidance", "ExplorerRocketLauncher"=>ModelPortrait.RocketLauncherArtwork, "HawkSalvoSystems"=>"hawk-salvo", "ReinforcedConcrete"=>"reinforced-concrete", "AdvancedReinforcedConcrete"=>"reinforced-concrete-2",
                 "UltimateWeaponSystems"=>"weapon-systems-3", "UltimateDefensiveSystems"=>"defensive-systems-3", "ScientificCenterUpgrade"=>"scientificCenterUpgraded",
                 "ImprovedWeaponSystems"=>"weapon-systems-1", "AdvancedWeaponSystems"=>"weapon-systems-2",
                 "ImprovedDefensiveSystems"=>"defensive-systems-1", "AdvancedDefensiveSystems"=>"defensive-systems-2",

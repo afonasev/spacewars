@@ -1,6 +1,7 @@
 {
   "id": "armored-mine-v1",
-  "revision": 6,
+  "revision": 7,
+  "depletedGlowRatio": 0.4,
   "cycleSeconds": 5,
   "rockerDegrees": 16,
   "dustRate": 12,

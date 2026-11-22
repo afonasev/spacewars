@@ -105,6 +105,24 @@ namespace Spacewars.Tests.EditMode
                 CollectionAssert.AreEqual(pristine.CaptureBytes(),live.CaptureBytes(),"first live policy and delivery at "+tick);
             }
         }
+        [Test] public void DetachedHumanStartupMoveKeepsLiveWorldAndContinuationUnchanged()
+        {
+            var setup=new NativeLobbyConfiguration{HasExplicitSeed=true,ExplicitSeed=7};setup.InitializeParticipants();
+            var basis=NativeLobbyMatch.Create(PlayableProfile.ThreeCrossingsDefault,setup);
+            var costs=new double[basis.Starts.Count,basis.Starts.Count];
+            for(int i=0;i<basis.Starts.Count;i++)for(int j=0;j<basis.Starts.Count;j++)costs[i,j]=basis.RouteCost(i,j);
+            var config=new OfflineMatchConfiguration(basis.Profile,basis.SourceIdentity,basis.MapIdentity,basis.RouteProvenance,basis.Seed,
+                basis.Roster.Select(p=>new OfflineParticipant(p.Id,p.LogicalPlayer,p.Team,OfflineControl.Human)).ToArray(),
+                basis.Starts.ToArray(),basis.Sites.ToArray(),basis.Obstacles.ToArray(),costs,basis.Spectators.ToArray(),basis.ScenarioUnits.ToArray(),basis.Profile.AuthoredMap.Id,basis.ScenarioBuildings.ToArray());
+            var live=new PlayableAuthorityTick(config,71,asynchronousRoutes:true);var pristine=new PlayableAuthorityTick(config,71,asynchronousRoutes:true);
+            var before=live.CaptureBytes();
+            Assert.Greater(live.PrepareStartupExecution(),1,"Detached human Move must reach actual route installation.");
+            CollectionAssert.AreEqual(before,live.CaptureBytes());Assert.Zero(live.Tick);Assert.Zero(live.Requests.Count);Assert.Zero(live.Answers.Count);
+            for(int tick=0;tick<90;tick++){
+                Assert.True(live.TryAdvance());Assert.True(pristine.TryAdvance());
+                CollectionAssert.AreEqual(pristine.CaptureBytes(),live.CaptureBytes(),"live human continuation at "+tick);
+            }
+        }
         [Test] public void InitialNavigationPreparationKeepsWorldBytesClocksReceiptsAndAiUnchanged()
         {
             var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),new ThreeCrossingsMap(new ThreeCrossingsProfileData()));
@@ -214,6 +232,45 @@ namespace Spacewars.Tests.EditMode
             for(int i=0;i<10;i++)View(new PlayableVision(i,64,64,1,.5));
             Exact(View(vision),vision);
         }
+        [Test] public void LargeObservedRouteUsesExactShortestWalkAndStillFallsBackForDetours()
+        {
+            var nav=PlayableProfile.Default.Navigation.ForUnit(.45,4,4.5);
+            var start=new NavPoint(-65,-42);
+            var goal=new NavPoint(65,42);
+            var open=new NavGeometry(240,new[]{new NavObstacle(-2,-5,2,5)},1);
+            using var reference=new SharedFlowRouter(open,nav,null,true);
+            using var observed=new SharedFlowRouter(open,nav,null,true,true);
+            var expected=reference.FindPath(start,goal);
+            Assert.IsNotEmpty(expected);
+            Assert.Greater(reference.ExpandedCells,0);
+            CollectionAssert.AreEqual(expected,observed.FindPath(start,goal));
+            Assert.Zero(observed.ExpandedCells,"The certified shortest walk avoids expanding a large field.");
+
+            var detour=new NavGeometry(240,new[]{new NavObstacle(-2,-55,2,55)},2);
+            using var fallback=observed.ForGeometry(detour);
+            using var detourReference=new SharedFlowRouter(detour,nav,null,true);
+            expected=detourReference.FindPath(start,goal);
+            Assert.IsNotEmpty(expected);
+            CollectionAssert.AreEqual(expected,fallback.FindPath(start,goal));
+            Assert.Greater(fallback.ExpandedCells,0,"An unproven shortest walk retains the exact route solver.");
+        }
+        [Test] public void LargeObservedRouteBacktracksWithinTheExactShortestWalk()
+        {
+            var nav = PlayableProfile.Default.Navigation.ForUnit(.45, 4, 4.5);
+            var start = new NavPoint(-65, -42);
+            var goal = new NavPoint(65, 42);
+            // Going north first reaches a wall blocking the final eastward leg.
+            // Crossing further south still allows the canonical shortest distance.
+            var geometry = new NavGeometry(240, new[] { new NavObstacle(-64, 32, -60, 55), new NavObstacle(-2, -5, 2, 5) }, 1);
+            using var reference = new SharedFlowRouter(geometry, nav, null, true);
+            using var observed = new SharedFlowRouter(geometry, nav, null, true, true);
+            var expected = reference.FindPath(start, goal);
+            Assert.IsNotEmpty(expected);
+            Assert.Greater(reference.ExpandedCells, 0);
+            CollectionAssert.AreEqual(expected, observed.FindPath(start, goal));
+            Assert.Zero(observed.ExpandedCells);
+        }
+
         [Test] public void ObserverWorkingSetRetainsRepeatedObjectivesAcrossMovingOrigins()
         {
             const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;

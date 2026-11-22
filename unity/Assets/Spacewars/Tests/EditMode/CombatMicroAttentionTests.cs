@@ -15,7 +15,7 @@ namespace Spacewars.Tests.EditMode
         const BindingFlags F=BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic;
         static object Get(object o,string key)=>o.GetType().GetField(key,F).GetValue(o);
         static void Set(object o,string key,object value)=>o.GetType().GetField(key,F).SetValue(o,value);
-        [TestCase(AiDifficulty.Recruit)][TestCase(AiDifficulty.Fighter)][TestCase(AiDifficulty.Veteran)]
+        [TestCase(AiDifficulty.Recruit)][TestCase(AiDifficulty.Fighter)][TestCase(AiDifficulty.Veteran)][TestCase(AiDifficulty.Expert)]
         public void TemporalLimitBurstIdlePauseFairnessAndExactStateAreOwnerWide(AiDifficulty difficulty)
         {
             var ai=AiProfile.Initial;var budget=new AiCombatMicroAttention();long delivered=0;
@@ -38,10 +38,17 @@ namespace Spacewars.Tests.EditMode
             CollectionAssert.AreEqual(Encode(budget),Encode(restored));
             for(long tick=now;tick<now+300;tick++)Assert.AreEqual(budget.Allows(tick,ai,difficulty,true,false),restored.Allows(tick,ai,difficulty,true,false));
         }
-        [Test]
-        public void AQueuedMicroAtTheFrontCannotHideAReadyProductionOrderBehindIt()
+        [TestCase(false)][TestCase(true)]
+        public void AQueuedMicroAtTheFrontCannotHideAReadyProductionOrderBehindIt(bool continuity)
         {
             const long gen=901;var p=PlayableProfile.Default;var ai=AiProfile.Initial;var d=new PlayableDomain(p,gen,false);
+            if(continuity)
+            {
+                var data=ai.CopyData();
+                data.fields.Single(f=>f.path=="economy.continuityEnabled").value=1;
+                data.fields.Single(f=>f.path=="difficulty.veteran.control.burst").value=1;
+                ai=new AiProfile(data);
+            }
             object Call(string method,params object[] args)=>typeof(PlayableDomain).GetMethod(method,F).Invoke(d,args);
             try
             {
@@ -71,13 +78,22 @@ namespace Spacewars.Tests.EditMode
                 Stage(stop,AiCombatMicroPolicy.Policy,1,0,micro.Receipt,1);
                 var saved=WorldWire.Pack(loop.WriteState);var clone=loop.CreateReviewClone(0);CollectionAssert.AreEqual(saved,WorldWire.Pack(clone.WriteState),"Whole owner clone preserves the pending micro ledger and clients exactly");
                 Stage(production,"production",2,p.TankCreditCost,_=>{},1);
-                var attention=loop.CombatAttention;attention.Charge(0,ai,AiDifficulty.Veteran,true);attention.Charge(0,ai,AiDifficulty.Veteran,true);
+                var attention=loop.CombatAttention;
+                if(!continuity){attention.Charge(0,ai,AiDifficulty.Veteran,true);attention.Charge(0,ai,AiDifficulty.Veteran,true);}
                 loop.Deliver(d,0,false);
                 Assert.True(loop.Checkpoint.Records.Any(r=>r.Policy=="production"&&r.Status==PlayableAiDeliveryStatus.Applied),"Due macro work behind a fairness-blocked micro is delivered in the bounded scan");
                 Assert.False(loop.Checkpoint.Records.Any(r=>r.Policy==AiCombatMicroPolicy.Policy&&r.Status==PlayableAiDeliveryStatus.Applied));
                 loop.Deliver(d,0,false);
-                Assert.True(loop.Checkpoint.Records.Any(r=>r.Policy==AiCombatMicroPolicy.Policy&&r.Status==PlayableAiDeliveryStatus.Applied));
-                Assert.AreEqual(4,attention.Applied);Assert.IsEmpty(((IList)Get(loop,"pendingItems")));
+                if(continuity)
+                {
+                    Assert.AreEqual(1,attention.Applied,"One available token went to paid production.");
+                    Assert.AreEqual(1,((IList)Get(loop,"pendingItems")).Count);
+                }
+                else
+                {
+                    Assert.True(loop.Checkpoint.Records.Any(r=>r.Policy==AiCombatMicroPolicy.Policy&&r.Status==PlayableAiDeliveryStatus.Applied));
+                    Assert.AreEqual(4,attention.Applied);Assert.IsEmpty(((IList)Get(loop,"pendingItems")));
+                }
                 Assert.AreEqual(1,d.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,PlayableOwner.Player).Buildings.Single(b=>b.Id==factory.Id).QueueCount);
             }
             finally{d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();}

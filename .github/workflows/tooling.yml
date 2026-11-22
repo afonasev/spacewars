@@ -4,6 +4,8 @@ on:
     paths:
       - 'tools/**'
       - 'Makefile'
+      - 'native/recast/**'
+      - 'unity/Assets/Spacewars/Plugins/**'
       - 'unity/Assets/Spacewars/Runtime/**'
       - 'unity/Assets/Spacewars/Simulation/**'
       - '.github/workflows/tooling.yml'
@@ -13,6 +15,8 @@ jobs:
   tooling:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      recast_native: ${{ steps.selection.outputs.recast_native }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,6 +29,16 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/select_tooling_tests.py --base "$BASE_SHA" --github-output "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v5
+        if: contains(steps.selection.outputs.modules, 'tools.test_windows_dpi')
+        with:
+          go-version-file: tools/native-release/updater/go.mod
+          cache: false
+      - name: Prepare existing Windows resource contracts
+        if: contains(steps.selection.outputs.modules, 'tools.test_windows_dpi')
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64
       - name: Run selected Python tooling tests
         if: steps.selection.outputs.modules != ''
         env:
@@ -45,5 +59,31 @@ jobs:
         with:
           name: decision-lab-evidence
           path: .local/tooling-ci/decision-lab/
+          include-hidden-files: true
+          retention-days: 14
+  recast-native:
+    needs: tooling
+    if: needs.tooling.outputs.recast_native == 'true'
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Build pinned arm64 C ABI plugin
+        run: |
+          mkdir -p .local/recast-ci
+          set -o pipefail
+          python3 tools/build_recast.py --target macos-arm64 2>&1 | tee .local/recast-ci/build.log
+      - name: Check native C ABI contracts
+        run: |
+          set -o pipefail
+          python3 -m unittest tools.test_recast_native -v 2>&1 | tee .local/recast-ci/checks.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recast-native-evidence
+          path: .local/recast-ci/
           include-hidden-files: true
           retention-days: 14

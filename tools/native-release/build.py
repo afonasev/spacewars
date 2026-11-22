@@ -44,9 +44,12 @@ def main():
  command+=['-executeMethod','Spacewars.Editor.PlayableProject.'+('ReleaseMac' if a.platform=='macos-universal' else 'ReleaseWindows'),'-logFile',str(log)]
  env=os.environ.copy();env['SPACEWARS_RELEASE_VERSION']=a.version;env['SPACEWARS_RELEASE_DATE']=a.release_date;env['SPACEWARS_RELEASE_CHANNEL']=a.channel;env['SPACEWARS_RELEASE_DEVELOPMENT']='1' if a.development else '0';env['SPACEWARS_RELEASE_COMPRESSION']=a.compression
  baseline=build_state.capture(ROOT,git)
- result=subprocess.run(command,cwd=ROOT,env=env)
- build_state.restore(ROOT,baseline,log.parent/('generated-'+a.platform),git)
- if result.returncode or not log.exists() or 'NATIVE_RELEASE_BUILD_PASS' not in log.read_text(errors='replace'):return 1
+ try:
+  result=subprocess.run(command,cwd=ROOT,env=env)
+  if result.returncode or not log.exists() or 'NATIVE_RELEASE_BUILD_PASS' not in log.read_text(errors='replace'):return 1
+  gameplay_profile=build_state.release_profile(ROOT,a.version)
+ finally:
+  build_state.restore(ROOT,baseline,log.parent/('generated-'+a.platform),git)
  if git('rev-parse','HEAD').decode().strip()!=revision:raise ValueError('source revision changed during build')
  # Release generation changes scene/settings/material data only. Code changes while compiling are rejected.
  if git('diff','HEAD','--','unity/Assets/Spacewars/Presentation','unity/Assets/Spacewars/Editor')!=code_before:raise ValueError('code changed during build')
@@ -67,6 +70,6 @@ def main():
   subprocess.check_call(['codesign','--verify','--strict',str(folder)])
  if a.platform=='windows-x64':validate_windows_recast(folder/WINDOWS_RECAST)
  files=inventory(folder);files.pop('native-build.json',None)
- record={'schema':1,'development':a.development,'compression':a.compression,'channel':a.channel,'test_match_logging':a.channel=='test','commit':revision,'dirty':dirty,'source_diff_sha256':hashlib.sha256(diff).hexdigest(),'version':a.version,'release_date':a.release_date,'platform':a.platform,'files':files,'build_log':str(log),'removed_debug_artifacts':removed_debug_artifacts}
+ record={'schema':1,'gameplay_profile':gameplay_profile,'development':a.development,'compression':a.compression,'channel':a.channel,'test_match_logging':a.channel=='test','commit':revision,'dirty':dirty,'source_diff_sha256':hashlib.sha256(diff).hexdigest(),'version':a.version,'release_date':a.release_date,'platform':a.platform,'files':files,'build_log':str(log),'removed_debug_artifacts':removed_debug_artifacts}
  identity.write_text(json.dumps(record,indent=2)+'\n');print(json.dumps({k:v for k,v in record.items() if k!='files'}));return 0
 if __name__=='__main__':sys.exit(main())

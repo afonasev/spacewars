@@ -11,7 +11,7 @@ namespace Spacewars.Runtime
         private PlayableProfileData OrbitalData{get{if(!ReferenceEquals(orbitalProfile,profile)){orbitalProfile=profile;orbitalData=profile.CopyData();}return orbitalData;}}
         private readonly Dictionary<PlayableOwner,OrbitalEscalationState> orbital=new Dictionary<PlayableOwner,OrbitalEscalationState>();
         private OrbitalEscalationState Orbital(PlayableOwner owner)
-        {if(!orbital.TryGetValue(owner,out var value))orbital.Add(owner,value=new OrbitalEscalationState(offline?.ProvingGround!=null));return value;}
+        {if(!orbital.TryGetValue(owner,out var value))orbital.Add(owner,value=new OrbitalEscalationState(offline?.ProvingGround!=null,profile.UsesCompactOrbitalProgression));return value;}
         private void CreditOrbital(PlayableOwner? owner,PlayableOwner victim,double amount)
         {if(owner.HasValue&&HasOwner(owner.Value)&&Hostile(owner.Value,victim)&&amount>0)Orbital(owner.Value).Damage(amount,OrbitalData);}
         private sealed class Scan
@@ -26,14 +26,21 @@ namespace Spacewars.Runtime
         private readonly Dictionary<int,ScanViewCache> scanViews=new Dictionary<int,ScanViewCache>();
         private static readonly ScanViewCache EmptyScanView=new ScanViewCache{Lines=Array.Empty<OrbitalScanLine>(),Faces=Array.Empty<OrbitalScanTriangle>()};
         private readonly List<Scan> scans=new List<Scan>();
+        private List<OrbitalScanTriangle> scanFaceScratch;
         private OrbitalScanSnapshot[] TeamOrbitalScans(PlayableOwner owner)=>scans.Where(s=>s.Remaining>0&&TeamOf(s.Owner)==TeamOf(owner)).Select(s=>new OrbitalScanSnapshot(s.Owner,s.Point,s.Radius)).ToArray();
         private void AdvanceOrbital(double dt)
-        {foreach(int id in systemFailures.Where(p=>p.Value<=elapsed||!buildings.ContainsKey(p.Key)).Select(p=>p.Key).ToArray())systemFailures.Remove(id);if(scans.Count>0)scanViews.Clear();foreach(var scan in scans)scan.Remaining=Math.Max(0,scan.Remaining-dt);if(scans.RemoveAll(s=>s.Remaining<=1e-9)>0)visionInputProfile=null;if(orbital.Count==0)return;var data=OrbitalData;foreach(var state in orbital.Values)state.Advance(dt,data);}
-        private OrbitalEscalationSnapshot OrbitalView(PlayableOwner owner)=>offline?.ProvingGround!=null?Orbital(owner).Snapshot(OrbitalData):orbital.TryGetValue(owner,out var state)?state.Snapshot(OrbitalData):new OrbitalEscalationState().Snapshot(OrbitalData);
+        {AdvanceUnitImmobility(dt);foreach(int id in systemFailures.Where(p=>p.Value<=elapsed||!buildings.ContainsKey(p.Key)).Select(p=>p.Key).ToArray())systemFailures.Remove(id);if(scans.Count>0)scanViews.Clear();foreach(var scan in scans)scan.Remaining=Math.Max(0,scan.Remaining-dt);if(scans.RemoveAll(s=>s.Remaining<=1e-9)>0)visionInputProfile=null;if(orbital.Count==0)return;var data=OrbitalData;foreach(var state in orbital.Values)state.Advance(dt,data);}
+        private OrbitalEscalationSnapshot OrbitalView(PlayableOwner owner)
+        {
+            var state = offline?.ProvingGround != null ? Orbital(owner) :
+                orbital.TryGetValue(owner,out var saved) ? saved : new OrbitalEscalationState(compact:profile.UsesCompactOrbitalProgression);
+            var vision = Vision(owner);
+            return state.Snapshot(OrbitalData,ReinforcementQuote(owner),VisibleRepairRims(vision),VisibleRepairedUnits(vision),ProjectNuclearStrikes(owner,vision));
+        }
         private PlayableCommandStatus ChooseOrbital(PlayableOwner owner,int id)=>!eliminated.Contains(owner)&&Orbital(owner).Choose(id)?PlayableCommandStatus.Applied:PlayableCommandStatus.Rejected;
         private PlayableCommandStatus UseOrbital(PlayableOwner owner,int id,NavPoint target)
         {
-            if(id==OrbitalAbilities.ControlHack)return PlayableCommandStatus.InvalidTarget;
+            if(id==OrbitalAbilities.ControlHack||id==OrbitalAbilities.AcceleratedProduction)return PlayableCommandStatus.InvalidTarget;
             if((id==1||id==2||id==OrbitalAbilities.SystemFailure)&&(double.IsNaN(target.X)||double.IsNaN(target.Z)||double.IsInfinity(target.X)||double.IsInfinity(target.Z)||Math.Abs(target.X)>profile.ArenaHalfExtent||Math.Abs(target.Z)>profile.ArenaHalfExtent))return PlayableCommandStatus.InvalidTarget;
             if(id==2&&!ValidMinePlacement(owner,target))return PlayableCommandStatus.InvalidTarget;
             if(id==OrbitalAbilities.SystemFailure){RefreshVision();if(!Vision(owner).IsVisible(target))return PlayableCommandStatus.InvalidTarget;}
@@ -42,7 +49,7 @@ namespace Spacewars.Runtime
             if(eliminated.Contains(owner)||!Orbital(owner).Use(id,OrbitalData))return PlayableCommandStatus.Rejected;
             if(id==1){scanViews.Clear();scans.Add(new Scan{Owner=owner,Point=target,Radius=OrbitalData.orbitalScanRadius,Remaining=OrbitalData.orbitalScanSeconds,Duration=OrbitalData.orbitalScanSeconds});visionInputProfile=null;RefreshVision();}
             if(id==2)PlaceMine(owner,target);
-            if(disabledTargets!=null){foreach(int targetId in disabledTargets)systemFailures[targetId]=Math.Max(systemFailures.TryGetValue(targetId,out var until)?until:0,elapsed+OrbitalData.orbitalSystemFailureSeconds);Sound(PlayableSoundKind.OrbitalSystemsDisabled,target,PlayableEntityKind.Tank,owner);}
+            if(disabledTargets!=null){foreach(int targetId in disabledTargets){boosts.Remove(targetId);systemFailures[targetId]=Math.Max(systemFailures.TryGetValue(targetId,out var until)?until:0,elapsed+OrbitalData.orbitalSystemFailureSeconds);}Sound(PlayableSoundKind.OrbitalSystemsDisabled,target,PlayableEntityKind.Tank,owner);}
             if(id==1||id==2)Sound(id==1?PlayableSoundKind.OrbitalScanApplied:PlayableSoundKind.OrbitalMineInstalled,target,PlayableEntityKind.Tank,owner);
             return PlayableCommandStatus.Applied;
         }
@@ -94,16 +101,21 @@ namespace Spacewars.Runtime
         }
         private OrbitalScanTriangle[] BuildScanFaces(Scan scan)
         {
-            var data=OrbitalData;if(ScanEnvelope(scan)*data.orbitalScanOpacity<=0)return Array.Empty<OrbitalScanTriangle>();
-            // Upper bound of the unchanged 96x12 beam and 2x8x96 wave samples.
-            var faces=new List<OrbitalScanTriangle>(96*12*2+2*8*96*2);
-            double age=scan.Duration-scan.Remaining,head=age/data.orbitalScanSweepSeconds*Math.PI*2,span=data.orbitalScanSectorDegrees*Math.PI/180,core=data.orbitalScanCoreDegrees*Math.PI/180,envelope=ScanEnvelope(scan)*data.orbitalScanOpacity;
+            var data=OrbitalData;
+            double envelope=ScanEnvelope(scan)*data.orbitalScanOpacity;
+            if(envelope<=0)return Array.Empty<OrbitalScanTriangle>();
+            // One scratch buffer per authority. Published scan faces still own an exact-size copy.
+            var faces=scanFaceScratch??=new List<OrbitalScanTriangle>(96*12*2+2*8*96*2);
+            faces.Clear();
+            double age=scan.Duration-scan.Remaining,head=age/data.orbitalScanSweepSeconds*Math.PI*2,span=data.orbitalScanSectorDegrees*Math.PI/180,core=data.orbitalScanCoreDegrees*Math.PI/180;
             NavPoint At(double angle,double radius)=>new NavPoint(scan.Point.X+Math.Cos(angle)*radius,scan.Point.Z+Math.Sin(angle)*radius);
             void Face(NavPoint a,NavPoint b,NavPoint c,(double opacity,double highlight) u,(double opacity,double highlight) v,(double opacity,double highlight) w){if(Math.Max(u.opacity,Math.Max(v.opacity,w.opacity))>1e-5)faces.Add(new OrbitalScanTriangle(a,b,c,u.opacity,u.highlight,v.opacity,v.highlight,w.opacity,w.highlight));}
             void Quad(double a,double b,double inner,double outer,Func<double,double,(double opacity,double highlight)> light){
                 if(inner<0||outer>scan.Radius||inner>=outer)return;
-                var x=At(a,inner);var y=At(b,inner);var z=At(a,outer);var w=At(b,outer);
-                if(inner>0)Face(x,y,z,light(a,inner),light(b,inner),light(a,outer));Face(y,w,z,light(b,inner),light(b,outer),light(a,outer));
+                var y=At(b,inner);var z=At(a,outer);var w=At(b,outer);
+                var yLight=light(b,inner);var zLight=light(a,outer);
+                if(inner>0)Face(At(a,inner),y,z,light(a,inner),yLight,zLight);
+                Face(y,w,z,yLight,light(b,outer),zLight);
             }
             // Fixed integration samples and Gaussian kernels approximate a continuous light field.
             // Editable brightness, angular extent and timing live in the named orbital profile.
@@ -112,38 +124,54 @@ namespace Spacewars.Runtime
                 double edge=Math.Sqrt(Math.Max(0,Math.Sin(Math.PI*radius/scan.Radius)));
                 return (envelope*(bright+tail)*edge,bright);
             }
+            Func<double,double,(double opacity,double highlight)> beam=Beam;
             for(int i=0;i<96;i++){
                 double a=head-span+(span+core*3)*i/96,b=head-span+(span+core*3)*(i+1)/96;
-                for(int j=0;j<12;j++)Quad(a,b,scan.Radius*j/12d,scan.Radius*(j+1)/12d,Beam);
+                for(int j=0;j<12;j++)Quad(a,b,scan.Radius*j/12d,scan.Radius*(j+1)/12d,beam);
             }
             for(int wave=0;wave<2;wave++){
                 double phase=(age/data.orbitalScanWaveSeconds+wave/2d)%1,radius=phase*scan.Radius;
+                (double,double) Wave(double angle,double r){double x=(r-radius)*16/scan.Radius;return (envelope*data.orbitalScanWaveOpacity*Math.Exp(-x*x*5)*Math.Sin(Math.PI*phase),0);}
+                Func<double,double,(double opacity,double highlight)> waveLight=Wave;
                 for(int band=0;band<8;band++){
                     double offset=(band-4)/4d,next=(band-3)/4d;
-                    (double,double) Wave(double angle,double r){double x=(r-radius)*16/scan.Radius;return (envelope*data.orbitalScanWaveOpacity*Math.Exp(-x*x*5)*Math.Sin(Math.PI*phase),0);}
-                    for(int i=0;i<96;i++)Quad(i*Math.PI/48,(i+1)*Math.PI/48,radius+offset*scan.Radius/16,radius+next*scan.Radius/16,Wave);
+                    for(int i=0;i<96;i++)Quad(i*Math.PI/48,(i+1)*Math.PI/48,radius+offset*scan.Radius/16,radius+next*scan.Radius/16,waveLight);
                 }
             }
             return faces.ToArray();
         }
         private void WriteOrbital(BinaryWriter w)
         {
-            w.Write(0x4f524234);w.Write(orbital.Count);
+            bool reinforcement=HasReinforcementState;
+            var frozen=immobilityUntil>elapsed?units.Values.Where(Frozen).OrderBy(u=>u.Id).ToArray():Array.Empty<Unit>();
+            bool stasis=frozen.Length!=0||orbital.Values.Any(state=>state.ProvingGroundStasisRecovery>0);
+            bool nanobots=repairFields.Count>0||orbital.Values.Any(state=>state.ProvingGroundRepairRecovery>0);
+            bool boost=boosts.Count>0||boostWear.Count>0||orbital.Values.Any(state=>state.ProvingGroundProductionRecovery>0);
+            bool nuclear=nuclearStrikes.Count>0||nuclearEvacuations.Keys.Any(id=>units.ContainsKey(id))||orbital.Values.Any(state=>state.ProvingGroundNuclearRecovery>0);
+            w.Write(nuclear?0x4f524239:boost?0x4f524238:nanobots?0x4f524237:stasis?0x4f524236:reinforcement?0x4f524235:0x4f524234);w.Write(orbital.Count);
             foreach(var pair in orbital.OrderBy(x=>(int)x.Key)){
                 w.Write((int)pair.Key);w.Write(pair.Value.Level);WorldWire.Number(w,pair.Value.Progress);WorldWire.Number(w,pair.Value.CommonRemaining);
-                for(int i=0;i<OrbitalEscalationState.ChoiceCount;i++){w.Write(pair.Value.Choice(i));WorldWire.Number(w,pair.Value.Recovery(i));}
+                for(int i=0;i<OrbitalEscalationState.StoredChoiceCount;i++){w.Write(pair.Value.Choice(i));WorldWire.Number(w,pair.Value.Recovery(i));}
             }
             w.Write(scans.Count);foreach(var scan in scans){w.Write((int)scan.Owner);WorldWire.Number(w,scan.Point.X);WorldWire.Number(w,scan.Point.Z);WorldWire.Number(w,scan.Radius);WorldWire.Number(w,scan.Remaining);WorldWire.Number(w,scan.Duration);}
             var disabled=systemFailures.Where(p=>buildings.ContainsKey(p.Key)&&p.Value>elapsed).OrderBy(p=>p.Key).ToArray();w.Write(disabled.Length);foreach(var pair in disabled){w.Write(pair.Key);WorldWire.Number(w,pair.Value);}
+            if(stasis||nanobots||boost||nuclear)w.Write(reinforcement);
+            if(reinforcement)WriteReinforcement(w);
+            if(stasis||nanobots||boost||nuclear)WriteStasis(w,frozen);
+            if(boost||nuclear)w.Write(nanobots);
+            if(nanobots)WriteRepairNanobots(w);
+            if(nuclear)w.Write(boost);
+            if(boost)WriteBoosts(w);
+            if(nuclear)WriteNuclearStrikes(w);
         }
         private void ReadOrbital(BinaryReader r)
         {
-            int format=r.ReadInt32();if(format!=0x4f524233&&format!=0x4f524234)throw new ArgumentException("Missing orbital state.");
+            int format=r.ReadInt32();if(format!=0x4f524233&&format!=0x4f524234&&format!=0x4f524235&&format!=0x4f524236&&format!=0x4f524237&&format!=0x4f524238&&format!=0x4f524239)throw new ArgumentException("Missing orbital state.");
             int count=r.ReadInt32();if(count<0||count>Owners.Count())throw new ArgumentException("Invalid orbital owner count.");
             for(int j=0;j<count;j++){
                 var owner=WorldWire.EnumValue<PlayableOwner>(r);if(!HasOwner(owner)||orbital.ContainsKey(owner))throw new ArgumentException("Invalid orbital owner.");
-                int level=r.ReadInt32();double progress=WorldWire.Number(r),common=WorldWire.Number(r);var ids=new int[OrbitalEscalationState.ChoiceCount];var times=new double[OrbitalEscalationState.ChoiceCount];
-                for(int i=0;i<OrbitalEscalationState.ChoiceCount;i++){ids[i]=r.ReadInt32();times[i]=WorldWire.Number(r);}
+                int level=r.ReadInt32();double progress=WorldWire.Number(r),common=WorldWire.Number(r);var ids=new int[OrbitalEscalationState.StoredChoiceCount];var times=new double[OrbitalEscalationState.StoredChoiceCount];
+                for(int i=0;i<OrbitalEscalationState.StoredChoiceCount;i++){ids[i]=r.ReadInt32();times[i]=WorldWire.Number(r);}
                 orbital.Add(owner,OrbitalEscalationState.Restore(level,progress,common,ids,times,OrbitalData,offline?.ProvingGround!=null));
             }
             int scanCount=r.ReadInt32();if(scanCount<0||scanCount>10000)throw new ArgumentException("Invalid scan count.");
@@ -151,7 +179,12 @@ namespace Spacewars.Runtime
                 var scan=new Scan{Owner=WorldWire.EnumValue<PlayableOwner>(r),Point=new NavPoint(WorldWire.Number(r),WorldWire.Number(r)),Radius=WorldWire.Number(r),Remaining=WorldWire.Number(r),Duration=WorldWire.Number(r)};
                 if(!HasOwner(scan.Owner)||Math.Abs(scan.Point.X)>profile.ArenaHalfExtent||Math.Abs(scan.Point.Z)>profile.ArenaHalfExtent||scan.Radius<=0||scan.Remaining<=0||scan.Remaining>scan.Duration)throw new ArgumentException("Invalid scan state.");scans.Add(scan);
             }
-            if(format==0x4f524234){int disabled=r.ReadInt32();if(disabled<0||disabled>buildings.Count)throw new ArgumentException("Invalid system failure count.");for(int i=0;i<disabled;i++){int id=r.ReadInt32();double until=WorldWire.Number(r);if(!buildings.ContainsKey(id)||until<=elapsed||systemFailures.ContainsKey(id))throw new ArgumentException("Invalid system failure state.");systemFailures.Add(id,until);}}
+            if(format>=0x4f524234){int disabled=r.ReadInt32();if(disabled<0||disabled>buildings.Count)throw new ArgumentException("Invalid system failure count.");for(int i=0;i<disabled;i++){int id=r.ReadInt32();double until=WorldWire.Number(r);if(!buildings.ContainsKey(id)||until<=elapsed||systemFailures.ContainsKey(id))throw new ArgumentException("Invalid system failure state.");systemFailures.Add(id,until);}}
+            if(format==0x4f524235||format>=0x4f524236&&WorldWire.Boolean(r))ReadReinforcement(r);
+            if(format>=0x4f524236)ReadStasis(r);
+            if(format==0x4f524237||format>=0x4f524238&&WorldWire.Boolean(r))ReadRepairNanobots(r);
+            if(format==0x4f524238||format==0x4f524239&&WorldWire.Boolean(r))ReadBoosts(r);
+            if(format==0x4f524239)ReadNuclearStrikes(r);
             visionInputProfile=null;
         }
     }

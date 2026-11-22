@@ -21,7 +21,14 @@ namespace Spacewars.Runtime
             .Concat(o.Buildings.Where(b=>b.Id==id&&o.IsHostile(b.Owner)).Select(b=>Team(o,b.Owner))).DefaultIfEmpty(-1).First();
         internal static bool KnownEconomicLead(PlayableAiObservation o,PlayableProfile p)
         {
-            double Income(PlayableBuildingSnapshot b)=>b.Kind==PlayableBuildingKind.Refinery&&b.RefineryUpgraded?p.RefineryUpgradedIncome:TerritoryRules.Income(p,b.Kind);
+            double Income(PlayableBuildingSnapshot b)
+            {
+                if(b.Kind==PlayableBuildingKind.Refinery&&b.RefineryUpgraded)return p.RefineryUpgradedIncome;
+                double income=TerritoryRules.Income(p,b.Kind);
+                if(b.Kind==PlayableBuildingKind.Mine&&o.Sites.Any(s=>s.CenterId==b.Id&&s.MineDepleted))
+                    income*=p.MineDepletedIncomePercent/100;
+                return income;
+            }
             var ready=o.Buildings.Where(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&Income(b)>0).ToArray();
             var known=ready.Where(b=>o.IsHostile(b.Owner)).GroupBy(b=>Team(o,b.Owner)).ToArray();
             if(known.Length==0)return false;

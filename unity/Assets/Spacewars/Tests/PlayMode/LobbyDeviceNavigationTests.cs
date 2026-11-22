@@ -56,6 +56,27 @@ public sealed class LobbyDeviceNavigationTests : InputTestFixture
         Assert.AreSame(primary,nav.CurrentGamepad,"Secondary MakeCurrent must not steal menu ownership");
         yield return Capture("pad-lobby");
     }
+    [UnityTest] public IEnumerator FocusedModeButtonShowsOneValueAndTogglesWithGamepad()
+    {
+        nav.UseGamepad();
+        Call("ShowLobby");
+        yield return null;
+        yield return null;
+        var button=lobby.Q<Button>("lobby-match-mode");
+        var caption=button.Q<Label>();
+        var hint=lobby.Q<Label>("lobby-match-mode-hint");
+        bool initial=SetupRoster.Domination;
+        Assert.AreEqual(initial?"Доминирование":"Уничтожение",caption.text);
+        button.Focus();
+        yield return null;
+        Assert.AreEqual(DisplayStyle.Flex,hint.style.display.value);
+        Assert.That(hint.text,Does.Contain("Доминирование").And.Contain("Уничтожение"));
+        Tap(primary,GamepadButton.South);
+        Assert.AreNotEqual(initial,SetupRoster.Domination);
+        Assert.AreEqual(initial?"Уничтожение":"Доминирование",caption.text);
+        Tap(primary,GamepadButton.South);
+        Assert.AreEqual(initial,SetupRoster.Domination);
+    }
     [UnityTest] public IEnumerator MouseEntryIsExclusiveAndKeyboardCanJoinPadLobby()
     {
         nav.UseKeyboardMouse();Call("ShowLobby");yield return null;

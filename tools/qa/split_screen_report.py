@@ -20,6 +20,18 @@ def distribution(values, milliseconds=True):
     return result
 
 
+def frame_rate(rows, frequency):
+    if len(rows) < 2 or frequency <= 0:
+        return None
+    stamps = [int(row['stopwatch_stamp']) for row in rows]
+    if stamps[0] <= 0 or any(end <= start for start, end in zip(stamps, stamps[1:])):
+        return None
+    duration = (stamps[-1] - stamps[0]) / frequency
+    return {'average_fps': (len(stamps) - 1) / duration, 'elapsed_seconds': duration,
+            'frame_intervals': len(stamps) - 1,
+            'unfocused_samples': sum(int(row['focused']) == 0 for row in rows)}
+
+
 def report(directory):
     directory = Path(directory)
     action_path=directory/'native-input.txt'
@@ -38,11 +50,12 @@ def report(directory):
         seats = list(csv.DictReader(source))
     host = json.loads((directory/'precise-render-host.json').read_text())
     frequency = host['clockFrequency']
+    measured_rows = [r for r in frames if 15 <= float(r['elapsed']) - start < 90]
     windows = {}
     for name, phase, low, high in [('separated', 1, 15, 45), ('overlapping', 2, 45, 75), ('combat', 3, 75, 90)]:
         rows = [r for r in frames if low <= float(r['elapsed'])-start < high]
         owner_rows = [r for r in seats if int(r['phase']) == phase]
-        result = {}
+        result = {'frame_rate': frame_rate(rows, frequency)}
         seen_timing = set()
         gpu = []
         for row in rows:
@@ -70,7 +83,8 @@ def report(directory):
     for owner in {r['owner'] for r in seats}:
         rows = [r for r in seats if r['owner']==owner]
         owners[owner] = dict(center_displacement=math.hypot(float(rows[-1]['center_x'])-float(rows[0]['center_x']),float(rows[-1]['center_z'])-float(rows[0]['center_z'])),health_first=int(rows[0]['health']),health_last=int(rows[-1]['health']),moving_samples=sum(int(r['moving'])>0 for r in rows))
-    return {'status':'measured','measurement_start_native_elapsed':start,'windows':windows,'owners':owners,
+    return {'status':'measured','measurement_start_native_elapsed':start,
+            'frame_rate':frame_rate(measured_rows, frequency),'windows':windows,'owners':owners,
             'test_logs':match[2], 'notes':['render/hud/maps_ms are first seat only; main_update_ms includes all children','GPU unavailable values omitted; positive timing stamps deduplicated; Mono constant0 allocation counter is unavailable','Timing includes screenshot tails; nearest-rank percentiles; uncapped pacing asserted separately','Movement centers and health totals require journal review if units disappear; no physical device acceptance inferred']}
 
 

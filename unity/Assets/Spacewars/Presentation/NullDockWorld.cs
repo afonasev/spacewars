@@ -30,7 +30,18 @@ namespace Spacewars.Presentation
             dockMaterial.SetVector("_ThreatBounds",new Vector4((float)-home.MaxX,(float)north.MinZ,(float)-south.MinX,(float)-home.MinZ));
             // Palette vectors carry sRGB, matching vertex colors; shader converts both exactly once.
             dockMaterial.SetVector("_BattleColor",art.Battle);dockMaterial.SetVector("_ContestedColor",art.Contested);dockMaterial.SetVector("_RearColor",art.Rear);
-            var baseSites=map.Sites(profile).Where(s=>s.Kind!=PlayableBuildingKind.Mine).ToArray();
+            var sites=map.Sites(profile);
+            var baseSites=sites.Where(s=>TerritoryRules.Center(s.Kind)).ToArray();
+            if(map.Revision>=4){
+                var relays=sites.Where(s=>s.Kind==PlayableBuildingKind.RelayTower).ToArray();
+                dockMaterial.SetVector("_RelayCenters",new Vector4((float)relays[0].Position.X,(float)relays[0].Position.Z,
+                    (float)relays[1].Position.X,(float)relays[1].Position.Z));
+                dockMaterial.SetVector("_RelayPavingShape",new Vector4(NullDockArtProfile.RelayPavingRadiusScale,
+                    NullDockArtProfile.RelayPavingDiagonal,NullDockArtProfile.RelayStripeWidth,0));
+                dockMaterial.SetVector("_RelayPavingColor",NullDockArtProfile.RelayPaving);
+                dockMaterial.SetVector("_RelayStripeColor",NullDockArtProfile.RelayStripe);
+                ApplyDockRelayCaptureRadius();
+            }
             Vector4 Pair(int a,int b)=>new Vector4((float)baseSites[a].Position.X,(float)baseSites[a].Position.Z,(float)baseSites[b].Position.X,(float)baseSites[b].Position.Z);
             dockMaterial.SetVector("_BaseSitesA",Pair(0,1));dockMaterial.SetVector("_BaseSitesB",Pair(2,3));
             dockMaterial.SetVector("_SiteDisk",new Vector4(DockBaseSiteRadius-.2f,art.siteDiskLift,0,0));
@@ -54,7 +65,9 @@ namespace Spacewars.Presentation
                 if(budget.Expired){yield return null;budget.Restart();}
             }
             DockDeckDetails(batch,map,art);
-            foreach(var site in map.Sites(profile)){
+            foreach(var site in sites){
+                // On the lower deck the surface shader paints the actual capture boundary.
+                if(site.Kind==PlayableBuildingKind.RelayTower&&map.Revision>=4)continue;
                 float h=(float)map.SurfaceHeight(site.Position);var at=V(site.Position,h+.03f);
                 float radius=site.Kind==PlayableBuildingKind.RelayTower?1.8f:site.Kind==PlayableBuildingKind.Mine?3.3f:DockBaseSiteRadius;
                 batch.Ring(at,radius,radius-.2f,new Color(.66f,.48f,.21f),4);
@@ -98,6 +111,10 @@ namespace Spacewars.Presentation
             var backdrop=TerrainMesh.Prism(new NavObstacle(-700,-700,700,700),-42,-41);FinalProceduralMesh.IndexOwned(backdrop);DockEmit("Orbital backdrop",backdrop,dockSpaceMaterial);
             var backdropRenderer=root.Find("Orbital backdrop").GetComponent<MeshRenderer>();backdropRenderer.shadowCastingMode=ShadowCastingMode.Off;backdropRenderer.receiveShadows=false;
             DockMetrics.materials=2;
+        }
+        private void ApplyDockRelayCaptureRadius(){
+            if(dockMaterial&&profile.AuthoredMap is NullDockMap map&&map.Revision>=4)
+                dockMaterial.SetFloat("_RelayCaptureRadius",(float)profile.RelayCaptureRadius);
         }
         private static readonly Color Steel=new Color(.45f,.50f,.53f),DarkSteel=new Color(.12f,.18f,.22f),Copper=new Color(.47f,.28f,.15f),Cyan=new Color(.10f,.66f,.76f),Amber=new Color(.95f,.56f,.13f);
         private static Vector3 V(NavPoint p,float y)=>new Vector3((float)p.X,y,(float)p.Z);

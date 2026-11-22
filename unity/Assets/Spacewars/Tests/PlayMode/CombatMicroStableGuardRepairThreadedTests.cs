@@ -140,7 +140,7 @@ namespace Spacewars.Tests.PlayMode
         [UnityTest,Timeout(90000)] public IEnumerator RecastRepairCurrentAndRecordedFrames()
         {
             var data=P.CopyData();data.groundRouteBackend=1;var profile=PlayableProfile.Create(data);
-            string output=Environment.GetEnvironmentVariable("COMBAT_MICRO_STABLE_GUARD_OUTPUT")??Path.Combine(Output,"recorded-"+DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffffff"));
+            string output=Path.Combine(Output,"recorded-"+DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffffff"));
             RunStableGuard(profile,true,output);
             yield return RenderRecordedRepair(profile,output,output);
         }
@@ -185,9 +185,9 @@ namespace Spacewars.Tests.PlayMode
                 }
             }finally{RenderSettings.ambientLight=ambient;RenderSettings.ambientMode=ambientMode;if(pipeline!=null)pipeline.shadowDistance=shadows;world?.Dispose();UnityEngine.Object.DestroyImmediate(root);target.Release();UnityEngine.Object.DestroyImmediate(target);}
         }
-        void RunStableGuard(PlayableProfile selectedProfile=null,bool currentControl=false,string outputOverride=null)
+        void RunStableGuard(PlayableProfile selectedProfile=null,bool currentControl=false,string outputOverride=null,[System.Runtime.CompilerServices.CallerMemberName]string method=null)
         {
-            string output=outputOverride??Output;string path=Path.Combine(output,"ordinary-attempt-4.json");Assert.False(File.Exists(path));
+            string output=outputOverride??Path.Combine(Output,method,Guid.NewGuid().ToString("N"));string path=Path.Combine(output,"ordinary-attempt-4.json");Assert.False(File.Exists(path));
             using var s=new Setup(selectedProfile);var P=s.Profile;CertifiedRouteWorker worker=null;var frames=new List<object>(2048);int dropped=0,errors=0;string traceError=null;
             PlayableAuthorityTick cold=null;CertifiedRouteWorker coldWorker=null;byte[] currentBytes=null,healingBytes=null,joinedBytes=null;bool currentExact=false;
             long repairScheduled=-1,repairApplied=-1,healed=-1,followScheduled=-1,followApplied=-1,followSequence=0,nativeJoin=-1,joined=-1;int anchor=0;bool repairMotion=false,towerLock=false,returnMotion=false;

@@ -20,6 +20,176 @@ namespace Spacewars.Tests.EditMode
         private static T Field<T>(object value,string name)=>(T)value.GetType().GetField(name).GetValue(value);
         private static PlayableTacticalOrderSnapshot Order(OfflineParticipantAuthority a,int id)=>Field<PlayableTacticalOrderSnapshot>(Unit(a,id),"CurrentOrder");
         private static PlayableCommandReceipt Send(OfflineParticipantAuthority a,long seq,PlayableCommandKind kind,int[] ids,int target=0,NavPoint point=default(NavPoint),string owner="owner-11")=>a.Apply(new PlayableCommand(71,seq,owner,kind,ids,point,targetId:target).AsHuman());
+        [Test]
+        public void RecastFollowRequestsFreeWaypointWhenBehindLeaderIsOccupied()
+        {
+            const BindingFlags hidden=BindingFlags.Instance|BindingFlags.NonPublic;
+            var p=PlayableProfile.Default;
+            Assert.True(p.UsesRecastGroundRoutes);
+            var d=new PlayableDomain(p,1,false);
+            int Spawn(NavPoint point)=>(int)typeof(PlayableDomain).GetMethod("SpawnUnit",hidden)
+                .Invoke(d,new object[]{point,PlayableOwner.Player,PlayableEntityKind.Tank});
+            try
+            {
+                var position=new NavPoint(-8,15);
+                const double heading=0;
+                int leader=Spawn(position),follower=Spawn(new NavPoint(-15,15));
+                Assert.True(d.Navigation.Crowd.TryGet(leader,out var actor));
+                actor.Heading=heading;
+                var rear=PlayableUnitRules.FollowGoal(p,position,heading);
+                int blocker=Spawn(rear);
+                Assert.AreEqual(PlayableCommandStatus.Applied,d.Apply(
+                    new PlayableCommand(1,1,"player-1",PlayableCommandKind.Hold,new[]{blocker}),out _));
+                Assert.AreEqual(PlayableCommandStatus.Applied,d.Apply(
+                    new PlayableCommand(1,2,"player-1",PlayableCommandKind.Follow,new[]{follower},targetId:leader),out _));
+                d.Step(1d/30);
+                Assert.True(d.Navigation.Requests.TryDequeue(out var request),d.Navigation.LastCommandAdmissionRefusal);
+                Assert.AreEqual(follower,request.Entity);
+                Assert.AreEqual(actor.Location.SurfaceId,request.GoalLocation.Value.SurfaceId);
+                Assert.AreNotEqual(rear,request.Goal);
+                double x=request.Goal.X-position.X,z=request.Goal.Z-position.Z;
+                Assert.LessOrEqual(Math.Sqrt(x*x+z*z),p.FollowDistance+p.FollowArrivalTolerance);
+            }
+            finally
+            {
+                d.Navigation.ReleaseCommittedHostRoot();
+                d.DestroyOwnedNavigation();
+            }
+        }
+        [Test]
+        public void RecastFollowUsesAnAdmissiblePointWithinTheArrivalBand()
+        {
+            const BindingFlags hidden=BindingFlags.Instance|BindingFlags.NonPublic;
+            var profile=PlayableProfile.Default;
+            var domain=new PlayableDomain(profile,1,false);
+            int Spawn(NavPoint point,PlayableEntityKind kind)=>(int)typeof(PlayableDomain).GetMethod("SpawnUnit",hidden)
+                .Invoke(domain,new object[]{point,PlayableOwner.Player,kind});
+            try
+            {
+                var center=new NavPoint(-8,15);
+                int leader=Spawn(center,PlayableEntityKind.Explorer);
+                int follower=Spawn(new NavPoint(-16,15),PlayableEntityKind.Tank);
+                var navigation=domain.Navigation;
+                Assert.True(navigation.UsesRecastGroundRoutes);
+                Assert.True(navigation.Crowd.TryGet(leader,out var anchor));
+                anchor.Heading=0;
+                Assert.True(navigation.Crowd.TryGet(follower,out var subject));
+                int count=profile.Navigation.CrowdHeadingIntervals;
+                double inner=profile.FollowDistance-subject.Radius+.04;
+                var obstacles=Enumerable.Range(0,count).Select(i=>{
+                    double angle=2*Math.PI*i/count;
+                    return new NavObstacle(new NavPoint(center.X-Math.Cos(angle)*inner,center.Z-Math.Sin(angle)*inner),.04);
+                });
+                var geometry=domain.Geometry;
+                navigation.ChangeGeometry(new NavGeometry(geometry.HalfExtent,geometry.Obstacles.Concat(obstacles).ToArray(),geometry.Revision+1));
+                for(int i=0;i<count;i++)
+                    Assert.False(navigation.CanAdmitFollowWaypoint(follower,PlayableUnitRules.FollowGoal(profile,center,2*Math.PI*i/count)));
+                var band=new NavPoint(center.X-profile.FollowDistance-profile.FollowArrivalTolerance*.5,center.Z);
+                Assert.True(navigation.CanAdmitFollowWaypoint(follower,band),"A legal target remains inside the accepted joining distance.");
+
+                Assert.AreEqual(PlayableCommandStatus.Applied,domain.Apply(
+                    new PlayableCommand(1,1,"player-1",PlayableCommandKind.Follow,new[]{follower},targetId:leader),out _));
+                domain.Step(1d/30);
+                Assert.True(navigation.Requests.TryDequeue(out var request),"Follow must submit a legal alternative in the configured arrival band.");
+                Assert.AreEqual(follower,request.Entity);
+                Assert.AreEqual(band,request.Goal);
+                Assert.AreEqual(anchor.Location.SurfaceId,request.GoalLocation.Value.SurfaceId);
+            }
+            finally
+            {
+                domain.Navigation.ReleaseCommittedHostRoot();
+                domain.DestroyOwnedNavigation();
+            }
+        }
+        [Test]
+        public void AntennaCityFollowFindsTheFreeGapBetweenHeadingSamples()
+        {
+            const BindingFlags hidden=BindingFlags.Instance|BindingFlags.NonPublic;
+            var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),new AntennaCityMap());
+            var domain=new PlayableDomain(profile,1,false);
+            try
+            {
+                var center=new NavPoint(62.737421751998305,99.78880221051017);
+                double heading=Math.Atan2(center.Z-99.9581611178925,center.X-60.619181312272381);
+                var spawn=typeof(PlayableDomain).GetMethod("SpawnUnit",hidden);
+                int Scout(NavPoint point)=>(int)spawn.Invoke(domain,new object[]{point,PlayableOwner.Player,PlayableEntityKind.Explorer});
+                int leader=Scout(center);
+                int follower=Scout(new NavPoint(64.34486346055816,110.47470212007067));
+                foreach(var point in new[]{
+                    new NavPoint(64.45291159584406,99.51982072205935),
+                    new NavPoint(64.62466477689084,100.726372147899),
+                    new NavPoint(63.18305360527339,101.9515124730037),
+                    new NavPoint(64.26326667728932,98.17303926398199),
+                    new NavPoint(65.56184061005932,100.01777509530224),
+                    new NavPoint(60.0144368477736,100.69194188101092),
+                    new NavPoint(65.50801513404171,98.84321608086562)})
+                    Scout(point);
+
+                var nav=domain.Navigation;
+                Assert.True(nav.Crowd.TryGet(leader,out var anchor));
+                anchor.Heading=heading;
+                var geometry=domain.Geometry;
+                NavObstacle Building(NavPoint point,double r)=>new NavObstacle(point.X-r,point.Z-r,point.X+r,point.Z+r);
+                var structures=new[]{
+                    Building(new NavPoint(62.00861046343717,97.74118109821413),profile.ScienceFootprintRadius),
+                    Building(new NavPoint(60.000000000000014,103.92304845413263),profile.HeadquartersFootprintRadius),
+                    Building(new NavPoint(66.50000000000001,103.92304845413263),profile.RefineryFootprintRadius)};
+                nav.ChangeGeometry(new NavGeometry(geometry.HalfExtent,geometry.Obstacles.Concat(structures).ToArray(),geometry.Revision+1));
+
+                var gapAngle=heading-3*Math.PI/profile.Navigation.CrowdHeadingIntervals;
+                var gap=PlayableUnitRules.FollowGoal(profile,center,gapAngle);
+                Assert.True(nav.CanAdmitFollowWaypoint(follower,gap),"A free position exists between the standard heading samples.");
+                Assert.AreEqual(PlayableCommandStatus.Applied,domain.Apply(
+                    new PlayableCommand(1,1,"player-1",PlayableCommandKind.Follow,new[]{follower},targetId:leader),out _));
+                typeof(PlayableDomain).GetMethod("AdvanceFollow",hidden).Invoke(domain,new object[]{true});
+                Assert.True(nav.Requests.TryDequeue(out var request),"Follow must reach the legal gap.");
+                Assert.AreEqual(follower,request.Entity);
+                Assert.AreEqual(anchor.Location.SurfaceId,request.GoalLocation.Value.SurfaceId);
+                Assert.AreEqual(gap.X,request.Goal.X,1e-9);
+                Assert.AreEqual(gap.Z,request.Goal.Z,1e-9);
+            }
+            finally
+            {
+                domain.Navigation.ReleaseCommittedHostRoot();
+                domain.DestroyOwnedNavigation();
+            }
+        }
+        [Test]
+        public void AntennaCityFollowRequestsDistinctWaypointsForOneLeader()
+        {
+            const BindingFlags hidden=BindingFlags.Instance|BindingFlags.NonPublic;
+            var map=new AntennaCityMap();
+            var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);
+            var d=new PlayableDomain(p,1,false);
+            int Spawn(NavPoint point)=>(int)typeof(PlayableDomain).GetMethod("SpawnUnit",hidden)
+                .Invoke(d,new object[]{point,PlayableOwner.Player,PlayableEntityKind.Tank});
+            try
+            {
+                var position=new NavPoint(-42.194875758099208,-22.355671639356213);
+                const double heading=-1.9651085055604416;
+                int leader=Spawn(position),follower=Spawn(new NavPoint(-127.25434430269034,-1.30995788696597));
+                int second=Spawn(new NavPoint(-127.25861046343725,0.82060413990106118));
+                Assert.True(d.Navigation.Crowd.TryGet(leader,out var actor));
+                actor.Heading=heading;
+                var rear=PlayableUnitRules.FollowGoal(p,position,heading);
+                Assert.AreEqual(PlayableCommandStatus.Applied,d.Apply(
+                    new PlayableCommand(1,1,"player-1",PlayableCommandKind.Follow,new[]{follower,second},targetId:leader),out _));
+                d.Step(1d/30);
+                Assert.True(d.Navigation.Requests.TryDequeue(out var request),d.Navigation.LastCommandAdmissionRefusal);
+                Assert.AreEqual(follower,request.Entity);
+                Assert.AreEqual(actor.Location.SurfaceId,request.GoalLocation.Value.SurfaceId);
+                Assert.AreEqual(rear,request.Goal);
+                Assert.True(d.Navigation.Requests.TryDequeue(out var other),d.Navigation.LastCommandAdmissionRefusal);
+                Assert.AreEqual(second,other.Entity);
+                Assert.AreEqual(actor.Location.SurfaceId,other.GoalLocation.Value.SurfaceId);
+                Assert.AreNotEqual(request.Goal,other.Goal);
+            }
+            finally
+            {
+                d.Navigation.ReleaseCommittedHostRoot();
+                d.DestroyOwnedNavigation();
+            }
+        }
         [Test] public void MixedSelfForeignAndMissingActorsPreserveRejectedProvenanceAndCyclesFailClosed()
         {
             var a=World();int leader=Spawn(a,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-10,-10)),follower=Spawn(a,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-12,-10)),ally=Spawn(a,PlayableOwner.Third,PlayableEntityKind.Tank,new NavPoint(-14,-10)),hostile=Spawn(a,PlayableOwner.Enemy,PlayableEntityKind.Tank,new NavPoint(12,12));

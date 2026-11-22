@@ -22,20 +22,25 @@ namespace Spacewars.Simulation
         static double Positive(double a){while(a<0)a+=Math.PI*2;while(a>=Math.PI*2)a-=Math.PI*2;return a;}
         internal static TerritorySlot[] Create(TerritorySite site,PlayableProfile p)
         {
-            if(site.Slots.Count<2)return Array.Empty<TerritorySlot>();
+            if(TryCreate(site,p,out var slots))return slots;
+            throw new ArgumentException("No supported common defensive ring fits base "+site.Id);
+        }
+        internal static bool TryCreate(TerritorySite site,PlayableProfile p,out TerritorySlot[] slots)
+        {
+            if(site.Slots.Count<2){slots=Array.Empty<TerritorySlot>();return true;}
             double minimum=site.Slots.Average(slot=>Math.Sqrt(Math.Pow(slot.Position.X-site.Position.X,2)+Math.Pow(slot.Position.Z-site.Position.Z,2)))+p.TurretPadOffset;
-            if(TryCreate(site,p,minimum,out var slots))return slots;
+            if(TryCreate(site,p,minimum,out slots))return true;
             // Retain the previous layout's outer search envelope, but apply it to the
             // whole ring. Refinement is numerical precision, not a balance control.
             double lower=minimum,upper=minimum+OrdinaryRadius(p);
-            if(!TryCreate(site,p,upper,out slots))throw new ArgumentException("No supported common defensive ring fits base "+site.Id);
+            if(!TryCreate(site,p,upper,out slots))return false;
             const int refinementSteps=48; // Sub-nanometre precision over the bounded metre-scale envelope.
             for(int step=0;step<refinementSteps;step++)
             {
                 double middle=(lower+upper)/2;
                 if(TryCreate(site,p,middle,out var candidate)){upper=middle;slots=candidate;}else lower=middle;
             }
-            return slots;
+            return true;
         }
         static double OrdinaryRadius(PlayableProfile p)=>Math.Max(p.HangarFootprintRadius,Math.Max(p.ScienceFootprintRadius,Math.Max(p.FactoryFootprintRadius,p.RefineryFootprintRadius)));
         static bool TryCreate(TerritorySite site,PlayableProfile p,double ring,out TerritorySlot[] slots)

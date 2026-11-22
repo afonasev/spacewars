@@ -52,20 +52,44 @@ namespace Spacewars.Runtime
         {
             var home=Home(o);var ordered=candidates.GroupBy(s=>s.Site.Id).Select(g=>g.First())
                 .OrderBy(s=>Distance(s.Site.Position,home)).ThenBy(s=>s.Site.Id).ToArray();
-            // An Outpost adds real building capacity; a sole already-funded goal
-            // is retained because this filter only applies when an Outpost is offered.
-            if(NeedsBuildingTerritory(o)&&ordered.Any(s=>s.Site.Kind==PlayableBuildingKind.Outpost&&s.Site.Slots.Count>0))
-            {ordered=ordered.Where(s=>s.Site.Kind==PlayableBuildingKind.Outpost&&s.Site.Slots.Count>0).ToArray();localSite=0;}
+            // Keep the same ordering for equally productive or unexplored sites.
+            double horizon=ai.Value("economy.earlyMinePaybackSeconds");
+            double MineReturn(TerritorySiteSnapshot s)
+            {
+                if(s.Site.Kind!=PlayableBuildingKind.Mine||!s.MineReserve.HasValue)return 0;
+                double earningSeconds=Math.Max(0,horizon-TerritoryRules.Duration(p,PlayableBuildingKind.Mine));
+                return TerritoryRules.MineIncome(p,s.MineReserve,earningSeconds)
+                    -TerritoryRules.MineIncome(p,null,earningSeconds);
+            }
+            ordered=ordered.OrderByDescending(MineReturn).ToArray();
+            // Only admitted candidates compete here. Protect the local mine in
+            // the opening; in midgame compare recurring income, cost and access.
+            double Rate(TerritorySiteSnapshot s)=>s.Site.Kind==PlayableBuildingKind.Mine?
+                TerritoryRules.MineIncome(p,s.MineReserve,horizon)*p.IncomePeriodSeconds/horizon:TerritoryRules.Income(p,s.Site.Kind);
+            double OutpostValue(TerritorySiteSnapshot s)=>Rate(s)*
+                (1d+s.Site.Slots.Count)/(Math.Max(1,TerritoryRules.Cost(p,s.Site.Kind))*
+                (1d+Distance(s.Site.Position,home)/p.ExplorerVision));
+            if(ordered.Any(s=>s.Site.Kind==PlayableBuildingKind.Outpost&&s.Site.Slots.Count>0)&&
+                AiEconomicInvestmentPlanner.ReadyIncomeCount(o)>0)
+            {
+                if(NeedsBuildingTerritory(o))
+                    ordered=ordered.Where(s=>s.Site.Kind==PlayableBuildingKind.Outpost&&s.Site.Slots.Count>0).ToArray();
+                ordered=ordered.OrderByDescending(OutpostValue).ToArray();
+                localSite=0;
+            }
             var local=localSite==0?ordered.FirstOrDefault():ordered.FirstOrDefault(s=>s.Site.Id==localSite);if(!remote)return local;
             var mains=Mains(o,knowledge);
             return ordered.Where(s=>s.Site.Id!=(localSite!=0?localSite:local?.Site.Id??0)&&RemoteAllowed(o,p,ai,knowledge,s))
-                .OrderByDescending(s=>mains.Select(m=>Distance(s.Site.Position,m.Position)).DefaultIfEmpty(0).Min())
+                .OrderByDescending(MineReturn)
+                .ThenByDescending(s=>mains.Select(m=>Distance(s.Site.Position,m.Position)).DefaultIfEmpty(0).Min())
                 .ThenBy(s=>Distance(s.Site.Position,home)).ThenBy(s=>s.Site.Id).FirstOrDefault()??local;
         }
         // Recheck unaccepted goals when a main becomes known, without penalizing the local fallback.
         internal static bool TerritoryAllowed(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiKnowledgeState knowledge,TerritorySiteSnapshot site)
         {
-            var nearest=Select(o,p,ai,knowledge,o.Sites.Where(s=>Free(s,o,p)&&SiteSafe(o,p,knowledge,s)),false);
+            var home=Home(o);
+            var nearest=o.Sites.Where(s=>Free(s,o,p)&&SiteSafe(o,p,knowledge,s))
+                .OrderBy(s=>Distance(s.Site.Position,home)).ThenBy(s=>s.Site.Id).FirstOrDefault();
             return nearest?.Site.Id==site.Site.Id||RemoteAllowed(o,p,ai,knowledge,site);
         }
         internal static bool SiteSafe(PlayableAiObservation o,PlayableProfile p,AiKnowledgeState knowledge,TerritorySiteSnapshot s)=>

@@ -91,6 +91,6 @@ namespace Spacewars.Runtime
     }
     internal sealed partial class PlayableAiOwnerLoop
     {
-        internal bool ReservesExecutionSubject(int entity)=>combatMicro.Reserves(entity);
+        internal bool ReservesExecutionSubject(int entity) => combatMicro.ReservesExecutionMotion(entity);
     }
 }

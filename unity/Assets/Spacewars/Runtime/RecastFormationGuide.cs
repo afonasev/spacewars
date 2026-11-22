@@ -88,9 +88,45 @@ namespace Spacewars.Runtime
             }
             layout=candidate;return true;
         }
+#if UNITY_INCLUDE_TESTS
+        [ThreadStatic] internal static bool DisableTraceObservationForTests;
+        [ThreadStatic] internal static int TraceObservationsForTests;
+#endif
+        private static bool CanObserveTrace(NavTypedRoute route,PartitionNavigationProvider provider)
+        {
+#if UNITY_INCLUDE_TESTS
+            if(DisableTraceObservationForTests)return false;
+#endif
+            return route.IsImmutableCaptureRoot&&((INavStorageFacade)provider).StorageRoot?.IsImmutableCaptureRoot==true;
+        }
+        private sealed class LayoutTraceObservation
+        {
+            private readonly PartitionNavigationProvider provider;private readonly NavTypedRoute route;private readonly INavStorageReservation reservation;private readonly int last;
+            internal int Next;internal bool Accepted=true;
+            internal LayoutTraceObservation(PartitionNavigationProvider provider,NavTypedRoute route,int first,int last,INavStorageReservation reservation){this.provider=provider;this.route=route;Next=first;this.last=last;this.reservation=reservation;}
+            internal void Segment(NavLocation a,NavLocation b,double cost,NavTypedLegKind kind,string portal)
+            {
+                provider.CanonicalTraceSegment(ref a,ref b,ref portal,reservation);
+                if(!Accepted||kind!=NavTypedLegKind.Portal)return;
+                if(Next>last||route.Legs[Next].PortalId!=portal||route.Legs[Next].From.SurfaceId!=a.SurfaceId||route.Legs[Next].To.SurfaceId!=b.SurfaceId){Accepted=false;return;}
+                do{Next++;}while(Next<=last&&route.Legs[Next].Kind!=NavTypedLegKind.Portal);
+            }
+        }
         private static bool Trace(PartitionNavigationProvider provider,NavTypedRoute route,int first,int last,NavLocation from,NavPoint to,INavStorageReservation r)
         {
             var clearance=new NavClearanceProfile("ground",1,"ground",(int)route.Subscription.MobilityRevision,route.RecastPlan.Spine.Radius);
+            if(CanObserveTrace(route,provider)){
+                // Layout checks discard their trace immediately. Observe every
+                // exact certified leg without creating those temporary owners.
+                using(NavStorageScratch.Reserve(r,checked(NavStorageLayout.ObjectBytesBound(typeof(LayoutTraceObservation))+256))){
+                    var observation=new LayoutTraceObservation(provider,route,first,last,r);
+                    bool traced=provider.TryObserveTrace(from,to,clearance,r,observation.Segment,out var observed);
+#if UNITY_INCLUDE_TESTS
+                    TraceObservationsForTests++;
+#endif
+                    return traced&&observation.Accepted&&observation.Next>last&&observed.SurfaceId==route.Legs[last].To.SurfaceId;
+                }
+            }
             if(!provider.TryTraceOwned(from,to,clearance,out var reached,out var trace,r))return false;
             try{int next=first;foreach(var leg in trace)if(leg.Kind==NavTypedLegKind.Portal){if(next>last||route.Legs[next].PortalId!=leg.PortalId||route.Legs[next].From.SurfaceId!=leg.From.SurfaceId||route.Legs[next].To.SurfaceId!=leg.To.SurfaceId)return false;do{next++;}while(next<=last&&route.Legs[next].Kind!=NavTypedLegKind.Portal);}return next>last&&reached.SurfaceId==route.Legs[last].To.SurfaceId;}
             finally{(trace as NavOwnedStorage)?.ReleaseOwner();}
@@ -112,7 +148,16 @@ namespace Spacewars.Runtime
             if(!ReferenceEquals(frame.RecastRoutes[row],route)||!AcceptedPreEntry(route,state,actor.Location,portal))return new NavFormationFrameHint{Flags=NavFormationFrameHint.Wait};
             string bank=route.Legs[portal].From.SurfaceId;
             var hint=BankApproach(actor.Location,bank,portal,layout,frontier,role,firstRow,futureRows,frame.Profile.ArrivalTolerance,true);
-            if((hint.Flags&NavFormationFrameHint.Wait)!=0)return hint;
+            if((hint.Flags&NavFormationFrameHint.Wait)!=0){
+                // A body beside the mouth can project ahead of the queue.
+                // Let it follow its certified approach up to the entry portal.
+                if(actor.Location.SurfaceId==bank){
+                    double lateral=RecastFormationMotion.Station(actor.Position,layout.Entry,layout.Normal);
+                    if(lateral<layout.Low-layout.Radius||lateral>layout.High+layout.Radius)
+                        return new NavFormationFrameHint{Flags=NavFormationFrameHint.PreEntry,TargetLeg=portal};
+                }
+                return hint;
+            }
             hint.Flags|=NavFormationFrameHint.PreEntry;
             if(DirectionalAt(layout,route,portal,actor.Location))hint.Flags|=NavFormationFrameHint.Directional;
             if(actor.Location.SurfaceId==bank){
@@ -178,12 +223,14 @@ namespace Spacewars.Runtime
                     // crosses the band edge, avoiding a discontinuous target.
                     // Bodies already inside retain their full accepted forecast.
                     double crossing=(edge-side)/(chosen-side);
-                    station=Math.Min(station,current+(-layout.Radius-current)/crossing);
+                    double bankEntry=-layout.Radius-layout.BankReach;
+                    double boundary=current<bankEntry?bankEntry:-layout.Radius;
+                    station=Math.Min(station,current+(boundary-current)/crossing);
                 }
             }
             return layout.Point(station,lane);
         }
-        internal static NavFormationFrameHint RecoveringApproach(NavPreparedCrowdStep frame,int row,NavTypedRoute route,int portal,Layout layout,int lane,double pace,double dt)
+        internal static NavFormationFrameHint RecoveringApproach(NavPreparedCrowdStep frame,int row,NavTypedRoute route,int portal,Layout layout,int lane,double pace,double dt,bool lastMovingMember=true)
         {
             var actor=frame.After[row];var state=frame.RecastStates[row];
             if(!ReferenceEquals(frame.RecastRoutes[row],route)||!DirectionalAt(layout,route,portal,actor.Location)||state.Phase<0||state.Phase>2)return default;
@@ -236,7 +283,13 @@ namespace Spacewars.Runtime
                 }
                 if(goalStation>=layout.Length+layout.Radius+layout.BankReach)
                 {
-                    if(goalStation>actualStation+frame.Profile.ArrivalTolerance)
+                    // Keep the longitudinal approach while other members are
+                    // still moving through the same exit. The last member can
+                    // keep its certified slot aim after clearing the bank.
+                    bool needsLongitudinalApproach=goalStation>actualStation+frame.Profile.ArrivalTolerance;
+                    if((!needsLongitudinalApproach||lastMovingMember&&actualStation>=layout.Length+layout.Radius+layout.BankReach) &&
+                        ReachesSlot(actor.Location,state) && Qualify(goal.Position,true)) return hint;
+                    if(needsLongitudinalApproach)
                     {
                         var elbow=layout.BankPoint(goalStation,actor.Position);
                         if(RecastFormationMotion.DirectionalAllows(hint,route,actor.Position,elbow) &&
@@ -244,7 +297,6 @@ namespace Spacewars.Runtime
                             link.PortalCount==0 && link.ToSurface==goal.SurfaceId &&
                             ReachesSlot(new NavLocation(link.To,link.ToSurface),link.After) && Qualify(elbow,true)) return hint;
                     }
-                    else if(ReachesSlot(actor.Location,state) && Qualify(goal.Position,true)) return hint;
                 }
             }
             if((layout.BankReach==0||layout.Station(actor.Position)>=layout.Length+layout.Radius+layout.BankReach)&&actor.routeIndex<actor.route.Length&&RecastFormationMotion.DirectionalTailAllows(hint,route,actor.Position,actor.route,actor.routeIndex,actor.Goal)&&
@@ -298,11 +350,28 @@ namespace Spacewars.Runtime
                         var memberPhase=FindPhase(group,e.Entity);if(memberPhase==GroupMemberPhase.PendingRoute||memberPhase==GroupMemberPhase.Allocating)pending=true;else entries[i]=e.WithStage(RecastPassageStage.Tombstone);continue;
                     }
                     var route=owner.Corridor.TypedRoute;if(route.RecastPlan==null){entries[i]=e.WithStage(RecastPassageStage.Tombstone);continue;}
-                    if(plan.Phase!=RecastFormationPhase.Collecting&&(e.Request!=route.Subscription.RequestSequence||e.SpineIndex<0||e.SpineIndex>=plan.Spines.Count||plan.Spines[e.SpineIndex].Binding!=route.RecastPlan.Spine.Binding))throw new ArgumentException("Formation accepted route binding changed.");
+                    // A newly accepted route ends this member's old passage role.
+                    // Keep the frozen mapping (including its vacated rank), never
+                    // attach the replacement to an old spine or stop the match.
+                    if(plan.Phase!=RecastFormationPhase.Collecting&&e.Request!=route.Subscription.RequestSequence){rows[i]=-1;entries[i]=e.WithStage(RecastPassageStage.Tombstone);continue;}
+                    if(plan.Phase!=RecastFormationPhase.Collecting&&(e.SpineIndex<0||e.SpineIndex>=plan.Spines.Count||plan.Spines[e.SpineIndex].Binding!=route.RecastPlan.Spine.Binding))throw new ArgumentException("Formation accepted route binding changed.");
                     var recipe=owner.Corridor.Recipe;route.RecastPlan.ValidateBindings(recipe.GraphKey,owner.Corridor.ProviderOwner.Provider.Binding,recipe.Profile.ExactProfileBinding,owner.Request.Request.HeldIdentity,recipe.Clearance.Radius,owner.Request.Request.Geometry.Revision);NavContract.Sha256(route.RecastPlan.Spine.MapBinding);
                     routes[i]=route;valid++;if(MemberEligible(row,e.Entity))eligibleCount++;order[i]=i;
                 }
-                if(plan.Phase==RecastFormationPhase.Collecting&&pending){for(int i=0;i<n;i++)if(MemberEligible(rows[i],entries[i].Entity)){int row=rows[i];frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.Wait};frame.Preferred[row]=0;}return null;}
+                if(plan.Phase==RecastFormationPhase.Collecting&&pending){
+                    // Every accepted route must contain both portals of the passage.
+                    // Waiting for another route cannot add a portal to an installed route.
+                    foreach(var route in routes){
+                        if(route==null)continue;
+                        int portals=0;
+                        foreach(var leg in route.Legs)if(leg.Kind==NavTypedLegKind.Portal&&++portals==2)break;
+                        if(portals<2){ResetCaps();clearCollecting=true;return null;}
+                    }
+                    for(int i=0;i<n;i++)if(MemberEligible(rows[i],entries[i].Entity)){
+                        int row=rows[i];frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.Wait};frame.Preferred[row]=0;
+                    }
+                    return null;
+                }
                 string entry=plan.EntryPortal,exit=plan.ExitPortal;Layout layout=default;NavTypedRoute representative=null;
                 double bankReach=NavRecastSpine.Finite(minimumPace)?minimumPace*Math.Max(dt,frame.Profile.CrowdLookaheadSeconds):0;
                 bool GroupLayout(string ea,string eb,out Layout result){
@@ -324,19 +393,72 @@ namespace Spacewars.Runtime
                     for(int i=0;i<n;i++)if(routes[i]!=null&&(routes[i].RecastPlan.Spine.MapBinding!=representative.RecastPlan.Spine.MapBinding||routes[i].RecastPlan.Spine.ProviderBinding!=representative.RecastPlan.Spine.ProviderBinding||routes[i].RecastPlan.Spine.ProfileBinding!=representative.RecastPlan.Spine.ProfileBinding||routes[i].RecastPlan.Spine.KnowledgeBinding!=representative.RecastPlan.Spine.KnowledgeBinding)){ResetCaps();clearCollecting=true;return null;}
                     bool found=false;for(int a=0;a<representative.Legs.Count&&!found;a++)if(representative.Legs[a].Kind==NavTypedLegKind.Portal){int b=a+1;while(b<representative.Legs.Count&&representative.Legs[b].Kind!=NavTypedLegKind.Portal)b++;if(b>=representative.Legs.Count)continue;string ea=representative.Legs[a].PortalId,eb=representative.Legs[b].PortalId;bool common=true;for(int i=0;i<n;i++)if(routes[i]!=null&&(Portal(routes[i],ea)<0||Portal(routes[i],eb)<=Portal(routes[i],ea)))common=false;if(common&&GroupLayout(ea,eb,out layout)){entry=ea;exit=eb;found=true;}}
                     if(!found){ResetCaps();clearCollecting=true;return null;}
-                    int k=0;for(int i=0;i<n;i++)if(routes[i]!=null){order[k++]=i;distances[i]=RemainingApproach(frame,rows[i],routes[i],installed[rows[i]],Portal(routes[i],entry),r);}
+                    int k=0;
+                    for(int i=0;i<n;i++){
+                        if(routes[i]==null){
+                            // Excluded members may rejoin while collecting, but once
+                            // the mapping freezes they have no passage role to resume.
+                            entries[i]=entries[i].WithStage(RecastPassageStage.Tombstone);
+                            continue;
+                        }
+                        order[k++]=i;
+                        distances[i]=RemainingApproach(frame,rows[i],routes[i],installed[rows[i]],Portal(routes[i],entry),r);
+                    }
                     Array.Sort(order,0,k,Comparer<int>.Create((a,b)=>{int c=distances[a].CompareTo(distances[b]);return c!=0?c:entries[a].Slot.CompareTo(entries[b].Slot);}));
                     for(int j=0;j<k;j++){int i=order[j],spine=-1;for(int p=0;p<pathCount;p++)if(paths[p].Binding==routes[i].RecastPlan.Spine.Binding)spine=p;if(spine<0){spine=pathCount;paths[pathCount++]=routes[i].RecastPlan.Spine;}var e=entries[i];entries[i]=new RecastFormationEntry(e.Entity,e.Slot,spine,j,j%layout.Lanes,RecastPassageStage.Staging,e.Incarnation,e.Order,e.Mobility,routes[i].Subscription.RequestSequence);}
-                }else{for(int i=0;i<n;i++)if(routes[i]!=null){representative=routes[i];break;}if(representative==null)return null;if(!GroupLayout(entry,exit,out layout)||layout.Lanes!=plan.LaneCount)throw new ArgumentException("Formation passage geometry changed.");for(int i=0;i<plan.Spines.Count;i++)paths[pathCount++]=plan.Spines[i];}
+                }else{for(int i=0;i<n;i++)if(routes[i]!=null){representative=routes[i];break;}if(representative==null){
+                    // Publish retirement even when the last accepted member was
+                    // replaced; otherwise every frame sees the stale live role.
+                    for(int i=0;i<n;i++)if(entries[i].Stage!=plan.Entries[i].Stage)
+                        return RecastFormationPlan.Create(plan.World,plan.Group,plan.RootOrder,plan.Command,plan.BirthMembership,plan.LaneCount,plan.Phase,plan.FrontAnchor,plan.AnchorInitialized,entry,exit,entries,plan.Spines,r,expectedSeal:plan.Seal);
+                    return null;
+                }if(!GroupLayout(entry,exit,out layout)||layout.Lanes!=plan.LaneCount)throw new ArgumentException("Formation passage geometry changed.");for(int i=0;i<plan.Spines.Count;i++)paths[pathCount++]=plan.Spines[i];}
                 // Only a finite physical window receives narrow roles. Vacated
                 // rows release capacity immediately; survivor ranks never reset.
                 // Reprojecting the reached lane endpoint can round one ULP below its station.
                 // Use the same geometric epsilon as the forward sweep at this boundary.
                 double exitStation=layout.Length+layout.Radius-1e-9;
-                int baseRow=int.MaxValue;for(int i=0;i<n;i++)if(routes[i]!=null&&entries[i].Stage!=RecastPassageStage.Recovering&&entries[i].Stage!=RecastPassageStage.Tombstone){var e=entries[i];if(layout.Station(frame.After[rows[i]].Position)>=exitStation||!frame.After[rows[i]].Moving||Unmapped(group,e.Entity)){entries[i]=e.WithStage(RecastPassageStage.Recovering);continue;}baseRow=Math.Min(baseRow,e.EntryOrdinal/layout.Lanes);}
+                bool BeforeEntry(int row,NavTypedRoute route)
+                {
+                    return ReferenceEquals(frame.RecastRoutes[row],route)&&
+                        AcceptedPreEntry(route,frame.RecastStates[row],frame.After[row].Location,Portal(route,entry));
+                }
+                int baseRow=int.MaxValue;
+                for(int i=0;i<n;i++){
+                    var route=routes[i];var e=entries[i];
+                    if(route==null||e.Stage==RecastPassageStage.Tombstone)continue;
+                    int row=rows[i];var actor=frame.After[row];
+                    if(!actor.Moving||Unmapped(group,e.Entity)||
+                        ReferenceEquals(frame.RecastRoutes[row],route)&&frame.RecastStates[row].Cursor>Portal(route,exit)&&layout.Station(actor.Position)>=exitStation){
+                        entries[i]=e.WithStage(RecastPassageStage.Recovering);continue;
+                    }
+                    // An outer-ring approach can project beyond the exit plane
+                    // while still needing the entrance. Rejoin the same rank if
+                    // a saved plan had already moved this member to recovery.
+                    if(e.Stage==RecastPassageStage.Recovering){
+                        if(!BeforeEntry(row,route))continue;
+                        entries[i]=e=e.WithStage(RecastPassageStage.Staging);
+                    }
+                    baseRow=Math.Min(baseRow,e.EntryOrdinal/layout.Lanes);
+                }
                 int window=Math.Max(1,(int)Math.Floor(layout.Length/layout.Pitch));double pace=double.PositiveInfinity,minimum=double.PositiveInfinity;
                 for(int i=0;i<n;i++)if(routes[i]!=null&&MemberEligible(rows[i],entries[i].Entity))pace=Math.Min(pace,frame.After[rows[i]].Speed);
-                bool changed=plan.Phase==RecastFormationPhase.Collecting;for(int i=0;i<n;i++)if(routes[i]!=null){var e=entries[i];int role=e.EntryOrdinal/layout.Lanes;if(e.Stage==RecastPassageStage.Staging&&role<baseRow+window){entries[i]=e=e.WithStage(RecastPassageStage.Admitted);changed=true;}if(e.Stage==RecastPassageStage.Admitted)minimum=Math.Min(minimum,layout.Station(frame.After[rows[i]].Position)+role*layout.Pitch);}
+                double bankEdge=-layout.Radius-layout.BankReach;
+                bool changed=plan.Phase==RecastFormationPhase.Collecting;
+                for(int i=0;i<n;i++)if(routes[i]!=null)
+                {
+                    var e=entries[i];int row=rows[i],role=e.EntryOrdinal/layout.Lanes;
+                    if(e.Stage==RecastPassageStage.Staging&&role<baseRow+window)
+                    {
+                        entries[i]=e=e.WithStage(RecastPassageStage.Admitted);changed=true;
+                    }
+                    if(e.Stage!=RecastPassageStage.Admitted||!MemberEligible(row,e.Entity))continue;
+                    double station=layout.Station(frame.After[row].Position);
+                    // The frozen role admits an approach. It only contributes
+                    // to passage spacing once the actor reaches the certified bank.
+                    if(BeforeEntry(row,routes[i])&&station<bankEdge-frame.Profile.ArrivalTolerance)continue;
+                    minimum=Math.Min(minimum,station+role*layout.Pitch);
+                }
                 bool initialized=!double.IsPositiveInfinity(minimum);double anchor=initialized?(plan.AnchorInitialized?Math.Min(minimum,plan.FrontAnchor+pace*dt):minimum):0;
                 double rear=double.PositiveInfinity;for(int i=0;i<n;i++)if(routes[i]!=null&&entries[i].Stage==RecastPassageStage.Admitted&&MemberEligible(rows[i],entries[i].Entity))rear=Math.Min(rear,layout.Station(frame.After[rows[i]].Position));
                 double frontier=BankFrontier(layout,rear);int firstStagingRow=0,lastStagingRowExclusive=0;
@@ -345,9 +467,30 @@ namespace Spacewars.Runtime
                 // own-row caps select a subset; the admitted window stays fixed.
                 int futureRows=lastStagingRowExclusive>firstStagingRow?lastStagingRowExclusive-firstStagingRow:0;
                 for(int i=0;i<n;i++)if(routes[i]!=null&&MemberEligible(rows[i],entries[i].Entity)){int row=rows[i];var e=entries[i];double bound=Math.Min(frame.After[row].Speed,pace);frame.Preferred[row]=frame.RecastReceiver[row]=bound;
+                    if(BeforeEntry(row,routes[i])&&layout.Station(frame.After[row].Position)>=exitStation){
+                        // Follow the owned approach outside the passage. Only an
+                        // admitted row may cross the entrance while approaching.
+                        if(e.Stage==RecastPassageStage.Staging)frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.PreEntry,TargetLeg=Portal(routes[i],entry)};
+                        continue;
+                    }
                     if(e.Stage==RecastPassageStage.Staging){int portal=Portal(routes[i],entry);frame.Formation[row]=StagingApproach(frame,row,routes[i],portal,layout,frontier,e.EntryOrdinal/layout.Lanes,e.Lane,firstStagingRow,futureRows,pace,dt);if((frame.Formation[row].Flags&NavFormationFrameHint.Wait)!=0)frame.Preferred[row]=0;continue;}
-                    if(e.Stage==RecastPassageStage.Recovering){frame.Formation[row]=RecoveringApproach(frame,row,routes[i],Portal(routes[i],entry),layout,e.Lane,pace,dt);continue;}
-                    if(e.Stage!=RecastPassageStage.Admitted)continue;double nominal=(e.EntryOrdinal/layout.Lanes)*layout.Pitch;double limit=anchor+group.Data.MarchStretch-nominal;double station=layout.Station(frame.After[row].Position);double lookahead=pace*Math.Max(dt,frame.Profile.CrowdLookaheadSeconds);double targetStation=Math.Min(layout.Length+layout.Radius+layout.BankReach,Math.Max(station,limit)+lookahead);var target=Aim(layout,frame.After[row].Position,targetStation,e.Lane);var state=frame.RecastRoutes[row]!=null?frame.RecastStates[row]:NavRecastIntervals.Initial(routes[i]);
+                    if(e.Stage==RecastPassageStage.Recovering){frame.Formation[row]=RecoveringApproach(frame,row,routes[i],Portal(routes[i],entry),layout,e.Lane,pace,dt,eligibleCount==1);continue;}
+                    if(e.Stage!=RecastPassageStage.Admitted)continue;
+                    double nominal=(e.EntryOrdinal/layout.Lanes)*layout.Pitch;
+                    double limit=anchor+group.Data.MarchStretch-nominal;
+                    if(BeforeEntry(row,routes[i]))
+                    {
+                        // The anchor is a passage-space coordinate. Outside the
+                        // certified bank, a following route can approach from a
+                        // different side or around an obstacle. Let admitted
+                        // members reach the bank while retaining the role bound
+                        // through the shared passage and its exit.
+                        limit=initialized?Math.Max(limit,bankEdge):bankEdge;
+                    }
+                    double station=layout.Station(frame.After[row].Position),lookahead=pace*Math.Max(dt,frame.Profile.CrowdLookaheadSeconds);
+                    double targetStation=Math.Min(layout.Length+layout.Radius+layout.BankReach,Math.Max(station,limit)+lookahead);
+                    var target=Aim(layout,frame.After[row].Position,targetStation,e.Lane);
+                    var state=frame.RecastRoutes[row]!=null?frame.RecastStates[row]:NavRecastIntervals.Initial(routes[i]);
                     // One lane objective continues through the already certified exit
                     // collar in both Admitted and Recovering. The seam lip is not
                     // a parked destination; stopping all rows there blocks drainage.
@@ -356,8 +499,12 @@ namespace Spacewars.Runtime
                     // owner filter still enforces the unchanged forward limit.
                     // A guide is temporary. The installed route and assigned
                     // endpoint remain the motor's authoritative intent.
-                    bool can=NavRecastIntervals.Advance(routes[i],state,frame.After[row].Location,target,r,out _,frame.Working,frame.After[row].Id);
-                    frame.Formation[row]=new NavFormationFrameHint{Target=target,TargetLeg=Portal(routes[i],entry),ForwardLimit=limit,DirectionalBankReach=can?layout.BankReach:0,Flags=(byte)(NavFormationFrameHint.Bound|(can?NavFormationFrameHint.Guide:0)|(DirectionalAt(layout,routes[i],Portal(routes[i],entry),frame.After[row].Location)?NavFormationFrameHint.Directional:0))};
+                    // A short sweep on the entry support can reach an unrelated
+                    // road far from the passage. Keep the accepted approach until
+                    // the forecast actually reaches the certified entry collar.
+                    bool withinPassageForecast=!BeforeEntry(row,routes[i])||layout.Station(target)>=-layout.Radius-layout.BankReach-1e-9;
+                    bool can=withinPassageForecast&&NavRecastIntervals.Advance(routes[i],state,frame.After[row].Location,target,r,out _,frame.Working,frame.After[row].Id);
+                    frame.Formation[row]=new NavFormationFrameHint{Target=target,TargetLeg=Portal(routes[i],entry),ForwardLimit=limit,DirectionalBankReach=can?layout.BankReach:0,Flags=(byte)(NavFormationFrameHint.Bound|(can?NavFormationFrameHint.Guide:0)|(DirectionalAt(layout,routes[i],Portal(routes[i],entry),frame.After[row].Location)?NavFormationFrameHint.Directional|NavFormationFrameHint.StrictBankEntry:0))};
                     // Keep accepted origin bends and avoidance eligible. The physical
                     // filter caps only own forward translation at the role limit.
                     frame.Preferred[row]=bound;

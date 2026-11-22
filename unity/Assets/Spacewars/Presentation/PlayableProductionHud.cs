@@ -9,6 +9,11 @@ namespace Spacewars.Presentation
         // Canonical six-slot queue is a structural UI contract, matching domain admission.
         private readonly ProductionSlot[] productionSlots=new ProductionSlot[6];
         private int productionFactory;
+        private bool productionIdleApplied;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        private static readonly bool disableProductionIdleReuse=
+            System.Environment.GetEnvironmentVariable("SPACEWARS_QA_DISABLE_PRODUCTION_IDLE_REUSE")=="1";
+#endif
         private sealed class ProductionSlot
         {
             public Button Button;
@@ -17,13 +22,23 @@ namespace Spacewars.Presentation
         }
         private void CreateProductionHud(VisualElement parent)
         {
+            productionIdleApplied=false;
             hawkButton.tooltip="ЛКМ — оплатить Ястреба. ПКМ — повтор.";
             hawkButton.RegisterCallback<PointerDownEvent>(evt=>{if(evt.button!=1)return;if(productionFactory!=0)Submit(PlayableCommandKind.ToggleRepeatProduction,new[]{productionFactory},unitKind:PlayableEntityKind.Hawk);root.Focus();evt.StopImmediatePropagation();},TrickleDown.TrickleDown);
+            skatButton.RegisterCallback<PointerDownEvent>(evt =>
+            {
+                if (evt.button != 1) return;
+                if (productionFactory != 0) Submit(PlayableCommandKind.ToggleRepeatProduction, new[]{productionFactory}, unitKind:PlayableEntityKind.Skat);
+                root.Focus();
+                evt.StopImmediatePropagation();
+            },TrickleDown.TrickleDown);
             shkvalButton.tooltip="ЛКМ — оплатить Шквал. ПКМ — повтор.";
+            iglaButton.RegisterCallback<PointerDownEvent>(evt=>{if(evt.button!=1)return;if(productionFactory!=0)Submit(PlayableCommandKind.ToggleRepeatProduction,new[]{productionFactory},unitKind:PlayableEntityKind.Igla);root.Focus();evt.StopImmediatePropagation();},TrickleDown.TrickleDown);
+            cerberusButton.RegisterCallback<PointerDownEvent>(evt=>{if(evt.button!=1)return;if(productionFactory!=0)Submit(PlayableCommandKind.ToggleRepeatProduction,new[]{productionFactory},unitKind:PlayableEntityKind.Cerberus);root.Focus();evt.StopImmediatePropagation();},TrickleDown.TrickleDown);
             shkvalButton.RegisterCallback<PointerDownEvent>(evt=>{if(evt.button!=1)return;if(productionFactory!=0)Submit(PlayableCommandKind.ToggleRepeatProduction,new[]{productionFactory},unitKind:PlayableEntityKind.Shkval);root.Focus();evt.StopImmediatePropagation();},TrickleDown.TrickleDown);
             explorerButton.tooltip="ЛКМ — оплатить Исследователя. ПКМ — повтор.";
             explorerButton.RegisterCallback<PointerDownEvent>(evt=>{if(evt.button!=1)return;if(productionFactory!=0)Submit(PlayableCommandKind.ToggleRepeatProduction,new[]{productionFactory},unitKind:PlayableEntityKind.Explorer);root.Focus();evt.StopImmediatePropagation();},TrickleDown.TrickleDown);
-            tankButton.tooltip="ЛКМ — оплатить танк. ПКМ — включить или выключить повтор.";
+            tankButton.tooltip="ЛКМ — заказать Вепря. ПКМ — включить или выключить повтор.";
             tankButton.RegisterCallback<PointerDownEvent>(evt=>
             {
                 if(evt.button!=1)return;
@@ -49,7 +64,7 @@ namespace Spacewars.Presentation
             }
         }
         private static string ProductionName(PlayableProductionOrderSnapshot o)=>o.IsUpgrade?"Улучшение здания":UnitName(o.Kind);
-        private static string UnitName(PlayableEntityKind kind)=>kind==PlayableEntityKind.Hawk?"Ястреб":kind==PlayableEntityKind.Shkval?"Шквал":kind==PlayableEntityKind.Explorer?"Исследователь":"Танк";
+        private static string UnitName(PlayableEntityKind kind)=>OfflinePadWorldActions.Name(kind);
         private void CancelProductionSlot(ProductionSlot slot)
         {
             if(!spectatorMode&&slot.Factory!=0&&slot.Order!=0)
@@ -57,23 +72,47 @@ namespace Spacewars.Presentation
         }
         private void UpdateProductionHud(PlayableBuildingSnapshot factory)
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.HudProduction);
+            var population=view.Population;
+            if(population!=null&&hudFocusButton==null)selectionLabel.text+=" · Армия: "+population.Living+" (+"+population.Reserved+") / "+population.Capacity;
+            // The first empty update clears all action bindings and hides the
+            // queue. A newly selected producer always refreshes its current view.
+            bool reuseIdle=factory==null&&productionIdleApplied;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            reuseIdle&=!disableProductionIdleReuse;
+#endif
+            if(reuseIdle)return;
+            productionIdleApplied=false;
             productionFactory=factory?.Id??0;
             productionSlots[0].Button.parent.style.display=factory==null?DisplayStyle.None:DisplayStyle.Flex;
-            tankButton.style.display=factory==null||factory.Kind==PlayableBuildingKind.Hangar?DisplayStyle.None:DisplayStyle.Flex;explorerButton.style.display=tankButton.style.display;shkvalButton.style.display=tankButton.style.display;
+            tankButton.style.display=factory==null||factory.Kind==PlayableBuildingKind.Hangar?DisplayStyle.None:DisplayStyle.Flex;explorerButton.style.display=tankButton.style.display;iglaButton.style.display=cerberusButton.style.display=shkvalButton.style.display=tankButton.style.display;
             hawkButton.style.display=factory?.Kind==PlayableBuildingKind.Hangar?DisplayStyle.Flex:DisplayStyle.None;
 
+            skatButton.style.display=hawkButton.style.display;
             queueLabel.style.display=factory==null?DisplayStyle.None:DisplayStyle.Flex;
             var state=factory?.PrivateState;
-            foreach(var item in new[]{(hawkButton,PlayableEntityKind.Hawk),(tankButton,PlayableEntityKind.Tank),(explorerButton,PlayableEntityKind.Explorer),(shkvalButton,PlayableEntityKind.Shkval)})item.Item1.tooltip=PlayableMenuDescriptions.Unit(profile,item.Item2,view.OwnerResearch,freeEconomy:provingGround!=null)+"\nЛКМ — разовый заказ. ПКМ — повтор.";
+            foreach(var item in new[]{(hawkButton,PlayableEntityKind.Hawk),(skatButton,PlayableEntityKind.Skat),(tankButton,PlayableEntityKind.Tank),(explorerButton,PlayableEntityKind.Explorer),(cerberusButton,PlayableEntityKind.Cerberus),(iglaButton,PlayableEntityKind.Igla),(shkvalButton,PlayableEntityKind.Shkval)})item.Item1.tooltip=PlayableMenuDescriptions.Unit(profile,item.Item2,view.OwnerResearch,freeEconomy:provingGround!=null)+"\nЛКМ — разовый заказ. ПКМ — повтор.";
             bool enabled=!spectatorMode&&factory!=null&&!factory.SystemsDisabled&&factory.Phase==ConstructionPhase.Ready&&state?.Lifecycle?.Selling!=true&&view.Outcome==PlayableMatchOutcome.Playing&&!paused&&!restarting;
             hawkButton.SetEnabled(enabled);hawkButton.text="Ястреб · "+(provingGround!=null?"бесплатно":profile.HawkCreditCost.ToString())+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Hawk?" · Повтор ВКЛ":"");
             bool shkvalReady=OfflinePadWorldActions.ShkvalAvailable(view);
+            bool skatRepeat = state?.Repeat == true && state.RepeatKind == PlayableEntityKind.Skat;
+            skatButton.SetEnabled(enabled && (shkvalReady || skatRepeat));
+            skatButton.text = "Скат · "+(provingGround!=null?"бесплатно":profile.SkatCreditCost.ToString())+(skatRepeat?" · Повтор ВКЛ":"");
+            if (!shkvalReady) skatButton.tooltip += "\nНужен готовый собственный Научный центр";
+            bool iglaReady=OfflinePadWorldActions.ShkvalAvailable(view);
+            bool repeatIgla=state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Igla;
+            iglaButton.SetEnabled(enabled&&(iglaReady||repeatIgla));
+            iglaButton.text="Игла · "+(provingGround!=null?"бесплатно":profile.IglaCreditCost.ToString())+(repeatIgla?" · Повтор ВКЛ":"");
+            if(!iglaReady)iglaButton.tooltip+="\nНужен готовый собственный Научный центр";
+            bool cerberusReady=OfflinePadWorldActions.CerberusAvailable(view);
+            bool repeatCerberus=state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Cerberus;
+            cerberusButton.SetEnabled(enabled&&(cerberusReady||repeatCerberus));
+            cerberusButton.text="Цербер · "+(provingGround!=null?"бесплатно":profile.CerberusCreditCost.ToString())+(repeatCerberus?" · Повтор ВКЛ":"");
+            if(!cerberusReady)cerberusButton.tooltip+="\nНужен готовый улучшенный Научный центр";
             shkvalButton.SetEnabled(enabled&&(shkvalReady||state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Shkval));
             if(!shkvalReady)shkvalButton.tooltip+="\nНужен готовый собственный Научный центр";shkvalButton.text="Шквал · "+(provingGround!=null?"бесплатно":profile.ShkvalCreditCost.ToString())+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Shkval?" · Повтор ВКЛ":"");
             explorerButton.SetEnabled(enabled);explorerButton.text="Исследователь · "+(provingGround!=null?"бесплатно":profile.ExplorerCreditCost.ToString())+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Explorer?" · Повтор ВКЛ":"");
-            tankButton.SetEnabled(enabled);tankButton.text="Танк · "+(provingGround!=null?"бесплатно":profile.TankCreditCost.ToString())+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Tank?" · Повтор ВКЛ":"");
-            var population=view.Population;
-            if(population!=null&&hudFocusButton==null)selectionLabel.text+=" · Армия: "+population.Living+" (+"+population.Reserved+") / "+population.Capacity;
+            tankButton.SetEnabled(enabled);tankButton.text=OfflinePadWorldActions.VeprName+" · "+(provingGround!=null?"бесплатно":profile.TankCreditCost.ToString())+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Tank?" · Повтор ВКЛ":"");
             var orders=state?.Orders;
             var head=orders!=null&&orders.Count>0?orders[0]:null;
             queueLabel.text=state==null?"Выберите фабрику":head!=null&&!head.Active?(head.IsUpgrade?head.BlockedReason:"Ожидает места в армии"):head!=null&&!head.IsUpgrade&&head.Remaining==0?"Выход занят — юнит готов":state.Repeat&&head==null?(population.Living+population.Reserved+PlayableUnitRules.Population(profile,state.RepeatKind)>population.Capacity?"Повтор: ожидает места в армии":(provingGround!=null?"Повтор: ожидает выпуска":"Повтор: ожидает оплаты")):"";
@@ -102,6 +141,7 @@ namespace Spacewars.Presentation
                 if(order?.IsUpgrade==true)slot.Button.tooltip+="\n"+(order.BlockedReason??"Ускоряет следующее производство");
                 if(order?.Active==true)slot.Button.text+="\n"+System.Math.Ceiling(order.Remaining)+"с";
             }
+            productionIdleApplied=factory==null;
         }
     }
 }

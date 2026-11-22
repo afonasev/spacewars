@@ -19,7 +19,8 @@ namespace Spacewars.Tests.EditMode
             string output=Environment.GetEnvironmentVariable("SPACEWARS_HAWK_EVIDENCE");Assert.IsNotEmpty(output);Directory.CreateDirectory(output);
             var p=PlayableProfile.ThreeCrossingsDefault;var setup=new NativeLobbyConfiguration{HasExplicitSeed=true,ExplicitSeed=1024700465};setup.InitializeParticipants();
             var config=NativeLobbyMatch.Create(p,setup);var runtime=new PlayableRuntime(config,81,startPaused:true);var host=new UnityHostRouteService();
-            object domain=typeof(PlayableRuntime).GetField("domain",hidden).GetValue(runtime);var nav=(NavigationSession)domain.GetType().GetProperty("Navigation",hidden).GetValue(domain);
+            var domain=(PlayableDomain)typeof(PlayableRuntime).GetField("domain",hidden).GetValue(runtime);var nav=domain.Navigation;
+            domain.VerifyAirInputReuseForTests=true;
             using var log=new StreamWriter(Path.Combine(output,"flight.csv")){AutoFlush=true};log.WriteLine("seconds,tick,stage,phase,unit,x,z,altitude,moving,outcome");
             try
             {
@@ -44,6 +45,11 @@ namespace Spacewars.Tests.EditMode
                 }
                 string result=$"buildApplied={buildApplied} orderApplied={orderApplied} moveApplied={moveApplied} built={built} spawned={spawned} moved={moved} arrived={arrived} aircraft={aircraft} firstMotionSeconds={firstMotion:R} seconds={clock.Elapsed.TotalSeconds:R}";File.WriteAllText(Path.Combine(output,"result.txt"),result);TestContext.WriteLine(result);
                 Assert.True(buildApplied&&orderApplied&&moveApplied,"Actual command receipts");Assert.True(built&&spawned,"Actual hangar production and independent takeoff");Assert.True(moved&&arrived,"Aircraft must physically move and arrive through ordinary threaded match");Assert.True(nav.HasCertifiedHost,"Ordinary threaded host remains bound");
+                int wireChecks=Volatile.Read(ref domain.VerifiedAirInputReusesForTests);
+                int templateChecks=Volatile.Read(ref domain.VerifiedAirInputTemplatesForTests);
+                Assert.Greater(wireChecks,0,"Ordinary Air revalidation compared the reused bytes to a complete independent write");
+                Assert.Greater(templateChecks,0,"Paid static input template produced the same complete wire on later ticks");
+                TestContext.WriteLine("AIR_WIRE_EXACT checks="+wireChecks+" template_checks="+templateChecks);
             }
             finally
             {

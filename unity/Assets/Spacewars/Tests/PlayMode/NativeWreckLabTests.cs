@@ -42,4 +42,26 @@ public sealed class NativeWreckLabTests
             view.Page.Q<Button>("lab-back").Focus();navigation.Activate();Assert.True(closed);Assert.AreEqual(revision,store.Active.Revision);Assert.IsNull(NativeBalanceFields.ValidateLiveDifference(baseline,store.Active));
         }finally{navigation.Dispose();panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);Directory.Delete(directory,true);}
     }
+    [UnityTest] public IEnumerator RepairDroneChanceSavesReloadsAndKeepsHawkIndependent()
+    {
+        var host=new GameObject("Drone wreck lab");var panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");
+        var doc=host.AddComponent<UIDocument>();doc.panelSettings=panel;var root=doc.rootVisualElement;OrbitalTheme.Install(root);root.style.width=1280;root.style.height=900;
+        var navigation=new NativeMenuNavigation(root);var directory=Path.Combine(Path.GetTempPath(),"spacewars-drone-wreck-lab-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        var texture=new RenderTexture(1280,900,24);texture.Create();panel.targetTexture=texture;OrbitalTheme.ConfigurePanel(panel,root);
+        try{
+            var path=Path.Combine(directory,"balance.json");var store=new NativeBalanceStore(PlayableProfile.Default,path);double hawk=store.Active.HawkWreckChancePercent;
+            var view=new NativeBalanceView(root,navigation,store,()=>{});
+            yield return null;view.Page.Q<TextField>("lab-search").value="Вероятность падения Ската";yield return null;
+            var chance=view.Page.Q<TextField>("lab-field-skatWreckChancePercent");Assert.NotNull(chance);Assert.AreEqual("30",chance.value);chance.value="31";
+            var field=PlayableProfileMetadata.WreckFields.Single(f=>f.FieldName=="skatWreckChancePercent");Assert.True(NativeBalanceFields.LabEditable(field));Assert.AreEqual("%",field.Unit);Assert.AreEqual(1,field.Step);Assert.AreEqual("Остовы",NativeBalanceLabels.Entity(field));
+            view.Page.Q<Button>("lab-save").Focus();navigation.Activate();yield return null;
+            int revision=(int)store.State["revisions"][store.State["revisions"].Count()-1]["revision"];var saved=new NativeBalanceStore(PlayableProfile.Default,path).Resolve(revision);
+            Assert.AreEqual(31,saved.SkatWreckChancePercent);Assert.AreEqual(hawk,saved.HawkWreckChancePercent);store.Select(revision);
+            Assert.AreEqual(31,new NativeBalanceStore(PlayableProfile.Default,path).Selected.SkatWreckChancePercent);
+            var old=(Newtonsoft.Json.Linq.JObject)store.State["revisions"][0];((Newtonsoft.Json.Linq.JObject)old["data"]).Remove("skatWreckChancePercent");Assert.AreEqual(30,store.Compile(old).SkatWreckChancePercent);
+            var folder=Environment.GetEnvironmentVariable("SPACEWARS_LAB_EVIDENCE")??directory;Directory.CreateDirectory(folder);
+            var previous=RenderTexture.active;var pixels=new Texture2D(texture.width,texture.height,TextureFormat.RGB24,false);
+            try{RenderTexture.active=texture;pixels.ReadPixels(new Rect(0,0,texture.width,texture.height),0,0);pixels.Apply();File.WriteAllBytes(Path.Combine(folder,"skat-wreck-chance.png"),pixels.EncodeToPNG());}finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(pixels);}
+        }finally{navigation.Dispose();panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);Directory.Delete(directory,true);}
+    }
 }

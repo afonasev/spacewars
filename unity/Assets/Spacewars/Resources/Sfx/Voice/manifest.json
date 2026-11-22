@@ -43,6 +43,11 @@
       "sha256": "9333c00b2cac627064b3817d244bd1e072bc8693f039c5537f9a27d4e97488a7"
     },
     {
+      "key": "system-mine-depleted",
+      "text": "Шахта истощена.",
+      "sha256": "71576e71e864e12aa89ce5b282178badb8f4f4260fb6931a1510fae618ca9510"
+    },
+    {
       "key": "system-relay-lost",
       "text": "Вышка потеряна.",
       "sha256": "d26ca4409a02c9d44ef7f46705cccef13a76244cae203df3b3f4b4b00a775e4a"
@@ -116,6 +121,42 @@
       "key": "ally-need-defense",
       "text": "Нужна защита!",
       "sha256": "076869a7601731d1454d62b10a7cdac7b0b7a50e8ed0ab37ae7c4264c706c463"
+    },
+    {
+      "key": "system-nuclear-launch",
+      "text": "Запущена ядерная ракета.",
+      "generator": "macOS Milena, rate 188; system signal EQ/compression/loudness chain",
+      "sha256": "8df0b9d5e7d1707d257f48e0212ad7aefebbc163297c73071e961fe059d31e5b"
+    },
+    {
+      "key": "system-relay-captured",
+      "text": "Вышка захвачена.",
+      "generator": "macOS local Milena, 188 wpm",
+      "sha256": "97d3ac4415fdc5abb59b682af34ad183c90558340da61f5dd5f5a1162673e317"
+    },
+    {
+      "key": "system-domination",
+      "text": "Доминирование.",
+      "generator": "macOS local Milena, 188 wpm",
+      "sha256": "a832694fb49a2c19ffd3ec00819f3a77031dddc5b77a4b5bc43753c405bdeae4"
+    },
+    {
+      "key": "system-domination-lost",
+      "text": "Доминирование прервано.",
+      "generator": "macOS local Milena, 188 wpm",
+      "sha256": "6527876a3f5a1f798914f9d1ea2b44eb774454ef1afdbfbf53e0ad596191d959"
+    },
+    {
+      "key": "system-domination-ninety",
+      "text": "Внимание, до полного доминирования девяносто секунд.",
+      "generator": "macOS local Milena, 188 wpm",
+      "sha256": "e0fcc255f7b9e42cf9efd1330668688d05d323b4cff916ff2dc1cc15d85a3287"
+    },
+    {
+      "key": "system-domination-ten",
+      "text": "Внимание, до полного доминирования десять секунд.",
+      "generator": "macOS local Milena, 188 wpm",
+      "sha256": "e5fe0bcfd3e3653aa3c3cdb331d0707907464c3b87bec1188d1a0f9d5d88fca5"
     }
   ]
 }

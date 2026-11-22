@@ -18,7 +18,7 @@ class AffectedSelectionTests(unittest.TestCase):
                     redirect_stdout(io.StringIO()):
                 selector.main()
             git.assert_called_once_with(['git', 'diff', '--name-only', '-z', 'base-sha', 'HEAD', '--'], cwd=ROOT)
-            self.assertEqual('modules=tools.test_route_performance_qa\ndecision_lab=false\n', output.read_text())
+            self.assertEqual('modules=tools.test_route_performance_qa\ndecision_lab=false\nrecast_native=false\n', output.read_text())
 
     def test_release_helpers_select_their_actual_regressions(self):
         for name,expected in [('publish.py',selector.RELEASE_TESTS),('publish_state.py',selector.RELEASE_TESTS),('build.py',selector.BUILD_TESTS),('build_state.py',selector.BUILD_TESTS)]:
@@ -37,6 +37,11 @@ class AffectedSelectionTests(unittest.TestCase):
         self.assertEqual(['tools.test_route_performance_qa'], result['modules'])
         self.assertFalse(result['decision_lab'])
 
+    def test_scale_report_only_selects_video_identity_contracts(self):
+        self.assertEqual(
+            {'modules': ['tools.test_split_scale_report'], 'decision_lab': False, 'recast_native': False},
+            select(['tools/qa/split_scale_report.py']))
+
     def test_lab_and_its_production_dependencies_require_the_explicit_lab_route(self):
         for path in ['tools/ai-decision-lab/test_runner.py', 'tools/ai-decision-lab/Program.cs',
                      'unity/Assets/Spacewars/Runtime/AiTechnologyFunding.cs',
@@ -47,16 +52,45 @@ class AffectedSelectionTests(unittest.TestCase):
                 self.assertEqual([], result['modules'])
 
     def test_docs_assets_and_unknown_filenames_never_expand_to_full_discovery(self):
-        self.assertEqual({'modules': [], 'decision_lab': False}, select([
+        self.assertEqual({'modules': [], 'decision_lab': False, 'recast_native': False}, select([
             'docs/README.md', 'unity/Assets/Spacewars/Content/model.prefab',
             'tools/unknown.py', 'tools/test_missing.py', 'tools/test_x.py\nmodules=unsafe']))
 
     def test_workflow_selection_is_bounded_and_every_module_exists(self):
         result = select(['.github/workflows/tooling.yml', 'tools/check_qa.py'])
         self.assertTrue(result['decision_lab'])
+        self.assertTrue(result['recast_native'])
         self.assertEqual(5, len(result['modules']))
         for module in result['modules']:
             self.assertTrue((ROOT / Path(module.replace('.', '/') + '.py')).is_file())
+
+    def test_native_dependency_and_test_only_changes_use_mac_job(self):
+        for path in ['native/recast/bridge.cpp', 'native/recast/upstream/Detour/Source/DetourNavMesh.cpp',
+                     'native/recast/CMakeLists.txt', 'tools/test_recast_native.py', 'tools/build_recast.py']:
+            with self.subTest(path=path):
+                result = select([path])
+                self.assertTrue(result['recast_native'])
+                self.assertNotIn('tools.test_recast_native', result['modules'])
+                self.assertFalse(result['decision_lab'])
+
+    def test_packaging_and_plugin_only_changes_select_existing_consumers(self):
+        for path, expected in [
+                ('tools/native-release/package.py', selector.PACKAGE_TESTS),
+                ('tools/native_plugins.py', selector.PLUGIN_TESTS),
+                ('tools/build_recast.py', selector.PLUGIN_TESTS),
+                ('unity/Assets/Spacewars/Plugins/macOS/libspacewars_recast.dylib', selector.PLUGIN_TESTS),
+                ('unity/Assets/Spacewars/Plugins/x86_64/spacewars_recast.dll.meta', selector.PLUGIN_TESTS)]:
+            with self.subTest(path=path):
+                self.assertEqual(select([path])['modules'], sorted(expected))
+
+    def test_native_github_output_is_exposed_without_ubuntu_module(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)/'outputs'
+            with patch('sys.argv', ['select_tooling_tests.py', '--base', 'base', '--github-output', str(output)]), \
+                    patch.object(selector.subprocess, 'check_output', return_value=b'tools/test_recast_native.py\0'), \
+                    redirect_stdout(io.StringIO()):
+                selector.main()
+            self.assertEqual(output.read_text(), 'modules=\ndecision_lab=false\nrecast_native=true\n')
 
     def test_existing_tooling_tests_are_selected_directly_and_deduplicated(self):
         result = select(['tools/test_route_performance_qa.py', 'tools/route_performance_qa.py'])

@@ -9,6 +9,16 @@ namespace Spacewars.Presentation
     public sealed partial class PlayableBootstrap
     {
         private PlayableMapTerrain mapTerrain;
+        private PlayableTacticalMapTerrain tacticalTerrain;
+        private PlayableTacticalMapFog tacticalFog;
+
+        private void BindTacticalMap()
+        {
+            tacticalFog?.Dispose();
+            var detail = (localCoordinator ?? this).tacticalTerrain;
+            tacticalFog = detail != null && detail.Texture ? new PlayableTacticalMapFog(profile, detail.Texture, detail.IsOverhead) : null;
+            tacticalMap.Rebind(profile, tacticalFog?.Texture);
+        }
         private PlayableMapSurface compactMap,tacticalMap;
         private VisualElement tacticalOverlay;
         private Label mapClock;
@@ -26,11 +36,16 @@ namespace Spacewars.Presentation
             mapFrame.style.backgroundColor=new Color(.025f,.05f,.065f,1);mapFrame.style.paddingLeft=mapFrame.style.paddingRight=mapFrame.style.paddingTop=mapFrame.style.paddingBottom=8;
             mapFrame.style.borderLeftWidth=mapFrame.style.borderRightWidth=mapFrame.style.borderTopWidth=mapFrame.style.borderBottomWidth=2;
             var mapEdge=new Color(Cyan.r,Cyan.g,Cyan.b,1);mapFrame.style.borderLeftColor=mapFrame.style.borderRightColor=mapFrame.style.borderTopColor=mapFrame.style.borderBottomColor=mapEdge;tacticalOverlay.Add(mapFrame);
-            tacticalMap=new PlayableMapSurface(profile,mapTerrain.Texture){OwnerPaint=owner=>matchSetup!=null||campaignConfiguration!=null?LobbyPaint(owner):owner==LocalOwner?new Color(.19f,.72f,.77f):owner==PlayableOwner.Enemy?new Color(.93f,.34f,.23f):Color.white};mapFrame.Add(tacticalMap);
+            tacticalMap=new PlayableMapSurface(profile,null){OwnerPaint=owner=>matchSetup!=null||campaignConfiguration!=null?LobbyPaint(owner):owner==LocalOwner?new Color(.19f,.72f,.77f):owner==PlayableOwner.Enemy?new Color(.93f,.34f,.23f):Color.white};mapFrame.Add(tacticalMap);CreateTacticalTeam();
+            BindTacticalMap();
             tacticalOverlay.RegisterCallback<GeometryChangedEvent>(_=>LayoutTacticalMap());
         }
         private void LayoutTacticalMap()
         {
+            if(TacticalTeamActive){LayoutTacticalTeamMap();return;}
+            tacticalMap.parent.style.position=Position.Relative;
+            tacticalMap.parent.style.left=StyleKeyword.Auto;
+            tacticalMap.parent.style.top=StyleKeyword.Auto;
             float size=Mathf.Min((float)profile.MinimapTacticalSize,Mathf.Max(0,tacticalOverlay.contentRect.width-(campaignConfiguration!=null?320:20)),Mathf.Max(0,tacticalOverlay.contentRect.height-20));
             if(campaignConfiguration==null&&mapOpen&&armyComposition!=null&&armyComposition.resolvedStyle.display!=DisplayStyle.None&&armyComposition.worldBound.width>0)
             {
@@ -60,7 +75,11 @@ namespace Spacewars.Presentation
             {
                 if(!tacticalHudOpen){tacticalTopIndex=root.IndexOf(top);tacticalArmyIndex=root.IndexOf(armyComposition);}
                 bottom.style.display=DisplayStyle.None;battleRing.style.display=DisplayStyle.None;
-                top.BringToFront();UpdateArmyCompositionCounts();ShowArmyComposition(false);armyComposition.BringToFront();LayoutTacticalMap();
+                if(!TacticalTeamActive)
+                {
+                    top.BringToFront();UpdateArmyCompositionCounts();ShowArmyComposition(false);armyComposition.BringToFront();
+                }
+                SyncTacticalTeam();LayoutTacticalMap();
             }
             else if(tacticalHudOpen)
             {
@@ -71,36 +90,36 @@ namespace Spacewars.Presentation
                 bottom.style.display=!inLobby&&!preparing?DisplayStyle.Flex:DisplayStyle.None;
                 UpdateArmyCompositionCounts();ShowArmyComposition(armyCompositionHovered||root.focusController?.focusedElement==hudFocusButton);
             }
+            if(!mapOpen)SyncTacticalTeam();
             tacticalHudOpen=mapOpen;
             var coordinator=localCoordinator??this;
             if(coordinator.sharedMapFrame!=null)coordinator.sharedMapFrame.style.display=coordinator.paused||coordinator.ResultsVisible||coordinator.inLobby||coordinator.localPresentations.Any(seat=>seat.mapOpen)?DisplayStyle.None:DisplayStyle.Flex;
         }
         private void PanMap(int kind,Vector2 screen)
         {
-            if(BotCameraLocked||view==null||cameraView==null)return;
+            if(BotSeat||view==null||cameraView==null)return;
             var destination=MapGround(kind,screen);var center=Ground(SeatScreenCenter);
-            cameraView.transform.position+=new Vector3((float)(destination.X-center.X),0,(float)(destination.Z-center.Z));
+            PanCameraManually(new Vector3((float)(destination.X-center.X),0,(float)(destination.Z-center.Z)));
         }
         private void MapSelect(int kind,Vector2 a,Vector2 b,bool shift)
         {
             if(view==null)return;if(scanTargeting){ConfirmScan(MapGround(kind,b),kind==2);return;}confirmSaleBuilding=0;root.Focus();
             if(matchSetup?.Spectator==true)
             {
-                if(BotCameraLocked)return;
                 var destination=MapGround(kind,b);var center=Ground(SeatScreenCenter);
-                cameraView.transform.position+=new Vector3((float)(destination.X-center.X),0,(float)(destination.Z-center.Z));
+                PanCameraManually(new Vector3((float)(destination.X-center.X),0,(float)(destination.Z-center.Z)));
                 Record("spectator map focus="+destination.X+","+destination.Z);if(kind==2)CloseMap();return;
             }
             if(ProvingPreparation){PanMap(kind,b);if(kind==2)CloseMap();return;}
             if(kind==2&&(b-a).magnitude>profile.SelectionDragPixels)
             {
-                runtime?.RecordHumanAction(LocalOwnerId);if(!shift)selection.Clear();else selection.RemoveWhere(id=>!view.Entities.Any(e=>e.Id==id&&e.Owner==view.Owner));foreach(int id in PlayableMapView.SelectOwnUnits(view,MapGround(kind,a),MapGround(kind,b)))selection.Add(id);
+                runtime?.RecordHumanAction(LocalOwnerId);inspectionEntityId=0;if(!shift)selection.Clear();else selection.RemoveWhere(id=>!view.Entities.Any(e=>e.Id==id&&e.Owner==view.Owner));foreach(int id in tacticalMap.SelectOwnUnits(view,tacticalMap.WorldToLocal(GlobalPanelPoint(a)),tacticalMap.WorldToLocal(GlobalPanelPoint(b))))selection.Add(id);
                 SelectionMarkerEvent();selectedSite=selectedSlot=0;keyboardGroups.Observe(selection);Record("map box shift="+shift+" ids="+string.Join(",",selection));
             }
             else
             {
                 var destination=MapGround(kind,b);var center=Ground(SeatScreenCenter);
-                cameraView.transform.position+=new Vector3((float)(destination.X-center.X),0,(float)(destination.Z-center.Z));
+                PanCameraManually(new Vector3((float)(destination.X-center.X),0,(float)(destination.Z-center.Z)));
                 Record("map focus="+destination.X+","+destination.Z);if(kind==2)CloseMap();
             }
         }
@@ -122,8 +141,10 @@ namespace Spacewars.Presentation
                 SyncTacticalMapHud();return;
             }
             mapTerrain.Update(world.Fog);
+            if(mapOpen)tacticalFog?.Update(world.Fog);
             var r=cameraView.pixelRect;var corners=new[]{Ground(new Vector2(r.xMin,r.yMin)),Ground(new Vector2(r.xMax,r.yMin)),Ground(new Vector2(r.xMax,r.yMax)),Ground(new Vector2(r.xMin,r.yMax))};
-            compactMap.Set(view,selection,corners);if(mapOpen)tacticalMap.Set(view,selection,corners);
+            bool showMines=spectatorMode&&spectatorPerspective.HasValue;
+            compactMap.Set(view,selection,corners,showMines);if(mapOpen)tacticalMap.Set(view,selection,corners,showMines,cameraView.transform.eulerAngles.y);
             if(spectatorMode){compactMap.SetOrderMarkers(Array.Empty<PlayableQueueMarker>());tacticalMap.SetOrderMarkers(Array.Empty<PlayableQueueMarker>());}
             // Native runtime tick frequency is the fixed 30 Hz authority contract.
             long seconds=view.Tick/30;mapClock.text=(seconds/60).ToString("D2")+":"+(seconds%60).ToString("D2");

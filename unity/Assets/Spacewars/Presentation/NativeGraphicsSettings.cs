@@ -2,13 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 namespace Spacewars.Presentation
 {
     // Device presentation preferences never modify authored Resources or simulation profiles.
     public static class NativeGraphicsSettings
     {
         public const string Prefix="spacewars.graphics.";
-        public const string AaPath="visual.cameraAntialiasing.mode";
+        public const string AaPath="visual.cameraAntialiasing.mode",RenderScalePath="visual.cameraAntialiasing.renderScale";
         public const string BloomKey=Prefix+"bloomEnabled",OcclusionKey=Prefix+"occlusionEnabled";
         public static event Action<string> Changed;
         // Editor and Player QA may inject a namespace instead of touching real device preferences.
@@ -20,31 +21,36 @@ namespace Spacewars.Presentation
             .Concat(Raw<ContactOcclusionProfile>("ContactOcclusionProfile").Parameters()).Concat(Raw<ActorMaterialProfile>("ActorMaterialProfile").Parameters())
             .Concat(Raw<TankMechanismProfile>("TankMechanismProfile").Parameters().Where(p=>p.Path=="visual.tankMechanism.modelScale"))
             .Concat(Raw<IndustrialLightingProfile>("IndustrialLightingProfile").Parameters()).Concat(Raw<IndustrialLightingProfile>("ThreeCrossingsLightingProfile").Parameters()).ToArray());
-        public static IEnumerable<string> PreferenceKeys=>Parameters.Select(p=>Key(p.Path)).Concat(new[]{Key("bloomEnabled"),Key("occlusionEnabled"),Key("groundTrailsEnabled")});
+        public static IEnumerable<string> PreferenceKeys=>Parameters.Select(p=>Key(p.Path)).Concat(new[]{Key("bloomEnabled"),Key("occlusionEnabled"),Key("groundTrailsEnabled"),Key("unitWrecksEnabled")});
+        public static bool UnitWrecksEnabled{get=>PlayerPrefs.GetInt(Key("unitWrecksEnabled"),1)!=0;set{NativePreferenceWriter.SetInt(Key("unitWrecksEnabled"),value?1:0);Changed?.Invoke("visual.unitWrecks.enabled");}}
         public static bool GroundTrailsEnabled{get=>PlayerPrefs.GetInt(Key("groundTrailsEnabled"),1)!=0;set{NativePreferenceWriter.SetInt(Key("groundTrailsEnabled"),value?1:0);Changed?.Invoke("visual.groundTrails.enabled");}}
         public static bool BloomEnabled{get=>PlayerPrefs.GetInt(Key("bloomEnabled"),1)!=0;set{NativePreferenceWriter.SetInt(Key("bloomEnabled"),value?1:0);Changed?.Invoke("visual.actorFinish.bloomEnabled");}}
         public static bool OcclusionEnabled{get=>PlayerPrefs.GetInt(Key("occlusionEnabled"),1)!=0;set{NativePreferenceWriter.SetInt(Key("occlusionEnabled"),value?1:0);Changed?.Invoke("visual.contactOcclusion.enabled");}}
         public static float Read(SurfaceParameter p)
         {
             // Art tuning belongs to authored Balance Lab profiles. Ignore legacy player sliders.
-            if(p.Path!=AaPath)return p.Read();
+            if(p.Path!=AaPath&&p.Path!=RenderScalePath)return p.Read();
             float value=PlayerPrefs.GetFloat(Key(p.Path),p.Read());
             return Valid(p,value)?value:p.Read();
         }
-        private static bool Valid(SurfaceParameter p,float value)=>!float.IsNaN(value)&&!float.IsInfinity(value)&&value>=p.Minimum&&value<=p.Maximum&&(p.Path!=AaPath||value==Mathf.Round(value));
+        private static bool Valid(SurfaceParameter p,float value)=>!float.IsNaN(value)&&!float.IsInfinity(value)&&value>=p.Minimum&&value<=p.Maximum&&Mathf.Abs(value/p.Step-Mathf.Round(value/p.Step))<.001f;
         public static void Set(string path,float value)
         {
-            if(path!=AaPath)throw new ArgumentException("Developer graphics controls belong to Balance Lab",nameof(path));
+            if(path!=AaPath&&path!=RenderScalePath)throw new ArgumentException("Developer graphics controls belong to Balance Lab",nameof(path));
             var p=Parameters.Single(x=>x.Path==path);if(!Valid(p,value))throw new ArgumentOutOfRangeException(nameof(value),"Invalid graphics value: "+path);
-            NativePreferenceWriter.SetFloat(Key(path),value);Changed?.Invoke(path);
+            NativePreferenceWriter.SetFloat(Key(path),value);if(path==RenderScalePath)ApplyRenderScale();Changed?.Invoke(path);
         }
         public static void Apply(IEnumerable<SurfaceParameter> parameters){foreach(var p in parameters)p.Write(Read(p));}
-        public static void Refresh()=>Changed?.Invoke("*");
+        public static float RenderScale=>Read(Parameters.Single(p=>p.Path==RenderScalePath));
+        public static void ApplyRenderScale(){var pipeline=UniversalRenderPipeline.asset;if(pipeline)pipeline.renderScale=RenderScale;}
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)] private static void InitializeRenderScale()=>ApplyRenderScale();
+        public static void Refresh(){ApplyRenderScale();Changed?.Invoke("*");}
         public static void Reset(){NativePreferenceWriter.Apply(()=>{foreach(var key in PreferenceKeys)PlayerPrefs.DeleteKey(key);});Refresh();}
         public static string Group(SurfaceParameter p)
         {
             if(p.Group=="Wrecks")return "Остовы · обгоревший металл";
             if(p.Path==AaPath)return "Сглаживание";
+            if(p.Path==RenderScalePath)return "Разрешение сцены";
             if(p.Path.StartsWith("visual.threeCrossings.lighting."))return "Освещение · Three Crossings";
             if(p.Path.StartsWith("visual.lighting."))return "Освещение · остальные карты";
             if(p.Path.StartsWith("visual.contactOcclusion."))return "Контактные тени (SSAO)";
@@ -56,6 +62,7 @@ namespace Spacewars.Presentation
             string key=p.Path.Substring(p.Path.LastIndexOf('.')+1);
             switch(key){
                 case "mode":return "Сглаживание";
+                case "renderScale":return "Масштаб рендера (Render Scale)";
                 case "armorMetallic":case "metalMetallic":return "Металличность";
                 case "armorSmoothness":case "metalSmoothness":case "structureSmoothness":return "Гладкость";
                 case "buildingLampEmission":return "Яркость огней зданий";

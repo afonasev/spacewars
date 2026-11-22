@@ -45,6 +45,7 @@ internal sealed record Scenario
     public required long Tick { get; init; }
     public required int Cash { get; init; }
     public required int Tanks { get; init; }
+    internal int ReadyIncomeBuildings { get; init; } = 1;
     public required bool ScienceCenter { get; init; }
     public required double SettledIncome { get; init; }
     public required int ProtectedFunds { get; init; }
@@ -62,7 +63,8 @@ internal static class Lab
     internal static readonly AiProfile Ai = AiProfile.Initial;
     internal static Scenario Case(int tanks = 10, int cash = 600, bool center = false) => new() {
         Schema = "ai-decision-case-v1", Name = "funding-boundary", Provenance = "Authored decision fixture, not a captured match",
-        Seed = 41, Tick = 600, Cash = cash, Tanks = tanks, ScienceCenter = center, SettledIncome = 0, ProtectedFunds = 0
+        Seed = 41, Tick = 600, Cash = cash, Tanks = tanks, ScienceCenter = center, SettledIncome = 0, ProtectedFunds = 0,
+        ReadyIncomeBuildings = (int)Ai.Value("technology.minimumIncomeBuildings")
     };
     internal static PlayableSnapshot Snapshot(Scenario s)
     {
@@ -71,9 +73,13 @@ internal static class Lab
         var site = TerritoryRules.Sites(p).First(x => x.Kind == PlayableBuildingKind.Headquarters);
         var buildings = new List<PlayableBuildingSnapshot> {
             new(1, PlayableOwner.Player, PlayableBuildingKind.Headquarters, site.Position, p.HeadquartersHealth, 1, 0, 0, default, siteId: site.Id),
-            new(2, PlayableOwner.Player, PlayableBuildingKind.Factory, site.Slots[0].Position, p.FactoryHealth, 1, 0, 0, default, siteId: site.Id, slotId: site.Slots[0].Id, parentId: 1),
-            new(3, PlayableOwner.Player, PlayableBuildingKind.Refinery, site.Slots[1].Position, p.RefineryHealth, 1, 0, 0, default, siteId: site.Id, slotId: site.Slots[1].Id, parentId: 1)
+            new(2, PlayableOwner.Player, PlayableBuildingKind.Factory, site.Slots[0].Position, p.FactoryHealth, 1, 0, 0, default, siteId: site.Id, slotId: site.Slots[0].Id, parentId: 1)
         };
+        if (s.ReadyIncomeBuildings > 0) buildings.Add(new(3, PlayableOwner.Player, PlayableBuildingKind.Refinery,
+            site.Slots[1].Position, p.RefineryHealth, 1, 0, 0, default, siteId: site.Id, slotId: site.Slots[1].Id, parentId: 1));
+        for (int i = 1; i < s.ReadyIncomeBuildings; i++)
+            buildings.Add(new(200 + i, PlayableOwner.Player, PlayableBuildingKind.Mine,
+                new NavPoint(i, -40), (int)Math.Ceiling(p.MineHealth), 1, 0, 0, default, siteId: 20 + i));
         if (s.ScienceCenter) buildings.Add(new(4, PlayableOwner.Player, PlayableBuildingKind.ScientificCenter,
             site.Slots[2].Position, TerritoryRules.Health(p, PlayableBuildingKind.ScientificCenter), 1, 0, 0, default, siteId: site.Id, slotId: site.Slots[2].Id, parentId: 1));
         var units = Enumerable.Range(10, s.Tanks).Select(i => new PlayableEntitySnapshot(i, PlayableOwner.Player,

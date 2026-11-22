@@ -15,6 +15,16 @@ namespace Spacewars.Tests.EditMode
         private static readonly Type Loop=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableAiOwnerLoop",true);
         private static readonly Type Scheduler=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.AiAuthorityScheduler",true);
         private static object Owner(string id,PlayableProfile profile,int seed)=>Activator.CreateInstance(Loop,Flags,null,new object[]{profile,PlayableAiOpeningComposition.Initialize(seed,id),71L,null},null);
+        private static object OwnerWithFixedReceiptClock(string id,PlayableProfile profile,int seed)
+        {
+            // This fixture tests receipt isolation at tick75, not the native
+            // difficulty's variable reaction window (covered by profile tests).
+            var data=AiProfile.Initial.CopyData();data.id="receipt-isolation-fixed-reaction-v1";
+            var minimum=data.fields.Single(f=>f.path=="difficulty.fighter.reactionSeconds").value;
+            data.fields.Single(f=>f.path=="difficulty.fighter.control.reactionMaxSeconds").value=minimum;
+            var ai=new AiProfile(data);
+            return Activator.CreateInstance(Loop,Flags,null,new object[]{profile,PlayableAiOpeningComposition.Initialize(seed,id,aiProfile:ai),71L,null,ai,AiDifficulty.Fighter},null);
+        }
         private static PlayableAiOwnerCheckpoint State(object loop)=>(PlayableAiOwnerCheckpoint)Loop.GetProperty("Checkpoint",Flags).GetValue(loop);
         private static object Coordinator(IEnumerable<object> loops)
         {var values=loops.ToArray();var array=Array.CreateInstance(Loop,values.Length);for(int i=0;i<values.Length;i++)array.SetValue(values[i],i);return Activator.CreateInstance(Scheduler,Flags,null,new object[]{array},null);}
@@ -72,7 +82,7 @@ namespace Spacewars.Tests.EditMode
                 var write=wire.GetMethods(BindingFlags.Static|BindingFlags.NonPublic).Single(m=>m.Name=="Write"&&m.GetParameters()[1].ParameterType==typeof(NavigationSessionState));
                 using(var writer=new System.IO.BinaryWriter(stream,System.Text.Encoding.UTF8,true))write.Invoke(null,new object[]{writer,nav.CaptureState()});
                 stream.Position=0;
-                using(var reader=new System.IO.BinaryReader(stream,System.Text.Encoding.UTF8,true))saved=(NavigationSessionState)wire.GetMethod("ReadNavigationSessionState",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{reader});
+                using(var reader=new System.IO.BinaryReader(stream,System.Text.Encoding.UTF8,true))saved=(NavigationSessionState)wire.GetMethod("ReadNavigationSessionState",BindingFlags.Static|BindingFlags.NonPublic,null,new[]{typeof(System.IO.BinaryReader)},null).Invoke(null,new object[]{reader});
             }
             var restored=new NavigationSession(71,geometry,PlayableProfile.Default.Navigation);restored.RestoreState(saved);
             Assert.False((bool)ready.GetValue(restored));Assert.True(restored.Requests.TryDequeue(out var last));
@@ -84,7 +94,7 @@ namespace Spacewars.Tests.EditMode
         [Test] public void ReceiptIsolation()
         {
             var config=OfflineParticipantAuthorityTests.Config(3,false);var authority=new OfflineParticipantAuthority(config,71);
-            var owners=config.Roster.Select(p=>Owner(p.Id,config.Profile,config.Seed)).ToArray();var scheduler=Coordinator(owners.Reverse());
+            var owners=config.Roster.Select(p=>OwnerWithFixedReceiptClock(p.Id,config.Profile,config.Seed)).ToArray();var scheduler=Coordinator(owners.Reverse());
             OfflineParticipantAuthorityTests.Step(authority,45);Review(scheduler,authority);
             var scheduled=owners.SelectMany(o=>State(o).Records).Where(r=>r.Status==PlayableAiDeliveryStatus.Scheduled).ToArray();
             Assert.GreaterOrEqual(scheduled.Length,3);

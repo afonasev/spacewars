@@ -11,6 +11,7 @@ namespace Spacewars.Runtime
     {
         // Technical corruption/allocation limits, not gameplay/profile tuning.
         internal const int MaxBytes=32*1024*1024, MaxItems=262144;
+        private static readonly UTF8Encoding StrictUtf8=new UTF8Encoding(false,true);
 
         internal static bool Boolean(BinaryReader r){byte b=r.ReadByte();
             if(b>1)throw new ArgumentException("Invalid bool tag.");
@@ -31,8 +32,14 @@ namespace Spacewars.Runtime
             if(n==-1)return null;
             if(n<0||n>MaxBytes||n>r.BaseStream.Length-r.BaseStream.Position)throw new ArgumentException("Invalid string length.");
             var transaction=(r as NavigationAdmittedReader)?.Transaction;
+            // Private review buffers can be decoded in place. Admitted navigation
+            // reads retain their transaction and scratch-allocation accounting.
+            if(transaction==null&&r.BaseStream is MemoryStream stream&&stream.TryGetBuffer(out var buffer)){
+                int offset=checked(buffer.Offset+(int)stream.Position);
+                stream.Position+=n;return StrictUtf8.GetString(buffer.Array,offset,n);
+            }
             var bytes=PrivateBytes(r,n);
-            return transaction==null?new UTF8Encoding(false,true).GetString(bytes):transaction.String(n,()=>new UTF8Encoding(false,true).GetString(bytes));
+            return transaction==null?StrictUtf8.GetString(bytes):transaction.String(n,()=>StrictUtf8.GetString(bytes));
             }
         internal static void String(BinaryWriter w,string s){if(s==null){w.Write(-1);
             return;
@@ -82,6 +89,17 @@ namespace Spacewars.Runtime
             if(m.Length>MaxBytes)throw new ArgumentException("World exceeds byte limit.");
             return m.ToArray();
             }}
+        // Ownership of this private buffer transfers to one detached review input.
+        // No pooling or public mutable array crosses the review boundary.
+        internal static ArraySegment<byte> PackReviewBuffer(Action<BinaryWriter> write)
+        {
+            using(var stream=new MemoryStream()){
+                using(var writer=new BinaryWriter(stream,Encoding.UTF8,true))write(writer);
+                if(stream.Length>MaxBytes)throw new ArgumentException("World exceeds byte limit.");
+                if(!stream.TryGetBuffer(out var buffer))throw new InvalidOperationException("Private review buffer is unavailable.");
+                return buffer;
+            }
+        }
         internal static NavigationCaptureBytes PackOwned(Action<BinaryWriter> write,NavigationRetentionBudget budget)
         {
             if(budget==null||!budget.TryOpenScope(NavigationPreparationKind.Capture,0,0,out var scope))throw new InvalidOperationException("Outer capture admission refused.");
@@ -773,7 +791,7 @@ namespace Spacewars.Runtime
             WriteObstacleView(w,m.MovementBlockers);
             WriteObstacleView(w,m.Solids);
             WriteObstacleView(w,crossings.Water);
-            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is BasaltCrownMap basalt){String(w,basalt.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is MossHighlandMap moss){String(w,moss.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is WhiteMeridianMap meridian){Number(w,meridian.Scale);Number(w,meridian.TerraceHeight);Number(w,meridian.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is CrimsonGroveMap grove){Number(w,grove.Scale);Number(w,grove.TerraceHeight);Number(w,grove.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is AntennaCityMap city){Number(w,city.Scale);Number(w,city.PlazaHeight);Number(w,city.BlockHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is NullDockMap dock){Number(w,dock.TerraceHeight);Number(w,dock.ModuleHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is StackedRampQualificationMap||m is AiTestMap||m is CampaignOpeningMap||m is ProvingGroundMap){Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else throw new ArgumentException("Unsupported native terrain binding.");
+            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is BasaltCrownMap basalt){String(w,basalt.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is MossHighlandMap moss){String(w,moss.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is WhiteMeridianMap meridian){Number(w,meridian.Scale);Number(w,meridian.TerraceHeight);Number(w,meridian.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is CrimsonGroveMap grove){Number(w,grove.Scale);Number(w,grove.TerraceHeight);Number(w,grove.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is AntennaCityMap city){Number(w,city.Scale);Number(w,city.PlazaHeight);Number(w,city.BlockHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is NullDockMap dock){Number(w,dock.TerraceHeight);Number(w,dock.ModuleHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is DeafMirrorMap||m is StackedRampQualificationMap||m is AiTestMap||m is CampaignOpeningMap||m is ProvingGroundMap){Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else throw new ArgumentException("Unsupported native terrain binding.");
             if(m is StackedRampQualificationMap physical)String(w,physical.Provider.Binding);
             w.Write(m.Supports.Count);
             foreach(var s in m.Supports){String(w,s.Id);
@@ -785,9 +803,77 @@ namespace Spacewars.Runtime
             }}if(!legacyQueue){w.Write(p.UnitOrderQueueLimit);Number(w,p.CameraEdgePanSpeed);Number(w,p.CameraEdgePanZonePixels);}
             if(!legacyQueue&&!legacyMarch){Number(w,p.GroupMarchMaximumStretch);Number(w,p.IncomeMarkerFontPixels);Number(w,p.IncomeMarkerRisePixels);Number(w,p.IncomeMarkerDurationSeconds);Number(w,p.RallyFlagHeight);}
             if(legacyQueue||legacyMarch){if(!p.Navigation.HasCrowdV1Defaults)throw new ArgumentException("Legacy binding requires v1 crowd defaults.");}else p.Navigation.WriteCrowdBinding(w);if(p.HasAccruedCreditExtension){w.Write(0x41434331);w.Write(p.MaxAccruedCredits);}if(p.UsesRecastGroundRoutes){w.Write(0x52435331);w.Write(1);}if(!legacyQueue&&!legacyMarch)WriteEffectiveProfileBindingV1(w,p);foreach(var f in OrbitalProfileMetadata.Fields)Number(w,f.Read(profileData));
+            if(p.ShkvalGuidanceFireIntervalMultiplier!=1)
+            {
+                w.Write(0x53475231); // SGR1
+                Number(w,p.ShkvalGuidanceFireIntervalMultiplier);
+            }
+            if(profileData.orbitalReinforcementCostMultiplier!=1.2||profileData.orbitalReinforcementSeconds!=3||profileData.orbitalReinforcementClearance!=7.2)
+            {
+                w.Write(0x524E4631);
+                foreach(var field in OrbitalProfileMetadata.ReinforcementFields)Number(w,field.Read(profileData));
+            }
+            if(profileData.orbitalStasisRadius!=PlayableProfileData.DefaultStasisRadius||
+                profileData.orbitalStasisSeconds!=PlayableProfileData.DefaultStasisSeconds||
+                profileData.orbitalStasisTargets!=PlayableProfileData.DefaultStasisTargets)
+            {
+                w.Write(0x53544131);
+                foreach(var field in OrbitalProfileMetadata.StasisFields)Number(w,field.Read(profileData));
+            }
+            if(profileData.orbitalNanobotsRadius!=OrbitalRepairNanobots.DefaultRadius||
+                profileData.orbitalNanobotsSeconds!=OrbitalRepairNanobots.DefaultSeconds||
+                profileData.orbitalNanobotsHealthPerSecond!=OrbitalRepairNanobots.DefaultHealthPerSecond)
+            {
+                w.Write(0x4e414e31);
+                foreach(var field in OrbitalProfileMetadata.RepairFields)Number(w,field.Read(profileData));
+            }
+            if(profileData.orbitalBoostSeconds!=30||profileData.orbitalBoostIncomeMultiplier!=3||
+                profileData.orbitalBoostProductionMultiplier!=2||profileData.orbitalBoostMineHealthPercent!=40||
+                profileData.orbitalBoostBuildingHealthPercent!=30)
+            {
+                w.Write(0x41435031);
+                foreach(var field in OrbitalProfileMetadata.BoostFields)Number(w,field.Read(profileData));
+            }
+            var nuclearDefaults = new PlayableProfileData();
+            if(OrbitalNuclearRules.Fields.Any(field => field.Read(profileData) != field.Read(nuclearDefaults)))
+            {
+                w.Write(0x4e554b31);
+                foreach(var field in OrbitalNuclearRules.Fields)Number(w,field.Read(profileData));
+            }
             // The original default has no binding suffix, preserving older default-profile checkpoints.
             if(p.ShkvalDirectHitDamage!=20){w.Write(0x53484431);w.Write(p.ShkvalDirectHitDamage);}
-            if(p.ShkvalBaseBlastRadiusMultiplier!=0.8){w.Write(0x53425231);Number(w,p.ShkvalBaseBlastRadiusMultiplier);}}
+            if(p.ShkvalBaseBlastRadiusMultiplier!=0.8){w.Write(0x53425231);Number(w,p.ShkvalBaseBlastRadiusMultiplier);}
+            if(p.MineEnemyClearanceTankBodies!=OrbitalMinePlacement.DefaultTankBodies){w.Write(0x4D4E4331);Number(w,p.MineEnemyClearanceTankBodies);}
+            if(p.UsesCompactOrbitalProgression){w.Write(0x4F525031);w.Write(OrbitalAbilities.CompactProgressionVersion);}
+            if(p.UsesIndependentLabStats)
+            {
+                w.Write(0x4C535431); // LST1
+                var data=p.CopyData();
+                foreach(var field in PlayableProfileMetadata.IndependentLabFields)Number(w,field.Read(data));
+            }
+            if(p.CombatResponseHelpRadius!=PlayableProfileData.DefaultCombatResponseHelpRadius||p.CombatResponsePursuitRadius!=PlayableProfileData.DefaultCombatResponsePursuitRadius||
+                p.CombatResponseWithdrawDistance!=PlayableProfileData.DefaultCombatResponseWithdrawDistance||p.CombatResponseQuietSeconds!=PlayableProfileData.DefaultCombatResponseQuietSeconds)
+            {
+                w.Write(0x43525031);
+                Number(w,p.CombatResponseHelpRadius);Number(w,p.CombatResponsePursuitRadius);
+                Number(w,p.CombatResponseWithdrawDistance);Number(w,p.CombatResponseQuietSeconds);
+            }
+            if(p.RelayTransferIncomeGap!=PlayableProfile.DefaultRelayTransferIncomeGap)
+            {
+                w.Write(0x52544731); // RTG1
+                Number(w,p.RelayTransferIncomeGap);
+            }
+            if(p.HasCustomDominationTerms)
+            {
+                w.Write(0x444F4D31);
+                Number(w,p.DominationTarget);Number(w,p.DominationGain);Number(w,p.DominationDisplacement);Number(w,p.DominationDecay);
+            }
+            if(p.MineReserveCredits!=0||p.MineDepletedIncomePercent!=20)
+            {
+                w.Write(0x4D525031); // MRP1
+                Number(w,p.MineReserveCredits);Number(w,p.MineDepletedIncomePercent);
+            }
+        }
 
 
         // EPB1 is an append-only current-profile identity extension. Keep the old
@@ -828,6 +914,31 @@ namespace Spacewars.Runtime
             Number(w,p.HawkDebrisSpeed);
             Number(w,p.HawkDebrisGravity);
             Number(w,p.HawkDebrisCount);
+            if(p.HasIndependentNewUnitTerms)
+            {
+                w.Write(0x4e554c54);
+                var data=p.CopyData();
+                foreach(var field in PlayableProfileMetadata.NewUnitTermFields)Number(w,field.Read(data));
+            }
+            if(p.HasCustomIglaTerms){w.Write(0x49474c41);var igla=p.CopyData();foreach(var field in PlayableProfileMetadata.IglaFields)Number(w,field.Read(igla));}
+            if(p.HasCustomCerberusEngagementRange){w.Write(0x43455245);Number(w,p.CopyData().cerberusEngagementRange);}
+            if(p.HasCustomCerberusTerms)
+            {
+                w.Write(0x43455242); var data=p.CopyData();
+                foreach(var field in PlayableProfileMetadata.CerberusFields)Number(w,field.Read(data));
+            }
+            if(p.HasCustomSkatTerms)
+            {
+                w.Write(0x534b4154);
+                var skat = p.CopyData();
+                foreach(var field in PlayableProfileMetadata.SkatFields) Number(w,field.Read(skat));
+            }
+            if(p.HasCustomExplorerRocketTerms)
+            {
+                w.Write(0x45524f43);
+                var rocket=p.CopyData();
+                foreach(var field in PlayableProfileMetadata.ExplorerRocketFields)Number(w,field.Read(rocket));
+            }
             Number(w,p.HawkHealth);
             Number(w,p.HawkCreditCost);
             Number(w,p.HawkPopulationCost);

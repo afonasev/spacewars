@@ -20,7 +20,7 @@ public sealed class PlayableProductionHudTests
     {
         host=new GameObject("production HUD test");hud=host.AddComponent<PlayableBootstrap>();hud.enabled=false;
         root=new VisualElement();Set("root",root);Set("profile",PlayableProfile.Default);
-        Set("hawkButton",new Button());Set("shkvalButton",new Button());Set("explorerButton",new Button());Set("tankButton",new Button());Set("queueLabel",new Label());Set("selectionLabel",new Label());Set("progress",new ProgressBar());
+        Set("hawkButton",new Button());Set("skatButton",new Button());Set("shkvalButton",new Button());Set("explorerButton",new Button());Set("tankButton",new Button());Set("queueLabel",new Label());Set("selectionLabel",new Label());Set("progress",new ProgressBar());
         Call("CreateProductionHud",root);
     }
     [TearDown] public void Cleanup()=>UnityEngine.Object.DestroyImmediate(host);
@@ -37,6 +37,34 @@ public sealed class PlayableProductionHudTests
         Assert.AreEqual("50%\n8с",slots[0].text);Assert.AreEqual("Ждёт",slots[1].text);Assert.True(slots.All(s=>!s.enabledSelf));
         Assert.False(((Button)Get("tankButton")).enabledSelf);Assert.IsEmpty(OfflinePadWorldActions.Building((PlayableSnapshot)Get("view"),PlayableProfile.Default,5));
         Assert.That(slots[0].tooltip,Does.Not.Contain("отменить"));
+    }
+    [Test] public void HiddenQueueClearsOrdersAndReopensWithCurrentFactoryData()
+    {
+        Show(new long[]{20,21});
+        var slot=root.Query<Button>().First();
+        var label=(Label)Get("selectionLabel");
+        Assert.That(slot.tooltip,Does.Contain("№20"));
+        Assert.That(slot.tooltip,Does.StartWith("Вепрь\nОсновной танк корпоративных армий в войнах за ресурсы."));
+        Assert.That(slot.tooltip,Does.Contain("Вепрь · отменить заказ"));
+        Assert.That(((Button)Get("tankButton")).text,Does.StartWith("Вепрь ·"));
+        Assert.That(((Button)Get("tankButton")).tooltip,Does.StartWith("Вепрь\nОсновной танк корпоративных армий в войнах за ресурсы."));
+        Assert.That(((ProgressBar)Get("progress")).title,Does.StartWith("Вепрь ·"));
+        Call("UpdateProductionHud",new object[]{null});
+        Assert.AreEqual(0,Get("productionFactory"));
+        Assert.False(slot.enabledSelf);
+        Assert.AreEqual(DisplayStyle.None,slot.parent.style.display.value);
+        Assert.AreEqual("Свободный слот",slot.tooltip);
+
+        label.text="АРМИЯ";
+        Call("UpdateProductionHud",new object[]{null});
+        Assert.That(label.text,Does.Contain("9 (+3) / 100"));
+        Assert.False(slot.enabledSelf);
+
+        Show(new long[]{22});
+        Assert.AreSame(slot,root.Query<Button>().First());
+        Assert.True(slot.enabledSelf);
+        Assert.AreEqual(DisplayStyle.Flex,slot.parent.style.display.value);
+        Assert.That(slot.tooltip,Does.Contain("№22"));
     }
     [Test] public void HangarShowsHawkIconAndActualReleasePhase()
     {

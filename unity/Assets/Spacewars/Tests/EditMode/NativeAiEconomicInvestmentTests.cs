@@ -8,7 +8,7 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class NativeAiEconomicInvestmentTests
     {
-        private static PlayableAiObservation View(int bank=150,double income=6,bool pending=false,bool full=false,long tick=900,bool factory=true)
+        private static PlayableAiObservation View(int bank=150,double income=6,bool pending=false,bool full=false,long tick=900,bool factory=true,AiDifficulty difficulty=AiDifficulty.Fighter)
         {
             var p=PlayableProfile.Default;var site=TerritoryRules.Sites(p).First(x=>x.Kind==PlayableBuildingKind.Headquarters);
             var buildings=new[]{new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Headquarters,site.Position,p.HeadquartersHealth,1,0,0,default,siteId:site.Id),
@@ -17,8 +17,85 @@ namespace Spacewars.Tests.EditMode
             if(full)foreach(var slot in site.Slots.Skip(1))buildings.Add(new PlayableBuildingSnapshot(10+slot.Id,PlayableOwner.Player,PlayableBuildingKind.Refinery,slot.Position,p.RefineryHealth,1,0,0,default,siteId:site.Id,slotId:slot.Id,parentId:1));
             if(!factory)buildings.RemoveAll(b=>b.Kind==PlayableBuildingKind.Factory);
             return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,bank,null,Array.Empty<PlayableEntitySnapshot>(),buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
-                sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(0,0,p.ArmyCapacity),incomePerSecond:income));
+                sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(0,0,p.ArmyCapacity),incomePerSecond:income),difficulty);
         }
+        [Test] public void NearDepletionReducesSustainableProductionIncome()
+        {
+            var p=PlayableProfile.Default;var ai=AiProfile.Initial;var basis=View();
+            var point=new NavPoint(4,-7);
+            var site=new TerritorySite(11,PlayableBuildingKind.Mine,point,Array.Empty<TerritorySlot>());
+            var mine=new PlayableBuildingSnapshot(30,basis.Owner,PlayableBuildingKind.Mine,point,(int)p.MineHealth,1,0,0,default,siteId:site.Id);
+            var snapshot=new TerritorySiteSnapshot(site,basis.Owner,basis.Owner,1,false,mine.Id,true,mineReserve:1,mineReserveCapacity:1300);
+            double full=p.MineIncomePerPeriod/p.IncomePeriodSeconds;
+            var o=PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,900,900,RuntimeStatus.Running,false,
+                PlayableMatchOutcome.Playing,2000,null,Array.Empty<PlayableEntitySnapshot>(),basis.Buildings.Append(mine).ToArray(),
+                Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
+                sites:basis.Sites.Append(snapshot).ToArray(),incomePerSecond:5+full));
+            double horizon=ai.Value("economy.incomeWindowSeconds");
+            Assert.That(AiEconomicInvestmentPlanner.SustainableIncome(o,p,ai),Is.EqualTo(5+full*.2+.8/horizon).Within(1e-8));
+        }
+
+        [Test] public void FundedSurplusDevelopsTheLastUsefulHomeSlotAfterScienceAndProductionExist()
+        {
+            var p=PlayableProfile.Default;var basis=View(2000,100);var site=basis.Sites.Single();
+            var extra=site.Site.Slots.Skip(1).Take(site.Site.Slots.Count-2).Select((slot,i)=>new PlayableBuildingSnapshot(50+i,PlayableOwner.Player,i==0?PlayableBuildingKind.ScientificCenter:PlayableBuildingKind.Refinery,slot.Position,250,1,0,0,default,siteId:site.Site.Id,slotId:slot.Id,parentId:1));
+            var o=PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,900,900,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,2000,null,basis.Entities.ToArray(),basis.Buildings.Concat(extra).ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:basis.Sites.ToArray(),population:basis.Population,incomePerSecond:100,activeProfile:p));
+            Assert.True(AiEconomicInvestmentPlanner.HasIncomeSlot(o,AiProfile.Initial));var capacity=new AiProductionCapacity(100,10,.5,900,0,0,600,"line utilization below scaling threshold");
+            var plan=AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,capacity,true,false,availableCredits:2000);Assert.NotNull(plan);Assert.True(plan.Candidate.Legal);Assert.AreEqual(PlayableBuildingKind.Refinery,plan.Candidate.Action.BuildingKind);Assert.AreEqual(site.Site.Slots.Last().Id,plan.Candidate.Action.SlotId);
+            var protectedCash=AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,capacity,true,false,availableCredits:p.RefineryCreditCost);Assert.True(protectedCash==null||protectedCash.Candidate.Action.BuildingKind!=PlayableBuildingKind.Refinery,"Do not consume the recurring unit cycle to fill a slot");
+        }
+        [Test]
+        public void SlotConversionUsesPostSaleRateAndKeepsFourReadyIncomeBuildings()
+        {
+            var p=PlayableProfile.Default;var ai=AiProfile.Initial;var initial=View(2000,18);
+            var home=initial.Sites.Single();
+            var life=new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,0,0,false);
+            var slots=home.Site.Slots.Skip(1).ToArray();
+            var buildings=initial.Buildings.Concat(slots.Select((slot,i)=>new PlayableBuildingSnapshot(20+i,initial.Owner,
+                i==0?PlayableBuildingKind.ScientificCenter:PlayableBuildingKind.Refinery,slot.Position,p.RefineryHealth,1,0,0,default,
+                siteId:home.Site.Id,slotId:slot.Id,parentId:home.CenterId,lifecycle:life,refineryUpgraded:i==1)))
+                .Concat(Enumerable.Range(0,2).Select(i=>new PlayableBuildingSnapshot(40+i,initial.Owner,
+                    PlayableBuildingKind.Mine,new NavPoint(i,-40),(int)Math.Ceiling(p.MineHealth),1,0,0,default,siteId:20+i))).ToArray();
+            PlayableAiObservation Observe(PlayableBuildingSnapshot[] list)=>PlayableAiObservation.From(new PlayableSnapshot(
+                p.ProfileId,p.Revision,initial.Generation,initial.Seed,initial.Tick,initial.Tick,RuntimeStatus.Running,false,
+                PlayableMatchOutcome.Playing,initial.Credits,null,Array.Empty<PlayableEntitySnapshot>(),list,Array.Empty<PlayableProjectileSnapshot>(),
+                new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:initial.Sites.ToArray(),population:initial.Population,incomePerSecond:18));
+            var o=Observe(buildings);
+            PlayableAiAction Sale(int id)=>new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,
+                PlayableCommandKind.SellBuilding,new[]{id},siteId:home.Site.Id,slotId:buildings.Single(b=>b.Id==id).SlotId,
+                buildingKind:PlayableBuildingKind.Factory,parentId:home.CenterId);
+            Assert.AreEqual(5,AiEconomicInvestmentPlanner.ReadyIncomeCount(o));
+            Assert.True(AiInfrastructurePlanner.CanSellRefinery(o,p,ai,Sale(22),2000),"80 credits per period covers 80% of two Tank queues");
+            Assert.False(AiInfrastructurePlanner.CanSellRefinery(o,p,ai,Sale(21),2000),"the upgraded Refinery costs twice as much recurring income to sell");
+            Assert.False(AiInfrastructurePlanner.CanSellRefinery(Observe(buildings.Where(b=>b.Id!=23).ToArray()),p,ai,Sale(22),2000),"a free slot makes conversion unnecessary");
+            Assert.IsNotNull(AiEconomicInvestmentPlanner.MixRejection(Observe(buildings.Where(b=>b.Id!=23&&b.Id!=40).ToArray()),
+                p,ai,PlayableBuildingKind.Factory,home.Site.Id),"three ready income buildings cannot support the local mixed build");
+        }
+
+        [TestCase(PlayableBuildingKind.Factory)]
+        [TestCase(PlayableBuildingKind.Hangar)]
+        public void ExpertUsesCurrentIncomeForAnotherProducerAtAMixedBase(PlayableBuildingKind kind)
+        {
+            var p=PlayableProfile.Default;
+            var ai=AiProfile.Initial;
+            var basis=View();
+            var home=basis.Sites.Single();
+            var scienceSlot=home.Site.Slots[1];
+            var science=new PlayableBuildingSnapshot(3,basis.Owner,PlayableBuildingKind.ScientificCenter,scienceSlot.Position,
+                250,1,0,0,default,siteId:home.Site.Id,slotId:scienceSlot.Id,parentId:home.CenterId);
+            PlayableAiObservation Observe(double income,AiDifficulty difficulty)=>PlayableAiObservation.From(new PlayableSnapshot(
+                p.ProfileId,p.Revision,basis.Generation,basis.Seed,basis.Tick,basis.Tick,RuntimeStatus.Running,false,
+                PlayableMatchOutcome.Playing,2000,null,Array.Empty<PlayableEntitySnapshot>(),basis.Buildings.Append(science).ToArray(),
+                Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
+                sites:basis.Sites.ToArray(),population:basis.Population,incomePerSecond:income),difficulty);
+
+            Assert.IsNull(AiEconomicInvestmentPlanner.MixRejection(Observe(100,AiDifficulty.Expert),p,ai,kind,home.Site.Id));
+            Assert.AreEqual("current income below projected production spend",
+                AiEconomicInvestmentPlanner.MixRejection(Observe(.01,AiDifficulty.Expert),p,ai,kind,home.Site.Id));
+            Assert.AreEqual("ready income required for two producers and science",
+                AiEconomicInvestmentPlanner.MixRejection(Observe(100,AiDifficulty.Veteran),p,ai,kind,home.Site.Id));
+        }
+
         private static AiProductionCapacity Capacity(string reason="income within sustained spend capacity")=>new AiProductionCapacity(6,10,.9,900,0,0,600,reason);
         [Test] public void IncomeInvestmentAccumulatesAfterInitialOpeningCommitmentWithoutRequiringAStandingArmy()
         {
@@ -46,14 +123,14 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void OverflowFundsFactoryButDoesNotBypassExistingUtilizationAdmission()
         {
-            var p=PlayableProfile.Default;var plan=AiEconomicInvestmentPlanner.Plan(View(1000,13),p,AiProfile.Initial,Capacity("fill existing idle line"),true,false);
+            var p=PlayableProfile.Default;var plan=AiEconomicInvestmentPlanner.Plan(View(1000,16),p,AiProfile.Initial,Capacity("fill existing idle line"),true,false);
             Assert.AreEqual(PlayableBuildingKind.Factory,plan.Candidate.Action.BuildingKind);Assert.AreEqual(0,plan.Credits,"unqualified lines must receive ordinary production before saving");
             Assert.AreEqual("fill existing idle line",plan.Candidate.Reason);Assert.False(plan.Candidate.Legal);
-            var ready=AiEconomicInvestmentPlanner.Plan(View(1000,13),p,AiProfile.Initial,Capacity(null),true,false);Assert.True(ready.Candidate.Legal);Assert.AreEqual(p.FactoryCreditCost+AiProfile.Initial.Value("economy.factoryLaunchCycles")*p.TankCreditCost,ready.Credits);
+            var ready=AiEconomicInvestmentPlanner.Plan(View(1000,16),p,AiProfile.Initial,Capacity(null),true,false);Assert.True(ready.Candidate.Legal);Assert.AreEqual(p.FactoryCreditCost+AiProfile.Initial.Value("economy.factoryLaunchCycles")*p.TankCreditCost,ready.Credits);
         }
         [Test] public void QualifiedDemandSurvivesDeliberatePauseWithZeroMoneyAndAnUnchangedExpiry()
         {
-            var p=PlayableProfile.Default;var o=View(1000,13);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
+            var p=PlayableProfile.Default;var o=View(1000,16);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
             var ready=AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,Capacity(null),true,false);
             AiEconomicInvestmentPlanner.RememberDemand(o,p,b,ready);var witness=AiEconomicInvestmentPlanner.Demand(b);
             Assert.NotNull(witness);Assert.Zero(b.Reserved);Assert.Zero(witness.Amount);AiEconomicInvestmentPlanner.ValidateDemand(b,p,o.Tick);
@@ -61,7 +138,7 @@ namespace Spacewars.Tests.EditMode
             Assert.True(paused.Candidate.Legal,"a deliberate saving pause does not erase proven demand");Assert.AreEqual(ready.Credits,paused.Credits);
             AiEconomicInvestmentPlanner.RememberDemand(o,p,b,paused);Assert.AreEqual(witness.ExpiresTick,AiEconomicInvestmentPlanner.Demand(b).ExpiresTick);
             b.Expire(witness.ExpiresTick+1,e=>true);Assert.IsNull(AiEconomicInvestmentPlanner.Demand(b));
-            var expired=View(1000,13,tick:witness.ExpiresTick+1);Assert.False(AiEconomicInvestmentPlanner.Plan(expired,p,AiProfile.Initial,Capacity("fill existing idle line"),true,false).Candidate.Legal);
+            var expired=View(1000,16,tick:witness.ExpiresTick+1);Assert.False(AiEconomicInvestmentPlanner.Plan(expired,p,AiProfile.Initial,Capacity("fill existing idle line"),true,false).Candidate.Legal);
         }
         [TestCase(8,PlayableBuildingKind.Refinery)][TestCase(10,PlayableBuildingKind.Refinery)]
         public void CheaperCurrentHeadDoesNotInventFactoryOverflow(double income,PlayableBuildingKind expected)
@@ -96,14 +173,14 @@ namespace Spacewars.Tests.EditMode
         {Assert.IsNull(AiEconomicInvestmentPlanner.Plan(View(full:true),PlayableProfile.Default,AiProfile.Initial,Capacity(),true,false));}
         [Test] public void QualifiedDemandWaitsForBlockedExitThenFundsIdleLineWithoutRenewingExpiry()
         {
-            var p=PlayableProfile.Default;var o=View(400,13);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
+            var p=PlayableProfile.Default;var o=View(400,16);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
             var initial=AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,Capacity("factory startup fund unavailable"),true,false);
             AiEconomicInvestmentPlanner.RememberDemand(o,p,b,initial);var witness=AiEconomicInvestmentPlanner.Demand(b);
             var blocked=new AiProductionCapacity(13,0,.8,900,1,0,600,"producer exit blocked");
             var waiting=AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,blocked,true,false,witness);
             Assert.NotNull(waiting);Assert.AreEqual(initial.Credits,waiting.Credits);Assert.False(waiting.Candidate.Legal);
             AiEconomicInvestmentPlanner.RememberDemand(o,p,b,waiting);Assert.AreEqual(witness.ExpiresTick,AiEconomicInvestmentPlanner.Demand(b).ExpiresTick);
-            var funded=View(600,13,tick:945);b.ObserveBank(funded.Credits);
+            var funded=View(600,16,tick:945);b.ObserveBank(funded.Credits);
             var resumed=AiEconomicInvestmentPlanner.Plan(funded,p,AiProfile.Initial,Capacity("fill existing idle line"),true,false,AiEconomicInvestmentPlanner.Demand(b));
             Assert.True(resumed.Candidate.Legal);Assert.AreEqual(600,resumed.Credits);
             AiEconomicInvestmentPlanner.RememberDemand(funded,p,b,resumed);Assert.AreEqual(witness.ExpiresTick,AiEconomicInvestmentPlanner.Demand(b).ExpiresTick);
@@ -111,7 +188,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void BlockedExitCannotInventDemandAndLostIncomeDoesNotKeepFactoryQuote()
         {
-            var p=PlayableProfile.Default;var o=View(400,13);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
+            var p=PlayableProfile.Default;var o=View(400,16);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
             var blocked=new AiProductionCapacity(13,0,.8,900,1,0,600,"producer exit blocked");
             Assert.IsNull(AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,blocked,true,false));
             AiEconomicInvestmentPlanner.RememberDemand(o,p,b,AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,Capacity(null),true,false));
@@ -121,9 +198,9 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void LostLastProducerCannotUseAnOldDemandWitness()
         {
-            var p=PlayableProfile.Default;var o=View(400,13);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
+            var p=PlayableProfile.Default;var o=View(400,16);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
             AiEconomicInvestmentPlanner.RememberDemand(o,p,b,AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,Capacity(null),true,false));
-            var lost=View(400,13,tick:945,factory:false);var history=new AiProductionDemand();history.Observe(lost,AiProfile.Initial);
+            var lost=View(400,16,tick:945,factory:false);var history=new AiProductionDemand();history.Observe(lost,AiProfile.Initial);
             var capacity=history.Assess(lost,p,AiProfile.Initial,400);Assert.AreEqual("no existing live line",capacity.ScalingReason);
             var plan=AiEconomicInvestmentPlanner.Plan(lost,p,AiProfile.Initial,capacity,true,false,AiEconomicInvestmentPlanner.Demand(b));Assert.IsNull(plan);
             AiEconomicInvestmentPlanner.RememberDemand(lost,p,b,plan);Assert.IsNull(AiEconomicInvestmentPlanner.Demand(b));

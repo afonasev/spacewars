@@ -81,7 +81,7 @@ namespace Spacewars.Runtime
                     }
                 };
                 try{using(EnterTransport()){bool moved=false;try{if(stepDt>0)ValidateCompatibilityMotion(motionWorkspace);scope.Publish(c,publish);if(stepDt>0){StepMovementLocked(stepDt,motionWorkspace);moved=true;}}finally{if(c.Published&&stepDt>0){admissionBatchDepth--;if(moved)PublishAdmission();}}}}
-                finally{if(c.Published){scope.ResolveCommitted();try{RouteFailed?.Invoke(request,c.FailureOutcome);MovementCancelled?.Invoke(request.Entity);}finally{SignalHost();}}}return true;
+                finally{if(c.Published){scope.ResolveCommitted();try{RouteFailed?.Invoke(request,c.FailureOutcome);MovementCancelled?.Invoke(request.Entity);GroundRouteFailed?.Invoke(answer,c.FailureOutcome);}finally{SignalHost();}}}return true;
             }catch(InvalidOperationException){if(c?.Published==true)throw;return false;}finally{c?.Dispose();}}
         }
     }

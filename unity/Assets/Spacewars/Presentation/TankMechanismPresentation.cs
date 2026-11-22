@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Spacewars.Simulation;
 using UnityEngine;
@@ -10,14 +11,21 @@ namespace Spacewars.Presentation
     {
         const float Straight=1.72f,Radius=.30f,TrackX=.84f,TrackY=.335f,WheelRadius=.245f;
         const float Perimeter=2*Straight+2*Mathf.PI*Radius;
+        const float SmallestNormal=1.17549435e-38f;
         Transform[][] links=new Transform[2][],wheels=new Transform[2][];
         Quaternion[][] wheelRest=new Quaternion[2][];
         float[][] linkX=new float[2][],wheelScaleY=new float[2][];
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        private static readonly bool StockSamplingRequested =
+            Environment.GetEnvironmentVariable("SPACEWARS_QA_TRACK_STOCK_SAMPLING") == "1";
+        internal bool? FastSamplingForQa { get; set; }
+#endif
         readonly double[] displayedTravel={double.NaN,double.NaN};
         Quaternion upperRotation,lowerRotation;
         float upperSin,upperCos=1;
         Transform barrel,rotorL,rotorR;Vector3 barrelRest;
         GameObject flash;Material flashMaterial;TankMechanismProfile art;
+        float renderedRecoil,renderedFlashPhase,renderedRotor;
         PlayableDisplayPose previous;bool initialized;long generation=-1,lastTick=-1,lastShot=-1;
         float appliedModelScale=1;
         float frontRadius=Radius,rearRadius=Radius,frontHeight=TrackY,rearHeight=TrackY;
@@ -59,36 +67,92 @@ namespace Spacewars.Presentation
             flash=GameObject.CreatePrimitive(PrimitiveType.Quad);flash.name="Observed muzzle flash";
             if(Application.isPlaying)Destroy(flash.GetComponent<Collider>());else DestroyImmediate(flash.GetComponent<Collider>());flash.transform.SetParent(nodes.Single(t=>t.name=="muzzle"),false);
             flashMaterial=new Material(Resources.Load<Shader>("TankMuzzle"));flashMaterial.SetColor("_BaseColor",Color.white);flash.GetComponent<Renderer>().sharedMaterial=flashMaterial;flash.GetComponent<Renderer>().shadowCastingMode=UnityEngine.Rendering.ShadowCastingMode.Off;flash.GetComponent<Renderer>().receiveShadows=false;flash.SetActive(false);
+            flash.transform.localScale=Vector3.one*art.flashSize*2;
+            renderedRecoil=renderedFlashPhase=renderedRotor=float.NaN;
         }
         public void Drive(PlayableDisplayPose pose,PlayableSnapshot view,int unitId)
+            => DriveWithShotIndex(pose, view, unitId, null);
+
+        internal void DriveWithShotIndex(PlayableDisplayPose pose, PlayableSnapshot view, int unitId, TankShotIndex shots)
         {
             if(art==null)Initialize();
             bool reset=!initialized||generation!=view.Generation||view.Tick<lastTick;
-            if(!reset&&!view.Paused){
+            if(!reset&&!view.Paused&&(pose.Hull!=previous.Hull||!pose.Position.Equals(previous.Position))){
                 double yaw=Angle(pose.Hull-previous.Hull),mid=previous.Hull+yaw*.5;
                 double travel=((pose.Position.X-previous.Position.X)*Math.Cos(mid)+(pose.Position.Z-previous.Position.Z)*Math.Sin(mid))/transform.lossyScale.x;
                 left+=travel+yaw*TrackX;right+=travel-yaw*TrackX;
             }
-            if(reset){left=right=0;lastShot=view.Sounds.Count==0?-1:view.Sounds.Max(s=>s.Id);shotTime=double.NegativeInfinity;}
+            if(reset){left=right=0;shotTime=double.NegativeInfinity;}
             double time=view.Tick/30d;
-            foreach(var s in view.Sounds)if(s.Id>lastShot){if(!view.Paused&&s.Kind==PlayableSoundKind.Shot&&s.Weapon==PlayableEntityKind.Tank&&s.UnitId==unitId)shotTime=s.Tick/30d;lastShot=Math.Max(lastShot,s.Id);}
+            if (shots == null) ObserveShots(view.Sounds, unitId, view.Paused, reset, ref lastShot, ref shotTime);
+            else shots.Observe(view.Sounds, unitId, view.Paused, reset, ref lastShot, ref shotTime);
+            bool fastSampling = TrackLoopLength >= SmallestNormal && TrackLoopLength < float.MaxValue * .5f;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            fastSampling &= FastSamplingForQa ?? !StockSamplingRequested;
+#endif
             for(int side=0;side<2;side++){
                 double distance=side==0?left:right;
                 if(!reset&&displayedTravel[side]==distance)continue;
                 float phase=(float)(distance%TrackLoopLength);
-                for(int i=0;i<36;i++){SampleTrack(i*TrackLoopLength/36+phase,out float z,out float y,out float a);var t=links[side][i];t.localPosition=new Vector3(linkX[side][i],y,z);t.localRotation=a==upperAngle?upperRotation:a==Mathf.PI?lowerRotation:Quaternion.Euler(a*Mathf.Rad2Deg,0,0);}
+                for(int i=0;i<36;i++)
+                {
+                    float z, y, angle;
+                    if (fastSampling) SampleWrappedTrack(WrapLinkDistance(i*TrackLoopLength/36+phase), out z, out y, out angle);
+                    else SampleTrack(i*TrackLoopLength/36+phase, out z, out y, out angle);
+                    var rotation=angle==upperAngle?upperRotation:angle==Mathf.PI?lowerRotation:Quaternion.Euler(angle*Mathf.Rad2Deg,0,0);
+                    links[side][i].SetLocalPositionAndRotation(new Vector3(linkX[side][i],y,z),rotation);
+                }
                 for(int i=0;i<6;i++)wheels[side][i].localRotation=Quaternion.AngleAxis((float)(distance/(WheelRadius*wheelScaleY[side][i])*Mathf.Rad2Deg),Vector3.right)*wheelRest[side][i];
                 displayedTravel[side]=distance;
             }
             float age=(float)(time-shotTime),recoil=age>=0&&age<art.recoilSeconds?art.recoilTravel*(1-age/art.recoilSeconds):0;
-            barrel.localPosition=barrelRest+Vector3.back*recoil;
-            flash.SetActive(age>=0&&age<art.flashSeconds);flash.transform.localScale=Vector3.one*art.flashSize*2;flashMaterial.SetFloat("_Phase",Mathf.Clamp01(age/art.flashSeconds));
-            float rotor=(float)((left+right)*.5*art.rotorDegreesPerMeter%360);if(rotorL)rotorL.localRotation=Quaternion.Euler(0,0,rotor);if(rotorR)rotorR.localRotation=Quaternion.Euler(0,0,-rotor);
+            if(reset||recoil!=renderedRecoil){barrel.localPosition=barrelRest+Vector3.back*recoil;renderedRecoil=recoil;}
+            bool flashing=age>=0&&age<art.flashSeconds;
+            if(flash.activeSelf!=flashing)flash.SetActive(flashing);
+            float flashPhase=Mathf.Clamp01(age/art.flashSeconds);
+            if(reset||flashPhase!=renderedFlashPhase){flashMaterial.SetFloat("_Phase",flashPhase);renderedFlashPhase=flashPhase;}
+            if(rotorL||rotorR)
+            {
+                float rotor=(float)((left+right)*.5*art.rotorDegreesPerMeter%360);
+                if(reset||rotor!=renderedRotor)
+                {
+                    if(rotorL)rotorL.localRotation=Quaternion.Euler(0,0,rotor);
+                    if(rotorR)rotorR.localRotation=Quaternion.Euler(0,0,-rotor);
+                    renderedRotor=rotor;
+                }
+            }
             initialized=true;previous=pose;generation=view.Generation;lastTick=view.Tick;
         }
-        public void SampleTrack(float distance,out float z,out float y,out float angle)
+        private static void ObserveShots(IReadOnlyList<PlayableSoundEvent> sounds, int unitId, bool paused, bool reset,
+            ref long lastShot, ref double shotTime)
         {
-            float s=Mathf.Repeat(distance,TrackLoopLength);
+            if (reset) lastShot = sounds.Count == 0 ? -1 : sounds.Max(sound => sound.Id);
+            foreach (var sound in sounds)
+            {
+                if (sound.Id <= lastShot) continue;
+                if (!paused && sound.Kind == PlayableSoundKind.Shot && sound.Weapon == PlayableEntityKind.Tank && sound.UnitId == unitId)
+                    shotTime = sound.Tick / 30d;
+                lastShot = sound.Id;
+            }
+        }
+
+        public void SampleTrack(float distance,out float z,out float y,out float angle) =>
+            SampleWrappedTrack(Mathf.Repeat(distance,TrackLoopLength),out z,out y,out angle);
+
+        private float WrapLinkDistance(float distance)
+        {
+            float length = TrackLoopLength;
+            // A live link starts inside the loop and adds one signed remainder.
+            // Use the same +/- length as Repeat. Preserve its general path for
+            // values outside that range and for possible subnormal division.
+            if (distance > 0 && distance < length) return distance;
+            if (distance >= length && distance < 2f * length) return distance - length;
+            if (distance >= -length && distance < -SmallestNormal * length) return distance + length;
+            return Mathf.Repeat(distance, length);
+        }
+
+        private void SampleWrappedTrack(float s,out float z,out float y,out float angle)
+        {
             if(s<upperLength){z=rearZ+rearRadius*upperSin+s*upperCos;y=rearHeight+rearRadius*upperCos-s*upperSin;angle=upperAngle;return;}
             s-=upperLength;float arc=frontRadius*(Mathf.PI-upperAngle);
             if(s<arc){angle=upperAngle+s/frontRadius;z=frontZ+frontRadius*Mathf.Sin(angle);y=frontHeight+frontRadius*Mathf.Cos(angle);return;}
@@ -106,5 +170,44 @@ namespace Spacewars.Presentation
             angle=(s-Straight)/Radius;z=-half-Radius*Mathf.Sin(angle);y=TrackY-Radius*Mathf.Cos(angle);angle+=Mathf.PI;
         }
         void OnDestroy(){if(flashMaterial){if(Application.isPlaying)Destroy(flashMaterial);else DestroyImmediate(flashMaterial);}}
+    }
+
+    // A seat receives an immutable journal already filtered to its own visibility.
+    internal sealed class TankShotIndex
+    {
+        private IReadOnlyList<PlayableSoundEvent> indexedSounds;
+        private readonly Dictionary<int, PlayableSoundEvent> latestShot = new Dictionary<int, PlayableSoundEvent>();
+        private long latestEventId;
+
+        internal void Observe(IReadOnlyList<PlayableSoundEvent> sounds, int unitId, bool paused, bool reset,
+            ref long lastShot, ref double shotTime)
+        {
+            if (!ReferenceEquals(indexedSounds, sounds))
+            {
+                latestShot.Clear();
+                latestEventId = long.MinValue;
+                for (int i = 0; i < sounds.Count; i++)
+                {
+                    var sound = sounds[i];
+                    // The old cursor advances on every event, including other units
+                    // and non-shots. Out-of-order and duplicate IDs cannot fire later.
+                    if (sound.Id <= latestEventId) continue;
+                    latestEventId = sound.Id;
+                    if (sound.Kind == PlayableSoundKind.Shot && sound.Weapon == PlayableEntityKind.Tank)
+                        latestShot[sound.UnitId] = sound;
+                }
+                indexedSounds = sounds;
+            }
+
+            if (reset)
+            {
+                lastShot = sounds.Count == 0 ? -1 : latestEventId;
+                return;
+            }
+            if (latestEventId <= lastShot) return;
+            if (!paused && latestShot.TryGetValue(unitId, out var shot) && shot.Id > lastShot)
+                shotTime = shot.Tick / 30d;
+            lastShot = latestEventId;
+        }
     }
 }

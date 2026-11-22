@@ -59,7 +59,7 @@ namespace Spacewars.Tests.PlayMode
             Application.logMessageReceived+=Log;LogAssert.ignoreFailingMessages=true;
             try{
                 CreateHost();var maps=Get<VisualElement>("lobbyScreen").Q<DropdownField>("lobby-map-choice").choices.ToArray();UnityEngine.Object.DestroyImmediate(host);host=null;app=null;yield return null;
-                Assert.AreEqual(9,maps.Length,"Every shipped lobby map must be covered.");var ordered=maps.OrderBy(m=>m==AntennaCityMap.DisplayName?0:1).ToArray();
+                Assert.AreEqual(10,maps.Length,"Every shipped lobby map must be covered.");var ordered=maps.OrderBy(m=>m==AntennaCityMap.DisplayName?0:1).ToArray();
                 for(int index=0;index<ordered.Length;index++){
                     current=new Result{map=ordered[index]};report.maps.Add(current);Save();if(!string.IsNullOrEmpty(folder))File.WriteAllText(Path.Combine(folder,"phase.txt"),(index+1)+"/"+ordered.Length+" "+current.map+" preparation");
                     PlayableRuntime launched=null;Exception setup=null;float started=Time.realtimeSinceStartup;

@@ -64,12 +64,14 @@ namespace Spacewars.Tests.EditMode
                 var defense=(AiDefensePlanner)Get(Loop,"defense");long local=2;if(kind==PlayableCommandKind.Attack)defense.Commit(o,Action(o,local,kind,action.Target,action.TargetId),Registry,P);
                 StageItem(o,action,AiDefensePlanner.Policy,priority,1,local,due,expires,r=>{defense.ObserveReceipt(r);Receipts++;if(callbackFault)throw new InvalidOperationException("urgent-receipt");});
             }
-            internal void StageMicroCallbackFault()
+            internal void StageMicroCallbackFault()=>StageMicro(true);
+            internal void StageMicro(bool callbackFault=false,bool focus=false)
             {
                 var o=PlayableAiObservation.From(View());long local=Micro.PendingId==0?2:Micro.PendingId;
-                var action=Action(o,local,PlayableCommandKind.Move,new NavPoint(-20,15),tower:Tower);
-                Micro.Commit(new AiCombatMicroPlan{Action=action,Phase=AiCombatMicroPhase.Repair,Army=Registry.ArmyFor(Patient)},Gen,D.Tick);
-                StageItem(o,Action(o,101,action.Kind,action.Target,tower:Tower),AiCombatMicroPolicy.Policy,0,2,local,50,100,r=>{Micro.Receipt(r);throw new InvalidOperationException("micro-cancel-receipt");});
+                var action=focus?Action(o,local,PlayableCommandKind.Attack,new NavPoint(-7,15),target:Enemy):
+                    Action(o,local,PlayableCommandKind.Move,new NavPoint(-20,15),tower:Tower);
+                Micro.Commit(new AiCombatMicroPlan{Action=action,Phase=focus?AiCombatMicroPhase.Focus:AiCombatMicroPhase.Repair,Army=Registry.ArmyFor(Patient)},Gen,D.Tick);
+                StageItem(o,Action(o,101,action.Kind,action.Target,target:action.TargetId,tower:action.ParentId),AiCombatMicroPolicy.Policy,0,2,local,50,100,r=>{Micro.Receipt(r);if(callbackFault)throw new InvalidOperationException("micro-cancel-receipt");});
             }
             void StageItem(PlayableAiObservation o,PlayableAiAction action,string policy,int priority,int ordinal,long local,long due,long expires,Action<PlayableAiTraceRecord> receipt)
             {
@@ -118,6 +120,30 @@ namespace Spacewars.Tests.EditMode
             var error=Assert.Catch(()=>w.Loop.Deliver(w.D,0,false));
             Assert.AreEqual(!committed,w.Micro.Reserves(w.Patient));Assert.AreEqual(committed?100:10,w.View().Entities.Single(u=>u.Id==w.Patient).OrderStamp.ActionId);
             if(committed){Assert.IsInstanceOf<PlayableDomain.TacticalCommitFailure>(error);Assert.AreEqual(PlayableDomain.TacticalCommitPhase.Committed,((PlayableDomain.TacticalCommitFailure)error).Phase);Assert.AreEqual("committed-control",((PlayableDomain.TacticalCommitFailure)error).Original.Message);}
+        }
+        [TestCase("held")]
+        [TestCase("dead")]
+        public void ReviewCancelsPendingMicroAfterRecipientIsLost(string loss)
+        {
+            using var w=new World();
+            w.StageMicro(focus:loss=="dead");
+            CollectionAssert.AreEqual(WorldWire.Pack(w.Loop.WriteState),WorldWire.Pack(w.Loop.CreateReviewClone(0).WriteState));
+
+            if(loss=="held")
+                Assert.AreEqual(PlayableCommandStatus.Applied,w.D.Apply(new PlayableCommand(Gen,3,"player-1",PlayableCommandKind.Hold,new[]{w.Patient},default),out _));
+            else
+                typeof(PlayableDomain).GetMethod("Damage",F).Invoke(w.D,new object[]{w.Patient,1000});
+
+            w.Loop.Review(w.View(),0);
+
+            var clone=w.Loop.CreateReviewClone(0);
+            CollectionAssert.AreEqual(WorldWire.Pack(w.Loop.WriteState),WorldWire.Pack(clone.WriteState));
+            Assert.AreNotEqual(2,w.Micro.PendingId);
+            Assert.False(w.Micro.Reserves(w.Patient));
+            Assert.IsEmpty(w.Loop.Budget.Capture().Unpaid.Where(x=>x.Action.ActionId==101));
+            var terminal=w.Loop.Checkpoint.Records.Single(r=>r.ActionId==101);
+            Assert.AreEqual(PlayableAiDeliveryStatus.Cancelled,terminal.Status);
+            Assert.Zero(terminal.CommandSequence);
         }
         [Test] public void FailedMicroCancellationAfterAcceptedCommandClearsTheSinglePendingClaim()
         {

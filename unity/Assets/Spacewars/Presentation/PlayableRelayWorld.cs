@@ -45,7 +45,11 @@ namespace Spacewars.Presentation
                 var control=state!=null?state.Owner:known?.Owner;
                 Color? owner=control.HasValue?(OwnerPaint!=null?OwnerPaint(control):control==PlayableOwner.Enemy?Enemy:Ally):(Color?)null;
                 relay.Root.SetActive(true);
-                if(state!=null)relay.Motion.Sample(owner,state.ControlledSeconds);
+                if(state!=null)
+                {
+                    double offset=owner.HasValue?AnimationSeconds(view)-view.Tick/30d:0;
+                    relay.Motion.Sample(owner,System.Math.Max(0,state.ControlledSeconds+offset));
+                }
                 else relay.Motion.Drive(owner,0);
                 if(camera)relay.Detail.Select(camera);
                 double progress=state?.Progress??0;
@@ -57,6 +61,19 @@ namespace Spacewars.Presentation
                 if(state?.Contested==true)color*=.65f+.35f*(float)(.5+.5*System.Math.Sin(view.Tick/30d*System.Math.PI*2*profile.CapturePulseHz));
                 color.a=1;var block=new MaterialPropertyBlock();block.SetColor("_BaseColor",color);relay.ProgressRenderer.SetPropertyBlock(block);
             }
+        }
+        internal TerritorySite PickRelay(PlayableSnapshot view,Ray ray,double surfaceDistance)
+        {
+            TerritorySite hit=null;
+            double nearest=surfaceDistance;
+            float diameter=(float)(2*(view.ActiveProfile??profile).RelayFootprintRadius);
+            foreach(var site in view.PublicSites){
+                if(site.Kind!=PlayableBuildingKind.RelayTower||!relayViews.TryGetValue(site.Id,out var relay)||!relay.Root.activeInHierarchy)continue;
+                var bounds=new Bounds(relay.Root.transform.position+Vector3.up*(relay.Height*.5f),
+                    new Vector3(diameter,relay.Height,diameter));
+                if(bounds.IntersectRay(ray,out float distance)&&distance<=nearest){nearest=distance;hit=site;}
+            }
+            return hit;
         }
         public bool TryRelayIncomeAnchor(int siteId,out Vector3 point)
         {

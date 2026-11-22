@@ -1,0 +1,17 @@
+{
+  "id": "nova-city-night-line-v1",
+  "revision": 1,
+  "roadValue": 0.36,
+  "yardValue": 0.43,
+  "apronValue": 0.51,
+  "facadeValue": 0.43,
+  "textureTile": 4,
+  "textureContrast": 0.25,
+  "patchSize": 19,
+  "bayWidth": 3,
+  "roofRecess": 0.8,
+  "parapetWidth": 0.35,
+  "equipmentSpacing": 9,
+  "windowEmission": 0.55,
+  "signEmission": 0.85
+}

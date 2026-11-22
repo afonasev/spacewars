@@ -16,7 +16,8 @@ namespace Spacewars.Simulation
         private INavMotionWork work;
         private Exception infrastructureFailure;
         private long sequence;
-        private int remaining;
+        private int activeHelpers;
+        private bool helperFinished;
         private long completedBatches;
         private bool running,stopping;
         internal int HelperCount=>helpers.Length;
@@ -30,19 +31,25 @@ namespace Spacewars.Simulation
                 helpers[i]=new Thread(Loop){IsBackground=true,Name="Spacewars.Motion."+i};helpers[i].Start();
             }}catch{Dispose();throw;}
         }
-        internal void Dispatch(INavMotionWork next)
+        internal void Dispatch(INavMotionWork next) => Dispatch(next,ownerParticipates:true);
+        internal void DispatchWorkers(INavMotionWork next) => Dispatch(next,ownerParticipates:false);
+        private void Dispatch(INavMotionWork next,bool ownerParticipates)
         {
             if(next==null)throw new ArgumentNullException(nameof(next));
             lock(gate){
                 if(stopping)throw new ObjectDisposedException(nameof(NavMotionExecutor));
                 if(running)throw new InvalidOperationException("Motion executor already has a job.");
-                running=true;work=next;remaining=helpers.Length;infrastructureFailure=null;sequence++;Monitor.PulseAll(gate);
+                running=true;helperFinished=false;work=next;infrastructureFailure=null;sequence++;Monitor.PulseAll(gate);
             }
             Exception failure=null;
-            try{next.RunRows();}catch(Exception error){failure=error;}
+            try{if(ownerParticipates)next.RunRows();}catch(Exception error){failure=error;}
             finally{lock(gate){
-                while(remaining!=0)Monitor.Wait(gate);
-                failure=failure??infrastructureFailure;work=null;infrastructureFailure=null;completedBatches++;running=false;Monitor.PulseAll(gate);
+                // One participant must drain the cursor before closing admission.
+                // Worker-only batches keep the authority thread outside RunRows.
+                while(!ownerParticipates&&!helperFinished)Monitor.Wait(gate);
+                work=null;
+                while(activeHelpers!=0)Monitor.Wait(gate);
+                failure=failure??infrastructureFailure;infrastructureFailure=null;completedBatches++;running=false;Monitor.PulseAll(gate);
             }}
             if(failure!=null)throw failure;
         }
@@ -51,10 +58,12 @@ namespace Spacewars.Simulation
             long observed=0;
             while(true){
                 INavMotionWork job;
-                lock(gate){while(sequence==observed&&!stopping)Monitor.Wait(gate);if(stopping)return;observed=sequence;job=work;}
+                lock(gate){while(!stopping&&(sequence==observed||work==null))Monitor.Wait(gate);
+                    if(stopping)return;
+                    observed=sequence;job=work;activeHelpers++;}
                 try{job.RunRows();}
                 catch(Exception error){lock(gate)if(infrastructureFailure==null)infrastructureFailure=error;}
-                finally{job=null;lock(gate){remaining--;if(remaining==0)Monitor.PulseAll(gate);}}
+                finally{job=null;lock(gate){helperFinished=true;activeHelpers--;if(activeHelpers==0)Monitor.PulseAll(gate);}}
             }
         }
         public void Dispose()

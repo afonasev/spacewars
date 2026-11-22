@@ -16,6 +16,7 @@ namespace Spacewars.Runtime
             foreach(var choice in choices)
             {
                 if(saving!=null&&AiEconomyAdmission.IntentId("economy",choice.Action)!=AiEconomyAdmission.IntentId("economy",saving.Candidate.Action))continue;
+                if(choice.Action.Kind==PlayableCommandKind.BuildAt&&infrastructure.ClaimsSlot(choice.Action.SiteId,choice.Action.SlotId))continue;
                 var fork=economy.Fork();var action=fork.Admit(o,choice.Action);
                 // An unmet useful position minimum is ordinary development, never survival.
                 var quoted=Proposal("economy",action,o,action.Kind==PlayableCommandKind.BuildAt?1:0);if(quoted==null)continue;

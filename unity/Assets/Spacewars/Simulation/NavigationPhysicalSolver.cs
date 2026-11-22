@@ -54,7 +54,7 @@ namespace Spacewars.Simulation
                 NavPhysicalSolveValidation.Legs(legs,out double sum);if(sum!=cost||legs.Count>0&&(!legs[0].From.Equals(subscription.Origin)||!legs[legs.Count-1].To.Equals(subscription.AssignedEndpoint)))throw new ArgumentException("Physical route endpoint/cost contradiction.");
             }
             using(var allocation=new NavStorageAllocation(reader.Reservation.TryReserve)){
-                allocation.Reserve(128);var route=allocation.Register(new NavTypedRoute(subscription,legs,cost,true));route.ownedSubscription=NavPhysicalMacro.Acquire(route,subscription.MetadataOwner);NavPhysicalMacro.Acquire(route,storage);if(plan!=null){plan.Validate(route);route.RecastPlan=NavPhysicalMacro.Acquire(route,plan);}return route;
+                allocation.Reserve(128);var route=allocation.Register(new NavTypedRoute(subscription,legs,cost,true));route.ownedSubscription=NavPhysicalMacro.Acquire(route,subscription.MetadataOwner);NavPhysicalMacro.Acquire(route,storage);if(plan!=null){plan.Validate(route);route.BindRecastPlan(plan);}return route;
             }
         }
     }

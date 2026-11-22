@@ -30,29 +30,43 @@ namespace Spacewars.Runtime
         internal bool PrepareTickQuantum(long upcomingTick,int budget,bool asynchronous)
         {
             if(AccruedCreditsEnabled)throw new InvalidOperationException("Accrued policy requires explicit authority credit operands.");
+            // A direct transport can supply terminal answers without attaching a
+            // solver. Drain those receipts before inspecting an otherwise empty
+            // quantum; an attached/persisted solver must still finish its work.
             InitializePhysicalHostForCapture();
             NavigationHostRoot source=PinCommittedHostRoot(),next=null;
-            NavigationRetentionBudget.Scope scope=null;bool changed=false;
+            NavigationRetentionBudget.Scope scope=null;bool changed=false,completeTransport=false;
             try{
                 if(source==null)return false;
+                bool transportOnly;
+                using(EnterTransport())transportOnly=!asynchronous&&certifiedHost==null&&source.QuantumRunnable&&Requests.Count==0&&RegisteredRequests.Count==0&&
+                    source.Rows.Count==0&&source.ArrivalWork.Count==0&&source.Delivered.Count==0&&source.Scan.Count==0&&source.Frontier.Stage==CertifiedRouteKernel.PumpStage.Idle;
+                bool transportReady=transportOnly&&DeliveryBarrierReady;
                 long prefix;bool work;
                 using(EnterTransport()){
                     prefix=requestSequence;
                     work=pending.Count!=0||allocating.Count!=0||probes.Count!=0||Requests.Count!=0||source.Rows.Count!=0||source.ArrivalWork.Count!=0||source.Delivered.Count!=0;
                     if(source.TickQuantum&&source.QuantumGeneration!=Generation)throw new InvalidOperationException("Quantum generation differs from authority.");
-                    if(source.QuantumRunnable)return asynchronous;
+                    if(source.QuantumRunnable){
+                        completeTransport=transportReady&&certifiedHost==null&&Requests.Count==0&&RegisteredRequests.Count==0&&
+                            source.Rows.Count==0&&source.ArrivalWork.Count==0&&source.Delivered.Count==0&&source.Scan.Count==0&&source.Frontier.Stage==CertifiedRouteKernel.PumpStage.Idle;
+                        if(!completeTransport)return asynchronous;
+                    }
                     // Fixed polls inspect the SAME completed quantum until the world
                     // step consumes it; they never mint another grant.
-                    if(!asynchronous&&source.TickQuantum&&source.QuantumTick==upcomingTick&&source.QuantumSerial>source.ConsumedQuantum)return true;
+                    if(!completeTransport&&!asynchronous&&source.TickQuantum&&source.QuantumTick==upcomingTick&&source.QuantumSerial>source.ConsumedQuantum)return true;
                     if(!work&&(!source.TickQuantum||source.QuantumSerial==source.ConsumedQuantum))return true;
                 }
                 if(!TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,Generation,Admission.PublicationIdentity,out scope))return false;
                 next=source.ForkOwned(scope.OwnedReservation());
-                if(next.TickQuantum&&next.QuantumSerial>next.ConsumedQuantum)next.ConsumeQuantum();
-                if(work)next.IssueQuantum(Generation,upcomingTick,budget,prefix);
+                if(completeTransport)next.CompleteQuantum();
+                else{
+                    if(next.TickQuantum&&next.QuantumSerial>next.ConsumedQuantum)next.ConsumeQuantum();
+                    if(work)next.IssueQuantum(Generation,upcomingTick,budget,prefix);
+                }
                 next.SealPrepared();scope.Attach(next);
                 PublishPhysicalHostRoot(scope,source,next,()=>{});changed=true;
-                return asynchronous||!work;
+                return completeTransport||asynchronous||!work;
             }catch(PhysicalIngressRefused){return asynchronous;}
             finally{next?.ReleaseStorage();scope?.Discard();source?.Release();if(changed)SignalHost();}
         }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
+using Spacewars.Simulation;
 namespace Spacewars.Presentation
 {
     [Serializable] public sealed class NullDockArtProfile
@@ -42,6 +43,40 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Threat zones","Rear pockets hue","Static floor-zone hue; does not describe current enemy presence.","turn",0f,1f,0.01f)] public float rearHue=0.39f;
         [SurfaceSetting("Threat zones","Rear pockets saturation","Strength of the static painted-metal floor color.","ratio",0f,0.65f,0.01f)] public float rearSaturation=0.25f;
         [SurfaceSetting("Threat zones","Rear pockets value","Brightness beneath units in this floor zone.","ratio",0.3f,0.85f,0.01f)] public float rearValue=0.6f;
+        internal const float RelayPavingRadiusScale = 1.09f;
+        internal const float RelayPavingDiagonal = 1.72f;
+        internal const float RelayStripeWidth = .2f;
+        internal static readonly Color RelayPaving = new Color(.24f, .28f, .31f);
+        internal static readonly Color RelayStripe = new Color(.95f, .56f, .13f);
+
+        internal static Color PaintRelayPaving(Color ground, NavPoint point, NavPoint[] relays, float radius, float pixel)
+        {
+            if (relays.Length == 0) return ground;
+            double DistanceSquared(NavPoint center)
+            {
+                double dx = point.X - center.X, dz = point.Z - center.Z;
+                return dx * dx + dz * dz;
+            }
+            var nearest = relays[0];
+            double distanceSquared = DistanceSquared(nearest);
+            for (int i = 1; i < relays.Length; i++)
+            {
+                double candidate = DistanceSquared(relays[i]);
+                if (candidate > distanceSquared) continue;
+                nearest = relays[i];
+                distanceSquared = candidate;
+            }
+
+            float x = (float)Math.Abs(point.X - nearest.X);
+            float z = (float)Math.Abs(point.Z - nearest.Z);
+            float shoulder = Mathf.Max(Mathf.Max(x, z), (x + z) / RelayPavingDiagonal);
+            float paving = Mathf.Clamp01((radius * RelayPavingRadiusScale - shoulder) / pixel + .5f);
+            float distance = (float)Math.Sqrt(distanceSquared);
+            float stripe = (Mathf.Min(distance + pixel * .5f, radius) -
+                Mathf.Max(distance - pixel * .5f, radius - RelayStripeWidth)) / pixel;
+            return Color.Lerp(Color.Lerp(ground, RelayPaving, paving), RelayStripe, stripe);
+        }
+
         public Color Ceramic=>new Color(ceramicValue,ceramicValue*.985f,ceramicValue*.95f);
         public Color Core=>new Color(.10f,.58f,.72f);
         public Color Headquarters=>Color.HSVToRGB(baseHue,baseSaturation,headquartersValue);

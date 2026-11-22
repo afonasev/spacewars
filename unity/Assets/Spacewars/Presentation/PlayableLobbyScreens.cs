@@ -11,13 +11,12 @@ namespace Spacewars.Presentation
         private Button LobbyScreenButton(NativeLobbyParticipant participant,int index)
         {
             int count=NativeScreenLayout.Count(lobbySetup);
-            var button=new Button(()=>OpenLobbyScreenPicker(participant,index)){name="lobby-screen-"+index,tooltip=lobbySetup.Spectator?"В режиме зрителя используется весь экран":"Экран: "+NativeScreenLayout.Label(participant.ScreenSlot,count)};
+            var button=new Button(()=>OpenLobbyScreenPicker(participant,index)){name="lobby-screen-"+index,tooltip="Экран: "+NativeScreenLayout.Label(participant.ScreenSlot,count)};
             StyleAction(button);button.style.width=46;button.style.minWidth=46;button.style.height=38;button.style.marginRight=6;button.style.paddingLeft=button.style.paddingRight=0;
-            button.Add(new LobbyScreenIcon(participant.ScreenSlot,count));button.SetEnabled(!lobbySetup.Spectator);return button;
+            button.Add(new LobbyScreenIcon(participant.ScreenSlot,count));return button;
         }
         private void OpenLobbyScreenPicker(NativeLobbyParticipant participant,int index)
         {
-            if(lobbySetup.Spectator)return;
             CloseLobbyColorPicker(false);CloseLobbyScreenPicker(false);
             lobbyScreenAnchor=rosterPanel.Q<Button>("lobby-screen-"+index);
             lobbyScreenOverlay=new VisualElement{name="lobby-screen-overlay"};lobbyScreenOverlay.style.position=Position.Absolute;

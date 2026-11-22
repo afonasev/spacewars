@@ -7,7 +7,7 @@ using System.Text;
 
 namespace Spacewars.Simulation.Ai
 {
-    public enum AiDifficulty { Recruit, Fighter, Veteran }
+    public enum AiDifficulty { Recruit, Fighter, Veteran, Expert, Cheater }
     [Serializable] public sealed class AiNumericValue { public string path; public double value; }
     [Serializable] public sealed class AiProfileData
     {
@@ -17,9 +17,26 @@ namespace Spacewars.Simulation.Ai
     }
     public sealed class AiProfile
     {
+        private static readonly HashSet<string> IncomeAdditions=new HashSet<string>(StringComparer.Ordinal)
+        {
+            "economy.continuityEnabled","economy.earlyMinePaybackSeconds","economy.minimumIncomeToSpendRatio","economy.surplusIncomeToSpendRatio",
+            "technology.minimumIncomeBuildings","technology.mixedBaseIncomeBuildings",
+            "technology.rocketExplorers","technology.massAirPercent","technology.massAirMinimum","technology.massAirPerOpponent",
+            "openingsMidgame.outpostHomeBuildings","openingsMidgame.outpostTwoProducerShare","openingsMidgame.noOutpostTwoProducerShare",
+            "openingsMidgame.earlyMineRaidValue","openingsMidgame.openingRelayValue","openingsMidgame.midgameRelayValue"
+        };
+        private static readonly HashSet<string> DefenseAdditions=new HashSet<string>(StringComparer.Ordinal)
+        {
+            "positionDevelopment.homeCombatLimit","positionDevelopment.outpostCombatLimit",
+            "positionDevelopment.repairHomeBuildings","positionDevelopment.secondRepairBases",
+            "positionDevelopment.retrofitSeconds","positionDevelopment.airIntelSeconds","positionDevelopment.veteranSentryReserve"
+        };
         private readonly Dictionary<string,double> values;
         public string Id {get;} public int Revision {get;} public string Hash {get;}
-        public static AiProfile Initial=>new AiProfile(new AiProfileData{fields=AiProfileMetadata.Fields.Select(f=>new AiNumericValue{path=f.Path,value=f.Initial}).ToArray()});
+        // Values and identity are immutable; CopyData remains deeply detached.
+        // Ledger defaults and detached owners must not rebuild/hash all fields.
+        private static readonly Lazy<AiProfile> initial=new Lazy<AiProfile>(()=>new AiProfile(new AiProfileData{fields=AiProfileMetadata.Fields.Select(f=>new AiNumericValue{path=f.Path,value=f.Initial}).ToArray()}));
+        public static AiProfile Initial=>initial.Value;
         public AiProfile(AiProfileData data)
         {
             if(data==null||data.schemaVersion!=1||string.IsNullOrWhiteSpace(data.id)||data.revision<1||data.fields==null)throw new ArgumentException("Invalid native AI profile identity.");
@@ -32,16 +49,34 @@ namespace Spacewars.Simulation.Ai
                 if(descriptor==null)throw new ArgumentException("Unknown AI field: "+f.path);
                 descriptor.Validate(f.value);values.Add(f.path,f.value);
             }
+            foreach(var field in AiProfileMetadata.Fields.Where(f=>IsDefaultExtensionField(f.Path)))
+                if(!values.ContainsKey(field.Path))values.Add(field.Path,field.Initial);
             if(values.Count!=AiProfileMetadata.Fields.Count)throw new ArgumentException("Incomplete AI profile.");
-            foreach(var field in AiProfileMetadata.Fields.Where(f=>f.Unit=="s"))SecondsToTicks(values[field.Path],30);
+            foreach(var field in AiProfileMetadata.Fields.Where(f=>f.Unit=="s"&&(!f.InheritsWhenUnset||values[f.Path]!=f.Minimum)))SecondsToTicks(values[field.Path],30);
             ValidateGroups();Id=data.id;Revision=data.revision;
-            Hash=Digest(Id+"\n"+Revision+"\n"+string.Join("\n",values.OrderBy(v=>v.Key,StringComparer.Ordinal).Select(v=>v.Key+"="+v.Value.ToString("R",CultureInfo.InvariantCulture))));
+            Hash=Digest(Id+"\n"+Revision+"\n"+string.Join("\n",IdentityValues().OrderBy(v=>v.Key,StringComparer.Ordinal).Select(v=>v.Key+"="+v.Value.ToString("R",CultureInfo.InvariantCulture))));
         }
+        // Default extensions keep the established opening seed binding and
+        // saved default profile identity. Tuned values still contribute to identity.
+        private IEnumerable<KeyValuePair<string,double>> IdentityValues()=>
+            values.Where(v=>!IsDefaultExtensionField(v.Key)||v.Value!=AiProfileMetadata.Field(v.Key).Initial);
+        internal static bool IsDefaultExtensionField(string path)=>path.StartsWith("turretBypass.",StringComparison.Ordinal)||IncomeAdditions.Contains(path)||DefenseAdditions.Contains(path)||path.StartsWith("difficulty.expert.",StringComparison.Ordinal)||path=="difficulty.cheater.incomeBonusPercent"||path=="scouting.maximumCombatHealthLossShare"||path.StartsWith("victoryConversion.",StringComparison.Ordinal);
         public double Value(string path)=>values[path];
         // The explicit legacy importer validates every historical value. Only
         // these two fields were absent; the live profile retains caller values.
-        internal string BeforeExpansionSelectionHash=>Digest(Id+"\n"+Revision+"\n"+string.Join("\n",values.Where(v=>v.Key!="economy.remoteExpansionShare"&&v.Key!="economy.enemyMainProtectedIncomeSites").OrderBy(v=>v.Key,StringComparer.Ordinal).Select(v=>v.Key+"="+v.Value.ToString("R",CultureInfo.InvariantCulture))));
-        public double DifficultyValue(AiDifficulty difficulty,string name)=>Value("difficulty."+DifficultyId(difficulty)+"."+name);
+        internal string BeforeExpansionSelectionHash=>Digest(Id+"\n"+Revision+"\n"+string.Join("\n",IdentityValues().Where(v=>v.Key!="economy.remoteExpansionShare"&&v.Key!="economy.enemyMainProtectedIncomeSites").OrderBy(v=>v.Key,StringComparer.Ordinal).Select(v=>v.Key+"="+v.Value.ToString("R",CultureInfo.InvariantCulture))));
+        public double DifficultyValue(AiDifficulty difficulty,string name)
+        {
+            if(name=="opening.earlyGroundShare"||name=="opening.incomeBeforeReinforcement")
+                return UsesExpertPolicy(difficulty)?Value("difficulty.expert."+name):0;
+            if(name=="incomeBonusPercent")
+                return UsesExpertPolicy(difficulty)?Value("difficulty."+DifficultyId(difficulty)+"."+name):0;
+            if(UsesExpertPolicy(difficulty)&&values.TryGetValue("difficulty.expert."+name,out double expert)&&expert!=-1)return expert;
+            return name.StartsWith("decision.",StringComparison.Ordinal)?Value(name):Value("difficulty."+DifficultyId(BehaviorDifficulty(difficulty))+"."+name);
+        }
+        public double IncomeMultiplier(AiDifficulty difficulty)=>1+DifficultyValue(difficulty,"incomeBonusPercent")/100d;
+        public static bool UsesExpertPolicy(AiDifficulty difficulty)=>difficulty is AiDifficulty.Expert or AiDifficulty.Cheater;
+        public static AiDifficulty BehaviorDifficulty(AiDifficulty difficulty)=>UsesExpertPolicy(difficulty)?AiDifficulty.Veteran:difficulty;
         public static string DifficultyId(AiDifficulty difficulty)
         {if(!Enum.IsDefined(typeof(AiDifficulty),difficulty))throw new ArgumentException("Unknown difficulty.");return difficulty.ToString().ToLowerInvariant();}
         public static long SecondsToTicks(double seconds,double tickRate)
@@ -65,7 +100,7 @@ namespace Spacewars.Simulation.Ai
                 if(descending?(a<b||b<c):(a>b||b>c))throw new ArgumentException("Difficulty ordering: "+name);
                 if(name.EndsWith("Seconds")&&(SecondsToTicks(a,30)<SecondsToTicks(b,30)||SecondsToTicks(b,30)<SecondsToTicks(c,30)))throw new ArgumentException("Rounded difficulty ordering.");
             }
-            foreach(var difficulty in new[]{AiDifficulty.Recruit,AiDifficulty.Fighter,AiDifficulty.Veteran})
+            foreach(var difficulty in new[]{AiDifficulty.Recruit,AiDifficulty.Fighter,AiDifficulty.Veteran,AiDifficulty.Expert})
             {
                 if(DifficultyValue(difficulty,"reactionSeconds")>DifficultyValue(difficulty,"control.reactionMaxSeconds")||
                     DifficultyValue(difficulty,"micro.shortStep")>DifficultyValue(difficulty,"micro.maxWithdrawal")||

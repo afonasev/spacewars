@@ -10,21 +10,23 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.TestTools;
 using UnityEngine.UIElements;
-using System.Reflection;
 namespace Spacewars.Tests.PlayMode
 {
     public sealed class GroundTrailDensityRenderingTests
     {
-        [Test] public void VehicleTrailControlsAreAvailableInGraphicsLabWithCountUnits()
+        [Test] public void VehicleTrailControlsAreOwnedByTheGraphicsProfile()
         {
             string output=Environment.GetEnvironmentVariable("SPACEWARS_TRAIL_DENSITY_OUTPUT");Assert.IsNotEmpty(output);Directory.CreateDirectory(output);
             var root=new VisualElement();var navigation=new NativeMenuNavigation(root);
             try{
                 var store=new NativeBalanceStore(PlayableProfile.Default,Path.Combine(output,"lab-controls.json"));store.Copy("Whole vehicle tracks");var view=new NativeBalanceView(root,navigation,store,()=>{});
-                var flags=BindingFlags.Instance|BindingFlags.NonPublic;typeof(NativeBalanceView).GetField("section",flags).SetValue(view,"Графика");typeof(NativeBalanceView).GetField("entity",flags).SetValue(view,"Следы техники");typeof(NativeBalanceView).GetMethod("RenderFields",flags).Invoke(view,null);
-                var threshold=root.Q<TextField>("visual.modelDetail.trailCrowdThreshold");Assert.NotNull(threshold);Assert.AreEqual("20",threshold.value);Assert.False(threshold.isReadOnly);Assert.True(threshold.tooltip.Contains("юн."));Assert.False(threshold.tooltip.Contains("%"));
-                Assert.AreEqual("4",root.Q<TextField>("visual.modelDetail.trailLargeCrowdDivisor").value);
-                Assert.AreEqual("18",root.Q<TextField>("visual.modelDetail.trailHideZoom").value);
+                view.Page.Q<TextField>("lab-search").value="visual.modelDetail";
+                Assert.IsNull(root.Q<TextField>("visual.modelDetail.trailCrowdThreshold"));
+                Assert.IsNull(root.Q<TextField>("visual.modelDetail.trailLargeCrowdDivisor"));
+                Assert.IsNull(root.Q<TextField>("visual.modelDetail.trailHideZoom"));
+                Assert.AreEqual(20,store.SelectedModelDetail.trailCrowdThreshold);
+                Assert.AreEqual(4,store.SelectedModelDetail.trailLargeCrowdDivisor);
+                Assert.AreEqual(18,store.SelectedModelDetail.trailHideZoom);
             }finally{navigation.Dispose();root.Clear();}
         }
         // Controlled visual fixture only: no game camera or authoritative journal changes.

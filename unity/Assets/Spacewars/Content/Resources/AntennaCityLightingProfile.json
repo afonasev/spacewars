@@ -1,0 +1,19 @@
+{
+  "id": "nova-city-night-line-lighting-v1",
+  "revision": 1,
+  "sunHue": 0.6,
+  "sunSaturation": 0.18,
+  "sunIntensity": 0.95,
+  "sunElevation": 35,
+  "sunAzimuth": -30,
+  "ambientHue": 0.6,
+  "ambientSaturation": 0.22,
+  "ambientValue": 0.62,
+  "shadowStrength": 0.55,
+  "steelHighlight": 0.18,
+  "steelExponent": 24,
+  "concreteHighlight": 0.03,
+  "concreteExponent": 12,
+  "shadowDistance": 90,
+  "shadowCoveragePadding": 0.3
+}

@@ -1,5 +1,7 @@
 using System;
 using System.Linq;
+using System.Collections.Generic;
+using System.Reflection;
 using NUnit.Framework;
 using Spacewars.Presentation;
 using Spacewars.Simulation;
@@ -30,6 +32,49 @@ public sealed class HawkProjectionTests
             world.UpdateAircraft(actor,e,obstructed,true);Assert.False(actor.Selection.activeSelf,"Selection must not paint a circle over another vehicle");
         }
         finally{world.Dispose();UnityEngine.Object.DestroyImmediate(host);}
+    }
+    [TestCase(false)]
+    [TestCase(true)]
+    public void WorldSelectionUsesTheRenderedAircraftForMouseAndGamepad(bool upgraded)
+    {
+        var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),new ProvingGroundMap());
+        var host=new GameObject("Air selection input");
+        var world=new PlayableWorld(host.transform,p,staged:true);
+        var seat=host.AddComponent<PlayableBootstrap>();seat.enabled=false;
+        const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+        void Put(string field,object value)=>typeof(PlayableBootstrap).GetField(field,flags).SetValue(seat,value);
+        try
+        {
+            var camera=new GameObject("Air selection camera").AddComponent<Camera>();
+            camera.transform.SetParent(host.transform);
+            camera.transform.position=new Vector3(0,22,-14);
+            camera.transform.LookAt(new Vector3(0,3,0));
+            camera.orthographic=true;camera.orthographicSize=10;
+            camera.pixelRect=new Rect(0,0,800,600);
+            var position=new NavPoint(0,0);
+            var hawk=new PlayableEntitySnapshot(99,PlayableOwner.Player,PlayableEntityKind.Hawk,position,60,false,0,0,0,upgraded:upgraded,altitude:7);
+            var snapshot=new PlayableSnapshot(p.ProfileId,p.Revision,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,null,new[]{hawk},Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null);
+            var actor=world.Tank(hawk.Id,true,PlayableEntityKind.Hawk);
+            world.UpdateAircraft(actor,hawk,snapshot,display:new PlayableDisplayPose(new NavPoint(2,0),0,0,7,0,0));
+            object Call(string method,params object[] args)=>typeof(PlayableBootstrap).GetMethod(method,flags).Invoke(seat,args);
+            Put("world",world);Put("view",snapshot);Put("cameraView",camera);Put("profile",p);
+
+            var body=(Vector2)camera.WorldToScreenPoint(actor.Hull.TransformPoint(Vector3.up));
+            var ground=(Vector2)camera.WorldToScreenPoint(world.AirGroundPoint(position));
+            var snapshotBody=(Vector2)camera.WorldToScreenPoint(world.EntityPoint(hawk));
+            Assert.AreEqual(hawk.Id,Call("Pick",body,true));
+            Assert.Zero((int)Call("Pick",ground,true));
+            Assert.Zero((int)Call("Pick",snapshotBody,true),"Hit testing tracks the displayed interpolation");
+            Put("battleCursor",body);Put("padCursorGround",new NavPoint(0,9));
+            Assert.AreEqual(hawk.Id,Call("OrdinaryPadHit"));
+            CollectionAssert.AreEqual(new[]{hawk.Id},(int[])Call("OrdinaryPadArea",.1d,false));
+            CollectionAssert.AreEqual(new[]{hawk.Id},(IEnumerable<int>)Call("BoxSelectionUnits",body-Vector2.one*4,body+Vector2.one*4));
+            Put("battleCursor",ground);Put("padCursorGround",position);
+            Assert.Zero((int)Call("OrdinaryPadHit"));
+            CollectionAssert.IsEmpty((int[])Call("OrdinaryPadArea",.1d,false));
+            CollectionAssert.AreEqual(new[]{hawk.Id},(int[])Call("OrdinaryPadArea",.1d,true));
+        }
+        finally{Put("world",null);world.Dispose();UnityEngine.Object.DestroyImmediate(host);}
     }
     [Test] public void AircraftCircleConformsToRampAndStaysUnderDisplayedBody()
     {

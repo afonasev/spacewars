@@ -23,6 +23,19 @@ namespace Spacewars.Tests.EditMode
                 foreach(var slot in site.DefenseSlots(p))Assert.True(map.SupportsFootprint(slot.Position,p.TurretFootprintRadius*Math.Sqrt(2)+p.TankCollisionRadius),"defense "+site.Id+"/"+slot.Id);
             }
         }
+        [Test] public void AllYardsUseTheirStreetFrameAndKeepExistingSiteAnchors()
+        {
+            var map=new AntennaCityMap();var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);var sites=map.Sites(p);
+            Assert.AreEqual(24,map.Yards.Count);
+            for(int sector=0;sector<6;sector++)for(int kind=0;kind<4;kind++){
+                int id=sector+1+kind*6;var site=sites.Single(s=>s.Id==id);var yard=map.Yards[sector*4+kind];var v=yard.Footprint.Vertices;
+                var expected=map.PointAt(-120+60*sector+(kind==3?30:0),kind==0?120:kind==1?82:kind==2?142:124);
+                Assert.AreEqual(expected.X,site.Position.X,1e-8);Assert.AreEqual(expected.Z,site.Position.Z,1e-8);
+                Assert.AreEqual(site.Position.X,v.Average(a=>a.X),1e-8);Assert.AreEqual(site.Position.Z,v.Average(a=>a.Z),1e-8);
+                double angle=map.SiteHeading(id);var a=v[0];var b=v[1];Assert.AreEqual(0,(b.X-a.X)*Math.Sin(angle)-(b.Z-a.Z)*Math.Cos(angle),1e-7,"yard axis "+id);
+                var original=new TerritorySite(id,site.Kind,site.Position,p);CollectionAssert.AreEqual(original.Slots.Select(slot=>slot.Position.X),site.Slots.Select(slot=>slot.Position.X));CollectionAssert.AreEqual(original.Slots.Select(slot=>slot.Position.Z),site.Slots.Select(slot=>slot.Position.Z));
+            }
+        }
         [TestCase(1d,4d)][TestCase(1.25d,5d)]
         public void EveryRampConnectsBothWaysAndCliffsNeverShortcut(double scale,double height)
         {
@@ -42,6 +55,42 @@ namespace Spacewars.Tests.EditMode
                 foreach(int side in new[]{-1,1})Assert.True(map.SupportsSweep(map.Local(angle,71.5,side*25,0),map.Local(angle,71.5,side*34,0),radius),"inner cross passage "+i+"/"+side);
             }
         }
+        [TestCase(10d,1d)]
+        [TestCase(12d,1d)]
+        [TestCase(14d,1.25d)]
+        public void AllThreeCentralHallsHaveOpenFlanks(double streetWidth,double scale)
+        {
+            var map=new AntennaCityMap(new AntennaCityProfileData{sideStreetWidth=streetWidth,scale=scale});
+            foreach(var (angle,index) in new[]{(-30,map.StationQuarter),(90,map.WorkshopQuarter),(210,map.MunicipalHallQuarter)}){
+                var solid=map.Quarters[index].Single();
+                foreach(int radius in new[]{42,52,60,67})
+                    Assert.True(solid.Contains(map.PointAt(angle,radius)),"continuous frontage toward the forum at "+radius);
+                Assert.True(map.SupportsFootprint(map.PointAt(angle,37),1.5*scale),"open ground in front of the gallery");
+                foreach(int side in new[]{-1,1})
+                    Assert.True(map.SupportsSweep(map.Local(angle,44,side*20,0),map.Local(angle,52,side*20,0),1.5*scale));
+                var rim=solid.Footprint.Vertices;
+                foreach(var road in map.Streets)
+                    for(int i=0;i<rim.Count;i++)
+                        Assert.Greater(road.Footprint.SegmentDistanceSquared(rim[i],rim[(i+1)%rim.Count]),0d);
+            }
+        }
+        [TestCase(10d,1d)]
+        [TestCase(12d,1d)]
+        [TestCase(14d,1.25d)]
+        public void MunicipalWorksOccupyOneSolidBetweenMarkedApproaches(double streetWidth,double scale)
+        {
+            var map=new AntennaCityMap(new AntennaCityProfileData{sideStreetWidth=streetWidth,scale=scale});
+            var hall=map.Quarters[map.MunicipalHallQuarter].Single();
+            Assert.Contains(hall,map.Blocks.ToList());
+            foreach(int radial in new[]{43,52,62,68})
+                Assert.False(map.SupportsFootprint(map.PointAt(210,radial),0),"former gap inside the hall at "+radial);
+            foreach(var road in map.Streets){
+                var vertices=hall.Footprint.Vertices;
+                for(int i=0;i<vertices.Count;i++)
+                    Assert.Greater(road.Footprint.SegmentDistanceSquared(vertices[i],vertices[(i+1)%vertices.Count]),0d,"hall crosses marked street");
+            }
+        }
+
         [Test] public void AllSixGroundCenterApproachesAvoidPlazasAndRemainBroad()
         {
             var map=new AntennaCityMap();double radius=map.SideStreetWidth/2-1;

@@ -1,3 +1,4 @@
+using Spacewars.Simulation;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -7,7 +8,7 @@ namespace Spacewars.Presentation
     {
         readonly OrbitalPlaceholderImage orbital;readonly ModelPortrait portrait;readonly OrbitalGlyph glyph;readonly Label check;readonly ResearchIcon research;readonly PortraitUpgradeMark upgradeMark;
         readonly RadialCardProfile profile=RadialCardProfile.Load();
-        string kind;bool emblem,initialized,lastUpgrade,lastSelected,lastAvailable;
+        string kind;bool emblem,initialized,lastUpgrade,lastSelected,lastAvailable,lastFitProductionPortrait;
         public RadialArtwork()
         {
             pickingMode=PickingMode.Ignore;
@@ -20,32 +21,58 @@ namespace Spacewars.Presentation
             // original 13/70 reference proportions must not obscure a fitted model.
             RegisterCallback<GeometryChangedEvent>(_=>{
                 check.style.fontSize=13*Mathf.Min(1,contentRect.height/70f);
-                upgradeMark.style.width=upgradeMark.style.height=Mathf.Min(contentRect.width,contentRect.height)*profile.buildingUpgradeBadgeSize;
+                SizeUpgradeMark();
             });
         }
-        public void Set(string key,bool upgraded=false,bool selected=false,bool available=true)
+        private static bool IsResearchPortrait(string key)=>key is "scientificCenterUpgraded" or "tankHybridUpgraded"
+            or "explorerUpgraded" or "shkval-guidance-3" or "hawkUpgraded";
+
+        private void SizeUpgradeMark()
         {
-            if(initialized&&kind==key&&lastUpgrade==upgraded&&lastSelected==selected&&lastAvailable==available)return;
-            initialized=true;lastUpgrade=upgraded;lastSelected=selected;lastAvailable=available;
+            float size=Mathf.Min(contentRect.width,contentRect.height);
+            if(IsResearchPortrait(kind))
+                ResearchIcon.LayoutBadge(upgradeMark,size,profile.researchRankSize);
+            else
+                upgradeMark.style.width=upgradeMark.style.height=size*profile.buildingUpgradeBadgeSize;
+        }
+
+        public void Set(string key,bool upgraded=false,bool selected=false,bool available=true,bool fitProductionPortrait=false)
+        {
+            if(initialized&&kind==key&&lastUpgrade==upgraded&&lastSelected==selected&&lastAvailable==available&&lastFitProductionPortrait==fitProductionPortrait)return;
+            initialized=true;lastUpgrade=upgraded;lastSelected=selected;lastAvailable=available;lastFitProductionPortrait=fitProductionPortrait;
             kind=key;
-            bool isOrbital=key!=null&&key.StartsWith("orbital:",System.StringComparison.Ordinal)&&int.TryParse(key.Substring(8),out _);
+            bool reinforcementTanks=key==OrbitalPlaceholderImage.ReinforcementTanksRadialKey;
+            int abilityId=0;
+            bool isOrbital=reinforcementTanks||key!=null&&key.StartsWith("orbital:",System.StringComparison.Ordinal)&&int.TryParse(key.Substring(8),out abilityId);
             orbital.style.display=isOrbital?DisplayStyle.Flex:DisplayStyle.None;
-            if(isOrbital){orbital.SetId(int.Parse(key.Substring(8)));orbital.style.opacity=available?1:.4f;portrait.style.display=glyph.style.display=research.style.display=check.style.display=upgradeMark.style.display=DisplayStyle.None;return;}
+            if(isOrbital){orbital.SetId(reinforcementTanks?OrbitalAbilities.Reinforcement:abilityId,reinforcementTanks?PlayableEntityKind.Tank:PlayableEntityKind.Explorer);orbital.style.opacity=available?1:.4f;portrait.style.display=glyph.style.display=research.style.display=check.style.display=upgradeMark.style.display=DisplayStyle.None;return;}
             emblem=ResearchEmblem.Supports(key);research.Set(key,available);
-            portrait.Set(emblem?null:key,selected,available,upgraded);var texture=portrait.Texture;
+            portrait.Set(emblem?null:key,selected,available,upgraded&&!fitProductionPortrait);
+            if(fitProductionPortrait)portrait.FitSquareContent(0);
+            var texture=portrait.Texture;
             portrait.style.display=texture==null?DisplayStyle.None:DisplayStyle.Flex;
-            glyph.style.display=texture==null&&!emblem?DisplayStyle.Flex:DisplayStyle.None;glyph.Set(key,available?OrbitalTheme.Ink:OrbitalTheme.Muted);
-            bool portraitUpgrade=key=="factoryUpgraded"||key=="hangarUpgraded"||key=="refineryUpgraded"||key=="scientificCenterUpgraded"||key=="tankHybridUpgraded"||key=="explorerUpgraded"||key=="shkval-guidance-3"||key=="hawkUpgraded";
+            bool showGlyph=texture==null&&!emblem;
+            glyph.style.display=showGlyph?DisplayStyle.Flex:DisplayStyle.None;
+            if(showGlyph)
+            {
+                glyph.Set(key,available?OrbitalTheme.Ink:OrbitalTheme.Muted);
+                glyph.SetFallbackFrame(fitProductionPortrait?PortraitFraming.SquareUvFor(key):new Rect(0,0,1,1));
+            }
+            bool portraitUpgrade=IsResearchPortrait(key)||key is "factoryUpgraded" or "hangarUpgraded" or "refineryUpgraded"
+                ||key==ModelPortrait.RocketLauncherArtwork;
+            SizeUpgradeMark();
             check.style.display=upgraded&&!portraitUpgrade?DisplayStyle.Flex:DisplayStyle.None;
-            upgradeMark.style.display=upgraded&&portraitUpgrade?DisplayStyle.Flex:DisplayStyle.None;upgradeMark.Available=available;upgradeMark.MarkDirtyRepaint();MarkDirtyRepaint();
+            upgradeMark.style.display=upgraded&&portraitUpgrade&&!portrait.HasUpgradeMark?DisplayStyle.Flex:DisplayStyle.None;upgradeMark.Available=available;upgradeMark.MarkDirtyRepaint();MarkDirtyRepaint();
         }
     }
-    // Normalized vector paths keep both chevrons crisp at petal and card sizes.
+    // Normalized vector paths keep chevrons crisp at petal and card sizes.
     public sealed class PortraitUpgradeMark : VisualElement
     {
         public bool Available=true;
-        public PortraitUpgradeMark()
+        public int ChevronCount { get; }
+        public PortraitUpgradeMark(int chevronCount=2)
         {
+            ChevronCount=chevronCount;
             style.position=Position.Absolute;style.right=style.bottom=1;style.display=DisplayStyle.None;
             style.backgroundColor=OrbitalTheme.Panel;
             style.borderLeftWidth=style.borderRightWidth=style.borderTopWidth=style.borderBottomWidth=1;
@@ -57,11 +84,13 @@ namespace Spacewars.Presentation
         {
             var r=contentRect;var p=context.painter2D;
             p.strokeColor=Available?OrbitalTheme.Ink:OrbitalTheme.Muted;p.lineWidth=Mathf.Max(1,Mathf.Min(r.width,r.height)/10);
-            // Coordinates describe the approved double-chevron shape, not layout tuning.
-            foreach(float y in new[]{.18f,.48f})
+            bool triple=ChevronCount==3;
+            float top=triple?.12f:.18f, spacing=triple?.25f:.3f, arm=triple?.22f:.3f;
+            for(int i=0;i<ChevronCount;i++)
             {
-                p.BeginPath();p.MoveTo(new Vector2(r.x+r.width*.2f,r.y+r.height*(y+.3f)));
-                p.LineTo(new Vector2(r.x+r.width*.5f,r.y+r.height*y));p.LineTo(new Vector2(r.x+r.width*.8f,r.y+r.height*(y+.3f)));p.Stroke();
+                float y=top+i*spacing;
+                p.BeginPath();p.MoveTo(new Vector2(r.x+r.width*.2f,r.y+r.height*(y+arm)));
+                p.LineTo(new Vector2(r.x+r.width*.5f,r.y+r.height*y));p.LineTo(new Vector2(r.x+r.width*.8f,r.y+r.height*(y+arm)));p.Stroke();
             }
         }
     }
@@ -85,11 +114,15 @@ namespace Spacewars.Presentation
             rank.style.borderTopWidth=rank.style.borderBottomWidth=rank.style.borderLeftWidth=rank.style.borderRightWidth=1;
             Add(rank);RegisterCallback<GeometryChangedEvent>(_=>LayoutRank());
         }
-        void LayoutRank()
+        internal static void LayoutBadge(VisualElement badge,float iconSize,float rankScale)
         {
-            float size=Mathf.Min(contentRect.width,contentRect.height)*profile.researchRankSize;
-            rank.style.fontSize=size;rank.style.height=size*1.3f;rank.style.width=size*1.7f;
+            float size=iconSize*rankScale;
+            if(badge is Label label)label.style.fontSize=size;
+            badge.style.height=size*1.3f;
+            badge.style.width=size*1.7f;
         }
+
+        void LayoutRank()=>LayoutBadge(rank,Mathf.Min(contentRect.width,contentRect.height),profile.researchRankSize);
         public void Set(string key,bool available=true)
         {
             bool supported=ResearchEmblem.Supports(key);style.display=supported?DisplayStyle.Flex:DisplayStyle.None;

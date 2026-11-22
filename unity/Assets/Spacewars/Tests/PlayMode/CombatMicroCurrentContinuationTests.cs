@@ -21,7 +21,9 @@ namespace Spacewars.Tests.PlayMode
         [Test,Timeout(90000)]
         public void CurrentFullAuthorityContinuesExactlyAcrossLegitimateOldTargetLoss()
         {
-            const int seed=7;const long generation=901;var p=PlayableProfile.Default;var ai=AiProfile.Initial;
+            const int seed=7;const long generation=901;var profileData=PlayableProfile.Default.CopyData();
+            profileData.tankVisionRange=10.4;
+            var p=PlayableProfile.Create(profileData);var ai=AiProfile.Initial;
             var starts=new[]{new OfflineStart("west",1,new NavPoint(-25,-5),new NavPoint(-20,-5),pin:1),new OfflineStart("east",2,new NavPoint(24,-5),new NavPoint(19,-5),pin:2)};
             var sites=new[]{new TerritorySite(1,PlayableBuildingKind.Headquarters,starts[0].Position,Array.Empty<TerritorySlot>()),new TerritorySite(2,PlayableBuildingKind.Headquarters,starts[1].Position,Array.Empty<TerritorySlot>())};
             var scenario=new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-16,15)),new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-20,19)),new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-20,11)),
@@ -125,7 +127,11 @@ namespace Spacewars.Tests.PlayMode
                     {
                         // Scripted opponent stops focusing and leaves by ordinary human orders.
                         var remaining=authority.ParticipantView("enemy-1").Entities.Where(u=>u.Owner==PlayableOwner.Enemy&&u.Kind==PlayableEntityKind.Tank&&u.Health>0).Select(u=>u.Id).ToArray();
-                        Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(generation,enemySequence++,"enemy-1",PlayableCommandKind.Move,remaining,new NavPoint(8,25))).Status);releasedFocus=true;
+                        var retreat=new PlayableCommand(generation,enemySequence++,"enemy-1",PlayableCommandKind.Move,remaining,new NavPoint(14,12));
+                        Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(retreat).Status);
+                        if(cold!=null&&d.Tick<135&&captureError==null)
+                            Assert.AreEqual(PlayableCommandStatus.Applied,cold.Apply(retreat).Status,"The restored authority receives the same human input at the same tick.");
+                        releasedFocus=true;
                     }
                     var follow=loop.Checkpoint.Records.FirstOrDefault(r=>r.Policy==AiCombatMicroPolicy.Policy&&r.Kind==PlayableCommandKind.Follow&&r.Status==PlayableAiDeliveryStatus.Applied);
                     if(follow!=null&&actor!=null&&Math.Sqrt(Math.Pow(actor.Position.X-withdrawal.X,2)+Math.Pow(actor.Position.Z-withdrawal.Z,2))>1){returned=true;break;}
@@ -141,8 +147,18 @@ namespace Spacewars.Tests.PlayMode
                 // target. Keep its failure in Git/evidence; assert the actual
                 // negative premise alongside the separate live-core positives.
                 var observed=Newtonsoft.Json.Linq.JArray.Parse(JsonConvert.SerializeObject(frames));
-                Assert.True(observed.Any(f=>(long)f["Tick"]==150&&(bool)f["CurrentOverride"]&&f["CoreIds"].Count()==2));
-                Assert.True(observed.Any(f=>(long)f["Tick"]==165&&(string)f["Mission"]["Reason"]=="target not at remembered visible position; whereabouts unconfirmed"&&!(bool)f["CurrentOverride"]&&f["CoreIds"].Count()==0));
+                const string reviewStage="after-micro-observe-before-micro-plan";
+                const string targetLoss="target not at remembered visible position; whereabouts unconfirmed";
+                var reviews=observed.Where(frame=>(string)frame["Stage"]==reviewStage).ToArray();
+                var loss=reviews.FirstOrDefault(frame=>(string)frame["Mission"]["Reason"]==targetLoss);
+                Assert.NotNull(loss,"The old mission must confirm absence at its last observed target position.");
+                int lostIndex=Array.IndexOf(reviews,loss);
+                Assert.Greater(lostIndex,0);
+                var beforeLoss=reviews[lostIndex-1];
+                Assert.True((bool)beforeLoss["CurrentOverride"]&&beforeLoss["CoreIds"].Count()==2);
+                Assert.True(beforeLoss["ObservedEnemy"].Any(enemy=>(int)enemy["Id"]==enemies[0].Id));
+                Assert.False(loss["ObservedEnemy"].Any(enemy=>(int)enemy["Id"]==enemies[0].Id));
+                Assert.True(!(bool)loss["CurrentOverride"]&&loss["CoreIds"].Count()==0);
                 Assert.False(returned,"No stale old-army Follow; separate living-core companions require actual physical return");
                 int burst=(int)ai.DifficultyValue(AiDifficulty.Veteran,"control.burst");double rate=ai.DifficultyValue(AiDifficulty.Veteran,"control.ordersPerMinute");
                 Assert.LessOrEqual(appliedRecords.Count,burst+Math.Floor(d.Tick*rate/1800));

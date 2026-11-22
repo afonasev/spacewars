@@ -145,3 +145,23 @@ func TestHistoryImageDownloadsChecksHashAndPersistsForOffline(t *testing.T) {
 		t.Fatal("failed media replaced cache")
 	}
 }
+
+func TestHistoryBlocksKeepPatchNoteSectionsAndValues(t *testing.T) {
+	release := githubRelease{Tag: "v1.2.3", Body: "## Русский\nСравнение с v1.2.2.\n### Главное для игроков\n#### Юниты\n- Дальность — 10 ед. → 6.5 ед.\n### Всё остальное\n#### Интерфейс\n- Подсказки\n## English\nCompared with v1.2.2.\n### Highlights for players\n#### Units\n- Range — 10 units → 6.5 units.\n### Other changes\n#### Interface\n- Tooltips"}
+	note := releaseNote(release)
+	for _, blocks := range [][]HistoryBlock{note.BlocksRu, note.BlocksEn} {
+		want := []string{"text", "heading", "heading", "item", "heading", "heading", "item"}
+		if len(blocks) != len(want) {
+			t.Fatalf("wrong patch notes length: %+v", blocks)
+		}
+		for i, block := range blocks {
+			if block.Kind != want[i] || strings.HasPrefix(block.Text, "#") {
+				t.Fatalf("wrong patch notes block: %+v", block)
+			}
+		}
+	}
+	if note.BlocksRu[3].Text != "Дальность — 10 ед. → 6.5 ед." ||
+		note.BlocksEn[3].Text != "Range — 10 units → 6.5 units." {
+		t.Fatalf("numeric balance values lost: %+v", note)
+	}
+}

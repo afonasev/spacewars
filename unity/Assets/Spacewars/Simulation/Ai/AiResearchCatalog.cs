@@ -14,8 +14,8 @@ namespace Spacewars.Simulation.Ai
         public bool Affects(PlayableEntityKind kind)=>!Buildings&&(Global||Unit==kind);
         public double Cost(PlayableProfile p)=>PlayableResearchRules.Cost(p,Kind);
         public double Duration(PlayableProfile p)=>PlayableResearchRules.Duration(p,Kind);
-        public double Before(PlayableProfile p)=>Buildings?1:Global?1+(PlayableResearchRules.Previous(Kind).HasValue?PlayableResearchRules.Bonus(p,PlayableResearchRules.Previous(Kind).Value)/100:0):Effect==AiResearchEffect.Mobility?PlayableUnitRules.Speed(p,Unit):Effect==AiResearchEffect.BurstDamage?PlayableUnitRules.DamagePerSecond(p,Unit):PlayableUnitRules.Range(p,Unit);
-        public double After(PlayableProfile p)=>Buildings?1+p.ReinforcedConcreteBonusPercent/100:Global?1+PlayableResearchRules.Bonus(p,Kind)/100:Effect==AiResearchEffect.Mobility?PlayableUnitRules.Speed(p,Unit,true):Effect==AiResearchEffect.BurstDamage?PlayableUnitRules.DamagePerSecond(p,Unit,true):PlayableUnitRules.Range(p,Unit,true);
+        public double Before(PlayableProfile p)=>Kind==PlayableResearchKind.ExplorerRocketLauncher?PlayableUnitRules.DamagePerSecond(p,Unit,true):Buildings?1:Global?1+(PlayableResearchRules.Previous(Kind).HasValue?PlayableResearchRules.Bonus(p,PlayableResearchRules.Previous(Kind).Value)/100:0):Effect==AiResearchEffect.Mobility?PlayableUnitRules.Speed(p,Unit):Effect==AiResearchEffect.BurstDamage?PlayableUnitRules.DamagePerSecond(p,Unit):PlayableUnitRules.Range(p,Unit);
+        public double After(PlayableProfile p)=>Kind==PlayableResearchKind.ExplorerRocketLauncher?PlayableUnitRules.ExplorerRocketDamagePerSecond(p,true):Buildings?1+p.ReinforcedConcreteBonusPercent/100:Global?1+PlayableResearchRules.Bonus(p,Kind)/100:Effect==AiResearchEffect.Mobility?PlayableUnitRules.Speed(p,Unit,true):Effect==AiResearchEffect.BurstDamage?PlayableUnitRules.DamagePerSecond(p,Unit,true):PlayableUnitRules.Range(p,Unit,true);
         public double RelativeGain(PlayableProfile p)
         {
             if(Buildings)return p.ReinforcedConcreteBonusPercent/100;
@@ -38,6 +38,7 @@ namespace Spacewars.Simulation.Ai
         public static IReadOnlyList<AiResearchDescriptor> All{get;}=Array.AsReadOnly(new[]{
             new AiResearchDescriptor(PlayableResearchKind.HawkSalvoSystems,PlayableEntityKind.Hawk,AiResearchEffect.BurstDamage),
             new AiResearchDescriptor(PlayableResearchKind.TankChassis,PlayableEntityKind.Tank,AiResearchEffect.Mobility),
+            new AiResearchDescriptor(PlayableResearchKind.ExplorerRocketLauncher,PlayableEntityKind.Explorer,AiResearchEffect.BurstDamage),
             new AiResearchDescriptor(PlayableResearchKind.ExplorerAssaultGuns,PlayableEntityKind.Explorer,AiResearchEffect.BurstDamage),
             new AiResearchDescriptor(PlayableResearchKind.ShkvalGuidance,PlayableEntityKind.Shkval,AiResearchEffect.AttackRange),
             new AiResearchDescriptor(PlayableResearchKind.ImprovedWeaponSystems,PlayableEntityKind.Tank,AiResearchEffect.GlobalDamage),

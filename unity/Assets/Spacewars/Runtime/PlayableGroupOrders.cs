@@ -25,9 +25,9 @@ namespace Spacewars.Runtime
         private void RebuildContactSpatialIndex()
         {
             contactSpatialIndex.Clear();
-            foreach(var u in units.Values)if(TryActor(u.Id,out var actor))contactSpatialIndex.Add(u.Id,actor.Position,false);
+            foreach(var u in units.Values)if(TryActor(u.Id,out var actor))contactSpatialIndex.Add(u.Id,actor.Position,false,TeamOf(u.Owner));
             // FormationContact historically considers ALL buildings, including pending.
-            foreach(var building in buildings.Values)contactSpatialIndex.Add(building.Id,building.Position,true);
+            foreach(var building in buildings.Values)contactSpatialIndex.Add(building.Id,building.Position,true,TeamOf(building.Owner));
         }
         private void RefreshFormationContacts()
         {
@@ -66,38 +66,25 @@ namespace Spacewars.Runtime
 #endif
             // A direct query outside the phase also observes spawn/death/body changes.
             if(!contactSpatialPhase)RebuildContactSpatialIndex();
-            contactSpatialIndex.Query(position,range,contactSpatialIndex.Candidates);
-            contactSpatialIndex.Candidates.Sort(); // original unit order, then building order
+            int observerTeam=TeamOf(owner);
+            int excludedTeam=observerTeam;
+#if UNITY_INCLUDE_TESTS
+            if(ContactPhaseQa.RangeCandidate!=null)excludedTeam=int.MinValue;
+#endif
+            contactSpatialIndex.Query(position,range,contactSpatialIndex.Candidates,excludedTeam,ordered:true);
 #if UNITY_INCLUDE_TESTS
             ContactPhaseQa.QueryVisited?.Invoke(contactSpatialIndex.VisitedEntries);
 #endif
             foreach(var candidate in contactSpatialIndex.Candidates){
-                if(!candidate.Building){
-                    if(!units.TryGetValue(candidate.Id,out var other))continue;
-                    NavUnit enemy;
-                    if(other.Air!=null)enemy=other.Air.Actor;
-                    else if(!navigation.Crowd.TryGet(other.Id,out enemy))continue;
-                    if(Distance(position,enemy.Position)<=range&&
+                if(!(Distance(position,candidate.Position)<=range))continue;
 #if UNITY_INCLUDE_TESTS
-                        ContactPhaseQa.Range(other.Id)&&
+                ContactPhaseQa.Range(candidate.Id);
 #endif
-                        VisibleTarget(owner,other.Id)&&
+                if(candidate.Team==observerTeam || !VisibleTarget(owner,candidate.Id))continue;
 #if UNITY_INCLUDE_TESTS
-                        ContactPhaseQa.Terrain(other.Id)&&
+                ContactPhaseQa.Terrain(candidate.Id);
 #endif
-                        GroundFireClear(position,enemy.Position,radius))return true;
-                }else{
-                    if(!buildings.TryGetValue(candidate.Id,out var other))continue;
-                    if(Distance(position,other.Position)<=range&&
-#if UNITY_INCLUDE_TESTS
-                        ContactPhaseQa.Range(other.Id)&&
-#endif
-                        VisibleTarget(owner,other.Id)&&
-#if UNITY_INCLUDE_TESTS
-                        ContactPhaseQa.Terrain(other.Id)&&
-#endif
-                        GroundFireClear(position,other.Position,radius))return true;
-                }
+                if(GroundFireClear(position,candidate.Position,radius))return true;
             }
             return false;
         }

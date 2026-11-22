@@ -61,8 +61,8 @@ namespace Spacewars.Runtime
         }
         private static bool FailureMatches(NavUnit actor,QueueExecution e)=>actor.FailedRequest==e.AttemptRequest&&actor.FailedOrder==e.AttemptOrder&&actor.FailedGroupId==e.Issuance.GroupId&&actor.FailedRevision==e.Stamp.Revision&&actor.FailedGoal.Equals(e.Interrupted?e.OverrideLocation:e.Assigned);
         private bool TerminalProofMatches(QueueExecution e,NavUnit actor)=>e?.TerminalFailure is TerminalRouteFailure f&&f.Request==e.AttemptRequest&&f.Order==e.AttemptOrder&&f.GroupId==e.Issuance.GroupId&&f.Revision==e.Stamp.Revision&&f.Incarnation==e.Incarnation&&f.Incarnation==actor.Incarnation&&f.Tick>=e.Issuance.Tick&&f.Tick<=Tick&&f.Location.HasValue&&e.AttemptLocation.HasValue&&f.Location.Equals(e.AttemptLocation)&&
-            (e.Issuance.Command.Kind==PlayableCommandKind.Attack||f.Location.Equals(e.Interrupted?e.OverrideLocation:e.Assigned))&&navigation.Crowd.ValidLocation(f.Location.Value,actor.Radius)&&(f.Outcome==NavigationOutcome.Rejected||f.Outcome==NavigationOutcome.Unreachable);
-        private bool AttackAttemptBound(QueueExecution e,NavUnit actor,Dictionary<int,NavigationRequestState> pending,Dictionary<int,long> orders,long requestSequence)
+            (e.Issuance.Command.Kind==PlayableCommandKind.Attack||e.Issuance.Command.Kind==PlayableCommandKind.AttackMove&&!e.Interrupted||f.Location.Equals(e.Interrupted?e.OverrideLocation:e.Assigned))&&navigation.Crowd.ValidLocation(f.Location.Value,actor.Radius)&&(f.Outcome==NavigationOutcome.Rejected||f.Outcome==NavigationOutcome.Unreachable);
+        private bool AttackAttemptBound(QueueExecution e,QueueExecution replacement,NavUnit actor,Dictionary<int,NavigationRequestState> pending,Dictionary<int,long> orders,long requestSequence)
         {
             if(pending.TryGetValue(actor.Id,out var latest)&&latest.MemberIdentity!=null&&latest.MemberIdentity.GroupId==e.Issuance.GroupId&&latest.MemberIdentity.OrderRevision==e.Stamp.Revision)
                 return e.AttemptRequest==latest.Request&&e.AttemptOrder==latest.Order&&latest.MemberIdentity.Incarnation==e.Incarnation&&e.AttemptLocation.HasValue&&latest.GoalLocation.Equals(e.AttemptLocation);
@@ -76,7 +76,21 @@ namespace Spacewars.Runtime
             // Failure slots on NavUnit are a mutable last-result cache. A later accepted
             // replacement legitimately clears them, while this immutable attempt proof
             // remains the only evidence for the old active Attack chase.
-            return TerminalProofMatches(e,actor);
+            if(TerminalProofMatches(e,actor))return true;
+            // Accept a retired chase only behind a newer, exactly bound pending
+            // replacement. The old attempt cannot still own pending or installed
+            // motion. Any installed Attack route must match its own earlier stamp.
+            if(replacement==null||replacement.Failed||replacement.Stamp.Revision<=e.Stamp.Revision||
+                replacement.Issuance.Id<=e.Issuance.Id||replacement.Issuance.GroupId<=e.Issuance.GroupId||
+                replacement.AttemptRequest<=e.AttemptRequest||replacement.AttemptOrder<=e.AttemptOrder||
+                actor.InstalledRequest>=e.AttemptRequest||
+                !pending.TryGetValue(actor.Id,out var next)||next.Request!=replacement.AttemptRequest||
+                next.Order!=replacement.AttemptOrder||next.MemberIdentity==null||
+                next.MemberIdentity.GroupId!=replacement.Issuance.GroupId||next.MemberIdentity.OrderRevision!=replacement.Stamp.Revision||
+                next.MemberIdentity.Incarnation!=e.Incarnation)return false;
+            return e.RouteRequest==0?e.RouteOrder==0:
+                actor.InstalledGroupId==e.Issuance.GroupId&&actor.InstalledRevision==e.Stamp.Revision&&
+                actor.InstalledRequest==e.RouteRequest&&actor.InstalledOrder==e.RouteOrder&&e.RouteOrder<e.AttemptOrder;
         }
         private void ValidateTacticalQueues(NavigationSessionState privateNavigation)
         {
@@ -90,6 +104,13 @@ namespace Spacewars.Runtime
                 if(q.Deferred.Count>profile.UnitOrderQueueLimit||q.Deferred.Select(i=>i.Id).Distinct().Count()!=q.Deferred.Count||!q.Deferred.Select(i=>i.Id).SequenceEqual(q.Deferred.Select(i=>i.Id).OrderBy(id=>id))||q.Deferred.Any(i=>!i.Command.EntityIds.Contains(u.Id)||OwnerFor(i.Command.PlayerId)!=u.Owner))throw new ArgumentException("Invalid deferred FIFO.");
                 void StampBinding(PlayableOrderStamp o){if(o==null||o.UnitId!=u.Id||o.Owner!=u.Owner||o.Generation!=navigation.Generation||o.Revision<1||o.Revision>=nextOrderRevision||o.Sequence<1||o.Tick<0||o.Tick>Tick||!QueueKind(o.Kind)||
                     (o.Origin==PlayableOrderOrigin.Ai?(string.IsNullOrWhiteSpace(o.Source)||o.JobId<1||o.ActionId<1):(o.Source!=null||o.JobId!=0||o.ActionId!=0)))throw new ArgumentException("Invalid queue order stamp.");}
+                bool AttackMoveRouteBound(QueueExecution e)
+                {
+                    if(e.RouteRequest==0)return false;
+                    if(!AttackAttemptBound(e,q.Pending,actor,pending,orders,nav.RequestSequence))return false;
+                    return actor.InstalledGroupId==e.Issuance.GroupId&&actor.InstalledRevision==e.Stamp.Revision&&
+                        actor.InstalledRequest==e.RouteRequest&&actor.InstalledOrder==e.RouteOrder;
+                }
                 void Execution(QueueExecution e,bool waiting){
                     if(e==null)return;StampBinding(e.Stamp);var i=e.Issuance;var c=i.Command;
                     if(!c.EntityIds.Contains(u.Id)||OwnerFor(c.PlayerId)!=u.Owner||e.Stamp.Sequence!=c.Sequence||e.Stamp.Tick!=i.Tick||e.Stamp.Kind!=c.Kind||e.Stamp.Origin!=c.Origin||e.Stamp.Source!=c.Source||e.Stamp.JobId!=c.JobId||e.Stamp.ActionId!=c.ActionId||e.Incarnation!=actor.Incarnation||i.GroupId<1||i.GroupId>nav.GroupSequence||e.Stamp.Revision<i.Revision||
@@ -99,10 +120,10 @@ namespace Spacewars.Runtime
                     else if(u.WreckWaiting&&u.CurrentOrder?.CommandSequence==c.Sequence&&!waiting){
                         if(c.Kind!=PlayableCommandKind.Move&&c.Kind!=PlayableCommandKind.AttackMove||e.Failed||e.Arrived||e.Interrupted||e.ActivationTick<i.Tick||e.ActivationTick>Tick||e.RouteRequest!=0||e.RouteOrder!=0||!e.Assigned.HasValue||!(SameSpatialOrder(e.Stamp,u.LastOrder)||q.Pending!=null&&SameSpatialOrder(q.Pending.Stamp,u.LastOrder))||u.CurrentOrder==null||u.CurrentOrder.CommandSequence!=c.Sequence||u.CurrentOrder.Kind!=Order(u,i).Kind||!u.CurrentOrder.Destination.Equals(c.Target)||!u.CurrentOrder.DestinationLocation.Equals(c.TargetLocation))throw new ArgumentException("Invalid temporary wreck waiting order.");
                     }
-                    else if(!e.Interrupted&&(e.Failed||e.ActivationTick<i.Tick||e.ActivationTick>Tick||e.RouteRequest<0||e.RouteRequest>nav.RequestSequence||e.RouteOrder<0||e.Suspended&&actor.Moving||c.Kind!=PlayableCommandKind.Attack&&(e.RouteRequest<1||actor.InstalledGroupId!=i.GroupId||actor.InstalledRevision!=e.Stamp.Revision||actor.InstalledRequest!=e.RouteRequest||actor.InstalledOrder!=e.RouteOrder||!actor.GoalLocation.Equals(e.Assigned)||e.Arrived&&(actor.Outcome!=NavigationOutcome.Arrived||!navigation.Crowd.CompatibleArrival(actor.Location,e.Assigned.Value,actor.Radius)))||
-                        c.Kind==PlayableCommandKind.Attack&&!AttackAttemptBound(e,actor,pending,orders,nav.RequestSequence)||
+                    else if(!e.Interrupted&&(e.Failed||e.ActivationTick<i.Tick||e.ActivationTick>Tick||e.RouteRequest<0||e.RouteRequest>nav.RequestSequence||e.RouteOrder<0||e.Suspended&&actor.Moving||(c.Kind==PlayableCommandKind.AttackMove?!AttackMoveRouteBound(e)||e.Arrived&&!AtAssignedTacticalEndpoint(e,actor):c.Kind!=PlayableCommandKind.Attack&&(e.RouteRequest<1||actor.InstalledGroupId!=i.GroupId||actor.InstalledRevision!=e.Stamp.Revision||actor.InstalledRequest!=e.RouteRequest||actor.InstalledOrder!=e.RouteOrder||!actor.GoalLocation.Equals(e.Assigned)||e.Arrived&&(actor.Outcome!=NavigationOutcome.Arrived||!navigation.Crowd.CompatibleArrival(actor.Location,e.Assigned.Value,actor.Radius))))||
+                        c.Kind==PlayableCommandKind.Attack&&!AttackAttemptBound(e,q.Pending,actor,pending,orders,nav.RequestSequence)||
                         u.CurrentOrder==null||u.CurrentOrder.CommandSequence!=c.Sequence||u.CurrentOrder.Kind!=Order(u,i).Kind||!u.CurrentOrder.DestinationLocation.Equals(c.TargetLocation)))throw new ArgumentException("Invalid active queue execution. unit="+u.Id+" owner="+u.Owner+" tick="+Tick+" kind="+c.Kind+" seq="+c.Sequence+" failed="+e.Failed+" activation="+e.ActivationTick+" issued="+i.Tick+" suspended="+e.Suspended+" moving="+actor.Moving+" group="+i.GroupId+"/"+actor.InstalledGroupId+" revision="+e.Stamp.Revision+"/"+actor.InstalledRevision+" request="+e.RouteRequest+"/"+actor.InstalledRequest+" order="+e.RouteOrder+"/"+actor.InstalledOrder+" goalSame="+actor.GoalLocation.Equals(e.Assigned)+" arrived="+e.Arrived+" outcome="+actor.Outcome+" currentKind="+u.CurrentOrder?.Kind+" currentSeq="+u.CurrentOrder?.CommandSequence+" currentLocationSame="+(u.CurrentOrder!=null&&u.CurrentOrder.DestinationLocation.Equals(c.TargetLocation))+" pendingKind="+q.Pending?.Issuance.Command.Kind+" pendingGroup="+q.Pending?.Issuance.GroupId+" pendingRevision="+q.Pending?.Stamp.Revision+" pendingFailed="+q.Pending?.Failed+" pendingInterrupted="+q.Pending?.Interrupted+" pendingAssignedSame="+actor.GoalLocation.Equals(q.Pending?.Assigned)+" pendingAttempt="+q.Pending?.AttemptRequest+" terminal="+(e.TerminalFailure!=null)+" lastSeq="+u.LastOrder?.Sequence+" lastKind="+u.LastOrder?.Kind+" lastRevision="+u.LastOrder?.Revision+" nativeKind="+navigation.GroupFor(u.Id)?.Kind+" nativeSequence="+navigation.GroupFor(u.Id)?.CommandSequence+" nativeOrigin="+navigation.GroupFor(u.Id)?.Origin+" nativeSource="+navigation.GroupFor(u.Id)?.Source);
-                    if(e.Interrupted&&(!waiting&&(e.ActivationTick<i.Tick||e.ActivationTick>Tick)||e.OverrideLocation.Equals(e.Assigned)||e.Arrived||e.Suspended||!e.OverrideLocation.HasValue||!navigation.Crowd.ValidLocation(e.OverrideLocation.Value,actor.Radius)||e.AttemptRequest<1||e.AttemptRequest>nav.RequestSequence||e.AttemptOrder<1||!orders.TryGetValue(u.Id,out var interruptedOrder)||e.AttemptOrder>interruptedOrder||
+                    if(e.Interrupted&&(!waiting&&(e.ActivationTick<i.Tick||e.ActivationTick>Tick)||e.OverrideLocation.Equals(e.Assigned)||e.Arrived||e.Suspended&&(waiting||actor.Moving)||!e.OverrideLocation.HasValue||!navigation.Crowd.ValidLocation(e.OverrideLocation.Value,actor.Radius)||e.AttemptRequest<1||e.AttemptRequest>nav.RequestSequence||e.AttemptOrder<1||!orders.TryGetValue(u.Id,out var interruptedOrder)||e.AttemptOrder>interruptedOrder||
                         (pending.TryGetValue(u.Id,out var overrideRequest)?overrideRequest.Request!=e.AttemptRequest||!overrideRequest.GoalLocation.Equals(e.OverrideLocation):(e.Failed&&FailureMatches(actor,e)?false:(actor.InstalledRequest!=e.AttemptRequest||actor.InstalledOrder!=e.AttemptOrder||actor.InstalledGroupId!=i.GroupId||actor.InstalledRevision!=e.Stamp.Revision||!actor.GoalLocation.Equals(e.OverrideLocation))))))throw new ArgumentException("Invalid interrupted execution proof.");
                 }
                 Execution(q.Active,false);Execution(q.Pending,true);

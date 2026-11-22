@@ -4,16 +4,35 @@ using System.Linq;
 
 namespace Spacewars.Simulation
 {
-    // Normalized UI coordinates: north (+Z) is always at the top, independent of camera.
+    // Normalized UI coordinates; an optional camera bearing aligns map up with screen up.
     public readonly struct PlayableMapTransform
     {
         public readonly double HalfWidth,HalfDepth;
-        public PlayableMapTransform(double halfWidth,double halfDepth){if(halfWidth<=0||halfDepth<=0)throw new ArgumentOutOfRangeException();HalfWidth=halfWidth;HalfDepth=halfDepth;}
-        public NavPoint Project(NavPoint world)=>new NavPoint((world.X/HalfWidth+1)/2,(1-world.Z/HalfDepth)/2);
-        public NavPoint Ground(NavPoint uv)=>new NavPoint((Clamp(uv.X)*2-1)*HalfWidth,(1-Clamp(uv.Z)*2)*HalfDepth);
-        private static double Clamp(double v)=>Math.Max(0,Math.Min(1,v));
+        private readonly double cosine,sine,screenHalfWidth,screenHalfDepth;
+        public PlayableMapTransform(double halfWidth,double halfDepth,double? cameraYawDegrees=null)
+        {
+            if(halfWidth<=0||halfDepth<=0)throw new ArgumentOutOfRangeException();
+            HalfWidth=halfWidth;HalfDepth=halfDepth;
+            double angle=(cameraYawDegrees??0)*Math.PI/180;
+            cosine=Math.Cos(angle);sine=Math.Sin(angle);
+            // Fit the whole rotated map without clipping its corners or distorting bearings.
+            double extent=Math.Max(Math.Abs(cosine)*halfWidth+Math.Abs(sine)*halfDepth,
+                Math.Abs(sine)*halfWidth+Math.Abs(cosine)*halfDepth);
+            screenHalfWidth=cameraYawDegrees.HasValue?extent:halfWidth;
+            screenHalfDepth=cameraYawDegrees.HasValue?extent:halfDepth;
+        }
+        public NavPoint Project(NavPoint world)=>new NavPoint(
+            .5+(cosine*world.X-sine*world.Z)/(2*screenHalfWidth),
+            .5-(sine*world.X+cosine*world.Z)/(2*screenHalfDepth));
+        public NavPoint Ground(NavPoint uv)
+        {
+            double right=(uv.X*2-1)*screenHalfWidth,up=(1-uv.Z*2)*screenHalfDepth;
+            return new NavPoint(ClampWorld(cosine*right+sine*up,HalfWidth),
+                ClampWorld(-sine*right+cosine*up,HalfDepth));
+        }
+        private static double ClampWorld(double value,double extent)=>Math.Max(-extent,Math.Min(extent,value));
     }
-    public enum MapMarkState { Empty, Ready, Construction, Memory, Unit }
+    public enum MapMarkState { Empty, Ready, Construction, Memory, Unit, OrbitalMine }
     public sealed class PlayableMapMark
     {
         public PlayableMapMark(int id,NavPoint position,PlayableBuildingKind kind,MapMarkState state,PlayableOwner? owner,int start=0){Id=id;Position=position;Kind=kind;State=state;Owner=owner;Start=start;}
@@ -21,14 +40,23 @@ namespace Spacewars.Simulation
     }
     public static class PlayableMapView
     {
-        // Only the safe perspective enters this projection. No domain lookup or ordinary slots.
-        public static IReadOnlyList<PlayableMapMark> Marks(PlayableSnapshot view)
+        // Project the perspective and its public relay colors without a domain lookup.
+        public static IReadOnlyList<PlayableMapMark> Marks(PlayableSnapshot view,bool showOrbitalMines=false)
         {
             var result=new List<PlayableMapMark>();
             foreach(var site in view.PublicSites)
             {
                 if(site.Kind==PlayableBuildingKind.RelayTower)
-                {var relay=view.Sites.FirstOrDefault(s=>s.Site.Id==site.Id);var known=view.Vision?.KnownRelays.FirstOrDefault(r=>r.SiteId==site.Id);result.Add(new PlayableMapMark(-site.Id,site.Position,site.Kind,relay!=null?(relay.Owner.HasValue?MapMarkState.Ready:MapMarkState.Empty):known!=null?MapMarkState.Memory:MapMarkState.Empty,relay!=null?relay.Owner:known?.Owner));continue;}
+                {
+                    var publicControl=view.MapRelayControl.FirstOrDefault(r=>r.SiteId==site.Id);
+                    var liveRelay=view.Sites.FirstOrDefault(s=>s.Site.Id==site.Id);
+                    var observed=view.Vision?.KnownRelays.FirstOrDefault(r=>r.SiteId==site.Id);
+                    var owner=publicControl!=null?publicControl.Owner:liveRelay!=null?liveRelay.Owner:observed?.Owner;
+                    var state=publicControl==null&&liveRelay==null&&observed!=null?MapMarkState.Memory:
+                        owner.HasValue?MapMarkState.Ready:MapMarkState.Empty;
+                    result.Add(new PlayableMapMark(-site.Id,site.Position,site.Kind,state,owner));
+                    continue;
+                }
                 var live=view.Buildings.FirstOrDefault(b=>b.SiteId==site.Id&&b.SlotId==0&&b.Phase!=ConstructionPhase.Pending);
                 var memory=view.Vision?.KnownBuildings.FirstOrDefault(b=>b.Position.Equals(site.Position)&&!view.Vision.IsVisible(b.Position));
                 result.Add(new PlayableMapMark(live?.Id??memory?.Id??-site.Id,site.Position,site.Kind,live!=null?(live.Phase==ConstructionPhase.Ready?MapMarkState.Ready:MapMarkState.Construction):memory!=null?MapMarkState.Memory:MapMarkState.Empty,live?.Owner??memory?.Owner,site.Kind==PlayableBuildingKind.Headquarters?site.Id:0));
@@ -38,6 +66,8 @@ namespace Spacewars.Simulation
             if(view.Vision!=null)foreach(var b in view.Vision.KnownBuildings)
                 if(!view.Vision.IsVisible(b.Position)&&!view.PublicSites.Any(s=>s.Position.Equals(b.Position)))result.Add(new PlayableMapMark(b.Id,b.Position,b.Kind,MapMarkState.Memory,b.Owner));
             foreach(var e in view.Entities)result.Add(new PlayableMapMark(e.Id,e.Position,default(PlayableBuildingKind),MapMarkState.Unit,e.Owner));
+            if(showOrbitalMines)foreach(var mine in view.Mines)
+                result.Add(new PlayableMapMark(mine.Id,mine.Point,default,MapMarkState.OrbitalMine,mine.Owner));
             return result.AsReadOnly();
         }
         public static int[] SelectOwnUnits(PlayableSnapshot view,NavPoint a,NavPoint b)=>view.Entities.Where(e=>e.Owner==view.Owner&&e.Position.X>=Math.Min(a.X,b.X)&&e.Position.X<=Math.Max(a.X,b.X)&&e.Position.Z>=Math.Min(a.Z,b.Z)&&e.Position.Z<=Math.Max(a.Z,b.Z)).Select(e=>e.Id).ToArray();

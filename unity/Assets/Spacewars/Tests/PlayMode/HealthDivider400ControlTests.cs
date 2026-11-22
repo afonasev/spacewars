@@ -28,7 +28,7 @@ namespace Spacewars.Tests.PlayMode
             var data=Newtonsoft.Json.JsonConvert.DeserializeObject<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text);
             var baseline=PlayableProfile.Create(data,new AiTestMap());
             var store=new NativeBalanceStore(baseline,Path.Combine(output,"isolated-native-balance.json"),false);
-            store.Select(NativeBalanceStore.NewMatchProfileId,NativeBalanceStore.NewMatchProfileVersion);
+            store.Select(NativeBalanceStore.CorridorExperimentId,NativeBalanceStore.CorridorExperimentVersion);
             var profile=store.Active;Assert.AreEqual(2,profile.Revision);Assert.IsInstanceOf<AiTestMap>(profile.AuthoredMap);
             var setup=new NativeLobbyConfiguration{AiTestMap=true,HasExplicitSeed=true,ExplicitSeed=7};setup.InitializeParticipants();
             PlayableSnapshot view;

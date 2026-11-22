@@ -325,7 +325,7 @@ namespace Spacewars.Runtime
                 !memberGroups.TryGetValue(entity,out var group)||group!=descriptor.Group||
                 !groups.TryGetValue(group,out var root)||root.OrderRevision!=descriptor.RootRevision||
                 root.Members.All(m=>m.Entity!=entity||m.OrderRevision!=descriptor.ActivationRevision)||
-                !state.InstalledRoute.SequenceEqual(actor.Route))return false;
+                (!ReferenceEquals(state.InstalledRoute, actor.route) && !state.InstalledRoute.SequenceEqual(actor.Route)))return false;
             return true;
         }
         public NavigationInstalledExecutionState InstalledExecutionFor(int entity)
@@ -803,6 +803,9 @@ namespace Spacewars.Runtime
         internal NavigationSessionState CaptureOwnedState()
         {
             AssertMotionQuiescent();
+            // Derived caches carry no accepted decision and must not create a
+            // saved liability or alter exact current-format capture/rebind.
+            ClearMotionProofMemo();
             bool existingPrepared;using(EnterTransport())existingPrepared=CanPrepareCaptureGraph();
             if(existingPrepared)return CapturePreparedOwnedState();
             RefreshOwnedGroupMembers();
@@ -1080,12 +1083,98 @@ namespace Spacewars.Runtime
             double radius=0;foreach(int id in group)if(Crowd.TryGet(id,out var member))radius=Math.Max(radius,member.Radius);
             return NavArrivalAllocator.Allocate(geometry,profile.ForUnit(radius>0?radius:profile.Radius,profile.TankSpeed,profile.TankTurnSpeed),center,group.Count,occupied);
         }
+        internal NavPoint[] AllocateFormationSlots(NavPoint center, int[] ids, Func<int, PlayableEntityKind> kind,
+            (NavPoint Center, double Radius)? objective = null)
+        {
+            var members = new NavFormationLayout.Member[ids.Length];
+            for (int i = 0; i < ids.Length; i++)
+            {
+                if (!Crowd.TryGet(ids[i], out var actor)) return Array.Empty<NavPoint>();
+                members[i] = new NavFormationLayout.Member(actor.Id, kind(actor.Id), actor.Position, actor.Radius);
+            }
+
+            var direction = GroundFormationDirection(center, ids);
+            double gap = NavFormationLayout.Gap(profile);
+            double pitch = 2 * members.Max(m => m.Radius) + gap;
+            var selected = new HashSet<int>(ids);
+            var occupied = new List<(NavPoint point, double radius)>();
+            foreach (var actor in Crowd.Units)
+            {
+                if (selected.Contains(actor.Id)) continue;
+                occupied.Add((actor.Position, actor.Radius));
+                if (reservations.TryGetValue(actor.Id, out var reserved)) occupied.Add((reserved, actor.Radius));
+            }
+            foreach (var reservation in arrivalLedger.Values)
+                if (!selected.Contains((int)reservation.Entity))
+                    occupied.Add((reservation.Endpoint.Position, reservation.Radius));
+
+            bool Clear(int i, NavPoint point)
+            {
+                double radius = members[i].Radius;
+                if (!geometry.IsFree(point, radius) || !LocateCommandGoal(point, radius, commandGroup, out var location))
+                    return false;
+                // Reserve a short, same-surface approach before each parked body.
+                var approach = NavFormationLayout.At(point, direction, -pitch, 0);
+                if (!Crowd.Traverse(location, approach, radius, out var reached) || reached.SurfaceId != location.SurfaceId ||
+                    !geometry.SegmentFree(point, approach, radius, Crowd.PhysicalLayer(location))) return false;
+                return occupied.All(o => NavFormationLayout.Separated(point, o.point, radius + o.radius + gap) &&
+                    NavFormationLayout.Separated(approach, o.point, radius + o.radius));
+            }
+            bool Compatible(int i, NavPoint point, int j, NavPoint previous)
+            {
+                double spacing = members[i].Radius + members[j].Radius + gap;
+                return NavFormationLayout.Separated(point, previous, spacing) &&
+                    NavFormationLayout.Separated(NavFormationLayout.At(point, direction, -pitch, 0), previous, spacing - gap);
+            }
+
+            return NavFormationLayout.Destinations(members, center, direction, pitch, geometry.HalfExtent, Clear, Compatible, objective: objective);
+        }
+
+        internal NavPoint GroundFormationDirection(NavPoint target, int[] ids)
+        {
+            using (EnterTransport())
+            {
+                var actors = ids.Select(id => Crowd.TryGet(id, out var actor) ? actor : null).ToArray();
+                if (actors.Length == 0 || actors.Any(actor => actor == null)) return new NavPoint(1, 0);
+                var center = new NavPoint(actors.Average(actor => actor.Position.X), actors.Average(actor => actor.Position.Z));
+                if (NavFormationLayout.TryDirection(center, target, profile.ArrivalTolerance, out var direction))
+                    return direction;
+                if (memberGroups.TryGetValue(ids[0], out long groupId) && groups.TryGetValue(groupId, out var group) &&
+                    ids.All(id => memberGroups.TryGetValue(id, out long previous) && previous == groupId))
+                {
+                    var previousDirection = RetainedFormationDirection(group);
+                    if (previousDirection.HasValue) return previousDirection.Value;
+                }
+                return NavFormationLayout.DirectionFromHeadings(actors.Select(actor => actor.Heading));
+            }
+        }
+
+        private NavPoint? RetainedFormationDirection(GroupOrderState group)
+        {
+            double x = 0, z = 0;
+            int count = 0;
+            foreach (var member in group.Members)
+            {
+                NavPoint? origin = null;
+                if (installedExecutions.TryGetValue(member.Entity, out var installed) && installed.Corridor.Group == group.GroupId)
+                    origin = installed.Corridor.Origin.Position;
+                else if (pending.TryGetValue(member.Entity, out var request) && request.MemberIdentity?.GroupId == group.GroupId)
+                    origin = request.Start;
+                if (!origin.HasValue) continue;
+                x += origin.Value.X;
+                z += origin.Value.Z;
+                count++;
+            }
+            if (count != 0 && NavFormationLayout.TryDirection(new NavPoint(x / count, z / count), group.OriginalGoal,
+                profile.ArrivalTolerance, out var direction)) return direction;
+            return null;
+        }
         private string HeldIdentity(int id)
         {
             var raw=LegacyHeldIdentity(id);
             return raw.Length<=256?raw:NavContract.Digest(w=>{w.Write("held-binding-v1");w.Write(raw);});
         }
-        private bool CurrentHeldBinding(string binding,int id)=>binding==HeldIdentity(id)||binding==LegacyHeldIdentity(id);
+        internal bool CurrentHeldBinding(string binding,int id)=>binding==HeldIdentity(id)||binding==LegacyHeldIdentity(id);
         private string LegacyHeldIdentity(int id)
         {
             if(!Crowd.TryGet(id,out var mover))return "";
@@ -1094,11 +1183,13 @@ namespace Spacewars.Runtime
                 rows.Add(other.Id+":"+other.Incarnation+":"+other.MobilityRevision+":"+other.Team+":"+other.Position.X.ToString("R",culture)+":"+other.Position.Z.ToString("R",culture)+":"+other.Radius.ToString("R",culture));
             return string.Join("|",rows);
         }
+        internal Func<int, NavGeometry, NavGeometry> OwnerMovementGeometry;
         private NavGeometry MovementGeometry(int id)
         {
-            Crowd.TryGet(id,out var mover);var solids=new List<NavObstacle>(navigationGeometry.Obstacles);
+            var basis = OwnerMovementGeometry?.Invoke(id, navigationGeometry) ?? navigationGeometry;
+            Crowd.TryGet(id,out var mover);var solids=new List<NavObstacle>(basis.Obstacles);
             foreach(var other in Crowd.Units)if(other.Id!=id&&other.Held&&other.Team==mover.Team)solids.Add(new NavObstacle(other.Position,other.Radius));
-            return solids.Count==navigationGeometry.Obstacles.Count?navigationGeometry:new NavGeometry(navigationGeometry.HalfExtent,solids.ToArray(),navigationGeometry.Revision);
+            return solids.Count==basis.Obstacles.Count?basis:new NavGeometry(basis.HalfExtent,solids.ToArray(),basis.Revision);
         }
         private IDictionary<int,string> movementIdentities=new AuthoritySlotMap<int,string>();
         private void RefreshHeldMovement()
@@ -1204,7 +1295,8 @@ namespace Spacewars.Runtime
             LastGeometryPreparationFailure=null;
             if(next==null)throw new ArgumentNullException(nameof(next));
             var owned=TryOwnedOrdinaryRebind(profile,geometryTarget:next,geometryDomain:domain,removedActors:removedActors);if(owned.HasValue){if(!owned.Value&&LastGeometryPreparationFailure==null)LastGeometryPreparationFailure=new InvalidOperationException("Geometry rebind source changed during preparation.");return owned.Value;}
-            if(removedActors!=null||physicalArrivalEnabled&&groupCommandBacking!=null){LastGeometryPreparationFailure=LastGeometryPreparationFailure??new InvalidOperationException("Owned geometry rebind source is not eligible.");return false;}
+            if(LastGeometryPreparationFailure!=null)return false;
+            if(removedActors!=null||physicalArrivalEnabled&&groupCommandBacking!=null){LastGeometryPreparationFailure=new InvalidOperationException("Owned geometry rebind source is not eligible.");return false;}
             AdmissionBatch(()=>ChangeGeometryLocked(next));return true;
         }
         private void ChangeGeometryLocked(NavGeometry next)
@@ -1249,12 +1341,25 @@ namespace Spacewars.Runtime
         }
         // Authority-only notification after a route is actually installed, never on admission.
         internal event Action<NavigationRequest> RouteActivated;
+        internal event Action<NavigationAnswer> ReadyRouteAccepted;
+        internal event Action<NavigationAnswer> ReadyRouteReissued;
+        internal event Action<NavigationAnswer,NavigationOutcome> GroundRouteFailed;
         internal event Action<NavigationRequest> RouteRequested;
         internal event Action<NavigationRequest,NavigationOutcome> RouteFailed;
         internal event Action<int> MovementCancelled;
         internal Func<int,bool> PreserveInstalledExecution;
         private void ClearFailure(int id){technicalFailures.Remove(id);if(!Crowd.TryGet(id,out var u))return;u.FailedRequest=u.FailedOrder=u.FailedGroupId=u.FailedRevision=0;u.FailedGoal=null;u.LastFailure=NavigationOutcome.Idle;}
-        private void RecordFailure(NavigationRequest r,NavigationOutcome outcome,NavigationPreparedCrowdNameWrite names=null){names?.ApplyNoThrow(false);technicalFailures.Remove(r.Entity);if(!Crowd.TryGet(r.Entity,out var u))return;var m=Member(r.Entity);u.FailedRequest=r.Request;u.FailedOrder=r.Order;u.FailedGroupId=r.MemberIdentity?.GroupId??GroupFor(r.Entity)?.GroupId??0;u.FailedRevision=r.MemberIdentity?.OrderRevision??m?.OrderRevision??0;u.FailedGoal=r.GoalLocation;u.LastFailure=outcome;RouteFailed?.Invoke(r,outcome);}
+        private void RecordFailure(NavigationRequest r,NavigationOutcome outcome,NavigationPreparedCrowdNameWrite names=null,NavSolveStatus? technical=null)
+        {
+            names?.ApplyNoThrow(false);
+            technicalFailures.Remove(r.Entity);
+            if(!Crowd.TryGet(r.Entity,out var u))return;
+            var m=Member(r.Entity);
+            u.FailedRequest=r.Request;u.FailedOrder=r.Order;u.FailedGroupId=r.MemberIdentity?.GroupId??GroupFor(r.Entity)?.GroupId??0;
+            u.FailedRevision=r.MemberIdentity?.OrderRevision??m?.OrderRevision??0;u.FailedGoal=r.GoalLocation;u.LastFailure=outcome;
+            if(technical is NavSolveStatus status)technicalFailures[r.Entity]=status;
+            RouteFailed?.Invoke(r,outcome);
+        }
         public void ApplyResults()=>TryApplyResultsPrepared();
         private bool TryApplyResultsPrepared()
         {
@@ -1319,39 +1424,75 @@ namespace Spacewars.Runtime
                 var effectiveStatus=overCorridorBudget?NavSolveStatus.CapacityExceeded:answer.Status;
                 if(effectiveStatus!=NavSolveStatus.Ready){
                     var outcome=effectiveStatus==NavSolveStatus.UnreachableInGraph?NavigationOutcome.Unreachable:NavigationOutcome.Rejected;
-                    RecordFailure(r,outcome,nameWrite);MovementCancelled?.Invoke(r.Entity);
-                    if(effectiveStatus==NavSolveStatus.InvalidEndpoint||effectiveStatus==NavSolveStatus.BlockedConnector||effectiveStatus==NavSolveStatus.CapacityExceeded||effectiveStatus==NavSolveStatus.Partial)
-                        technicalFailures[r.Entity]=effectiveStatus;
+                    bool technical=effectiveStatus==NavSolveStatus.InvalidEndpoint||effectiveStatus==NavSolveStatus.BlockedConnector||effectiveStatus==NavSolveStatus.CapacityExceeded||effectiveStatus==NavSolveStatus.Partial;
+                    RecordFailure(r,outcome,nameWrite,technical?(NavSolveStatus?)effectiveStatus:null);MovementCancelled?.Invoke(r.Entity);
                     if(outcome==NavigationOutcome.Unreachable)UnreachableResults++;
                     CancelArrival(r.Entity,false);reservations.Remove(r.Entity);retainedGoals.Remove(r.Entity);
                     if(!Crowd.TryGet(r.Entity,out var heldFailure)||!heldFailure.Held&&!heldFailure.Moving&&!(PreserveInstalledExecution?.Invoke(r.Entity)??false))Crowd.Reject(r.Entity,outcome);
+                    GroundRouteFailed?.Invoke(answer,outcome);
                     continue;
                 }
-                bool valid=Crowd.TryGet(r.Entity,out var actor)&&QualifyPreparedOrLegacy(names,answer,corridorProviders);
+                bool valid=Crowd.TryGet(r.Entity,out var actor)&&QualifyPreparedOrLegacy(names,answer,corridorProviders)&&ReadyPhysicalOriginCurrent(answer,actor);
                 var previous=valid?actor.Position:r.Start;
-                foreach(var point in route){if(!r.Geometry.SegmentFree(previous,point,r.Profile.Radius)){valid=false;break;}previous=point;}
+                if (valid && answer.StorageOwner?.CanInstallFrom(Crowd,actor,terrain)!=true) {
+                    if (answer.StorageOwner?.HasBoundedEntryFor(terrain) == true) valid = false;
+                    else foreach(var point in route){if(!r.Geometry.SegmentFree(previous,point,r.Profile.Radius)){valid=false;break;}previous=point;}
+                }
                 if(valid&&(routeWrite!=null?routeWrite.ApplyNoThrow():Crowd.SetRoute(r.Entity,r.Goal,route,r.GoalLocation))){nameWrite?.ApplyNoThrow(true);AppliedResults++;ClearFailure(r.Entity);actor.InstalledGroupId=r.MemberIdentity?.GroupId??0;actor.InstalledRevision=r.MemberIdentity?.OrderRevision??0;actor.InstalledRequest=r.Request;actor.InstalledOrder=r.Order;
                     var installed=names?.TakeInstalled(answer,out _);int installedIndex=names==null?-1:Array.IndexOf(names.Answers,answer);SetInstalledExecution(r.Entity,answer.Corridor,r,installed,names,installedIndex);InstallArrival(r);
-                    RouteActivated?.Invoke(r);}
+                    RouteActivated?.Invoke(r);
+                    ReadyRouteAccepted?.Invoke(answer);}
                 else {
                     RejectedResults++;
                     // Replan from current position if the actor moved while this request was in flight.
-                    if(Crowd.TryGet(r.Entity,out var current)&&
-                       (Math.Abs(current.Position.X-r.Start.X)>1e-4||Math.Abs(current.Position.Z-r.Start.Z)>1e-4)&&Move(r.Entity,r.Goal))continue;
+                    if(Crowd.TryGet(r.Entity,out var current)&&ReadySourceMoved(r,current)&&Move(r.Entity,r.Goal)){
+                        ReadyRouteReissued?.Invoke(answer);
+                        continue;
+                    }
                     RecordFailure(r,NavigationOutcome.Rejected,nameWrite);MovementCancelled?.Invoke(r.Entity);CancelArrival(r.Entity,false);reservations.Remove(r.Entity);retainedGoals.Remove(r.Entity);if(!Crowd.TryGet(r.Entity,out var heldRejected)||!heldRejected.Held&&!heldRejected.Moving&&!(PreserveInstalledExecution?.Invoke(r.Entity)??false))Crowd.Reject(r.Entity,NavigationOutcome.Rejected);
+                    GroundRouteFailed?.Invoke(answer,NavigationOutcome.Rejected);
                 }
                 }finally{transportOwner?.Consume(r);}
             }
             PublishAdmission();
             }finally{retiredBarrier?.Release();}
         }
+        // Suspend stops the body for combat but leaves Outcome.Moving and its
+        // live route intent intact. Only a terminal movement may release its goal.
+        private static bool MovementGoalCanBeReleased(NavUnit unit)=>!unit.Moving&&unit.Outcome!=NavigationOutcome.Moving;
+        // The old motor remains authoritative while a compatible replacement is in flight.
+        // A raw or cancelled path has no accepted request identity to carry forward.
+        private static void ApplyPendingDirection(NavUnit actor, NavigationRequest request)
+        {
+            if (!actor.Moving) return;
+            if (PendingRouteRequiresBraking(actor, request)) actor.Moving = false;
+        }
+
+        private static bool PendingRouteRequiresBraking(NavUnit actor, NavigationRequest request)
+        {
+            double oldX = actor.Goal.X - request.Start.X;
+            double oldZ = actor.Goal.Z - request.Start.Z;
+            double newX = request.Goal.X - request.Start.X;
+            double newZ = request.Goal.Z - request.Start.Z;
+            return actor.InstalledRequest == 0 || oldX * newX + oldZ * newZ <= 0;
+        }
+
+        private static void ApplyPendingDirections(IEnumerable<NavUnit> actors,
+            IDictionary<int, NavigationRequest> pendingRoutes, IDictionary<int, NavigationRequest> allocatingRoutes)
+        {
+            foreach (var actor in actors)
+                if (pendingRoutes.TryGetValue(actor.Id, out var request) ||
+                    allocatingRoutes.TryGetValue(actor.Id, out request))
+                    ApplyPendingDirection(actor, request);
+        }
+
         private void StepMovementLocked(double dt,NavMotionWorkspace workspace)
         {
             if(HasTraffic)throw new InvalidOperationException("Traffic movement requires a complete prepared frame.");
             ValidateCompatibilityMotion(workspace);
-            try{if(SuspendPendingMovement){foreach(int actor in pending.Keys)Crowd.Suspend(actor);foreach(int actor in allocating.Keys)Crowd.Suspend(actor);}PrepareMarch(dt);Crowd.Step(dt,workspace);CaptureMovementDelay(3,workspace.Motion,workspace.Proposals);}finally{Crowd.ClearPreferredMotion();}
+            try{if(SuspendPendingMovement) ApplyPendingDirections(Crowd.Units, pending, allocating);PrepareMarch(dt);Crowd.Step(dt,workspace);CaptureMovementDelay(3,workspace.Motion,workspace.Proposals);}finally{Crowd.ClearPreferredMotion();}
             if(MovementDiagnosticObserver!=null){var trace=new System.Text.StringBuilder("compatibility:");for(int i=0;i<workspace.Motion.Length;i++){var body=workspace.Motion[i];var proposal=workspace.Proposals[i];trace.Append(body.Id).Append(":active=").Append(body.Active).Append(":pos=").Append(body.Position.X).Append(',').Append(body.Position.Z).Append(":target=").Append(body.Target.X).Append(',').Append(body.Target.Z).Append(":speed=").Append(body.Speed).Append(":heading=").Append(body.Heading).Append(":proposal=").Append(proposal.Position.X).Append(',').Append(proposal.Position.Z).Append(":velocity=").Append(proposal.Velocity.X).Append(',').Append(proposal.Velocity.Z).Append(":refuse=").Append(proposal.Refuse).Append(":blocked=").Append(proposal.Blocked).Append(":overflow=").Append(proposal.Overflow).Append(';');}LastOwnedMovementComputation=trace.ToString();}
-            foreach(var unit in Crowd.Units)if(!unit.Moving&&!IsPending(unit.Id)){
+            foreach(var unit in Crowd.Units)if(MovementGoalCanBeReleased(unit)&&!IsPending(unit.Id)){
                 CancelArrival(unit.Id,true);reservations.Remove(unit.Id);retainedGoals.Remove(unit.Id);
             }
             PublishAdmission();
@@ -1359,9 +1500,59 @@ namespace Spacewars.Runtime
         // Execution policy belongs to the saved authority envelope. Suspend without
         // changing mobility revision/order, so the in-flight certificate stays current.
         internal bool SuspendPendingMovement {get;set;}
+        private int refusedGroundReceiver,stationaryGroundReceiver,additionalStationaryGroundCount;
+        private int[] additionalStationaryGroundReceivers;
         public void Step(double dt)
         {
             AssertMotionOperational();
+            try{
+                StepPrepared(dt);
+                if(refusedGroundReceiver==0)return;
+                // The previous transaction has disposed its read set. Rebuild
+                // against current FIFO/authority with this receiver stationary.
+                stationaryGroundReceiver=refusedGroundReceiver;
+                refusedGroundReceiver=0;
+                StepPrepared(dt);
+                if(refusedGroundReceiver!=0&&refusedGroundReceiver!=stationaryGroundReceiver)
+                    ResolveAdditionalGroundRefusals(dt);
+            }finally{
+                refusedGroundReceiver=stationaryGroundReceiver=additionalStationaryGroundCount=0;
+                additionalStationaryGroundReceivers=null;
+            }
+        }
+
+        private void ResolveAdditionalGroundRefusals(double dt)
+        {
+            int capacity=Crowd.Units.Count-1;
+            if(capacity<=0||!TryOpenMotionScope(admissionPublicationIdentity,out var scratchScope))return;
+            using(scratchScope){
+                if(!NavStorageScratch.TryReserve(scratchScope.OwnedReservation(),NavigationCaptureDtoStorage.ArrayBytes<int>(capacity),out var scratch))return;
+                using(scratch){
+                    additionalStationaryGroundReceivers=new int[capacity];
+                    try{
+                        // Each retry adds a new live receiver. The shared
+                        // policy-work grant stays with this tick across retries.
+                        while(refusedGroundReceiver!=0&&refusedGroundReceiver!=stationaryGroundReceiver&&additionalStationaryGroundCount<capacity){
+                            int index=Array.BinarySearch(additionalStationaryGroundReceivers,0,additionalStationaryGroundCount,refusedGroundReceiver);
+                            if(index>=0)return;
+                            index=~index;
+                            Array.Copy(additionalStationaryGroundReceivers,index,additionalStationaryGroundReceivers,index+1,additionalStationaryGroundCount-index);
+                            additionalStationaryGroundReceivers[index]=refusedGroundReceiver;
+                            additionalStationaryGroundCount++;
+                            refusedGroundReceiver=0;
+                            StepPrepared(dt);
+                        }
+                    }finally{
+                        additionalStationaryGroundReceivers=null;
+                        additionalStationaryGroundCount=0;
+                    }
+                }
+            }
+        }
+
+        private void StepPrepared(double dt)
+        {
+            MotionSourceContended=false;
             LastOwnedMovementNullReason=0;LastOwnedMovementNullDetail=null;LastOwnedMovementNullActor=0;LastOwnedMovementNullGroup=0;LastOwnedMovementComputation=null;LastTrafficDispatchStage=0;LastNavigationStepPath=0;
             try{
                 if(dt<=0||double.IsNaN(dt)||double.IsInfinity(dt)){LastNavigationStepPath=1;throw new ArgumentException("Invalid step duration.");}

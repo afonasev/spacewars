@@ -8,7 +8,7 @@ namespace Spacewars.Presentation
 {
     public static class BasaltCrownDetails
     {
-        public enum Kind { Kerb=1, Rubble=2, Ore=3 }
+        public enum Kind { Kerb=1, Rubble=2, Ore=3, BorderRock=4 }
         public sealed class Placement
         {
             public Kind Type;
@@ -19,38 +19,65 @@ namespace Spacewars.Presentation
         public static TerritorySite[] HillMines(BasaltCrownMap map,PlayableProfile profile)=>map.Sites(profile)
             .Where(s=>s.Kind==PlayableBuildingKind.Mine&&map.SurfaceHeight(s.Position)>0).ToArray();
 
-        // Bounded shader layout: four central sites plus their authored construction slots.
+        // Bounded shader layout for the four base sites.
         public const int MaxPads=32;
         public sealed class SitePad
         {
             public NavPoint Center,Hub;
-            public float Radius;
+            public float HalfX,HalfZ,Corner;
+            public bool IsOutpost;
         }
         public static TerritorySite[] Mines(BasaltCrownMap map,PlayableProfile profile)=>map.Sites(profile).Where(s=>s.Kind==PlayableBuildingKind.Mine).ToArray();
         public static SitePad[] SitePads(BasaltCrownMap map,PlayableProfile profile,BasaltCrownArtProfile art)
         {
-            var result=new List<SitePad>();
             float slotRadius=(float)Math.Max(profile.ScienceFootprintRadius,Math.Max(profile.FactoryFootprintRadius,profile.RefineryFootprintRadius));
-            foreach(var site in map.Sites(profile).Where(s=>s.Kind!=PlayableBuildingKind.Mine)){
-                result.Add(new SitePad{Center=site.Position,Hub=site.Position,Radius=(float)TerritoryRules.Radius(profile,site.Kind)+art.siteApronMargin});
-                foreach(var slot in site.Slots)result.Add(new SitePad{Center=slot.Position,Hub=site.Position,Radius=slotRadius+art.siteApronMargin});
-            }
-            if(result.Count>MaxPads)throw new InvalidOperationException("Basalt site pad shader capacity exceeded");
-            return result.ToArray();
+            float defenseRadius=Mathf.Max((float)(Math.Sqrt(2)*profile.TurretFootprintRadius),
+                ConstructionApronMesh.DefenseSupportHalf(profile,EnvironmentArtProfile.Load()).magnitude);
+            var pads=map.Sites(profile).Where(site=>TerritoryRules.Center(site.Kind)).Select(site=>{
+                bool outpost=site.Kind==PlayableBuildingKind.Outpost;
+                // A compact outpost needs only the feather and the same width of solid paving beyond it.
+                float margin=outpost?Math.Min(art.siteApronMargin,2*art.siteApronFeather):art.siteApronMargin;
+                var hub=(Center:site.Position,Radius:(float)TerritoryRules.Radius(profile,site.Kind)+margin);
+                var slots=site.Slots.Select(slot=>(Center:slot.Position,Radius:slotRadius+margin));
+                var defenses=site.DefenseSlots(profile).Select(slot=>(Center:slot.Position,Radius:defenseRadius+margin));
+                return CompoundApron(hub.Center,slots.Prepend(hub).Concat(defenses).ToArray(),margin,outpost);
+            }).ToArray();
+            if(pads.Length>MaxPads)throw new InvalidOperationException("Basalt site pad shader capacity exceeded");
+            return pads;
         }
-        public static float PadDistance(NavPoint point,SitePad pad,float linkWidth)
+        private static SitePad CompoundApron(NavPoint hub,(NavPoint Center,float Radius)[] footprints,float margin,bool outpost)
         {
-            double x=Math.Abs(point.X-pad.Center.X),z=Math.Abs(point.Z-pad.Center.Z);
-            double octagon=Math.Max(Math.Max(x,z),(x+z)*.70710678)-pad.Radius;
-            double dx=pad.Center.X-pad.Hub.X,dz=pad.Center.Z-pad.Hub.Z,l=dx*dx+dz*dz;
-            double t=l>0?Math.Max(0,Math.Min(1,((point.X-pad.Hub.X)*dx+(point.Z-pad.Hub.Z)*dz)/l)):0;
-            double ax=point.X-pad.Hub.X-t*dx,az=point.Z-pad.Hub.Z-t*dz;
-            return (float)Math.Min(octagon,Math.Sqrt(ax*ax+az*az)-linkWidth*.5);
+            double minX=footprints.Min(p=>p.Center.X-p.Radius),maxX=footprints.Max(p=>p.Center.X+p.Radius);
+            double minZ=footprints.Min(p=>p.Center.Z-p.Radius),maxZ=footprints.Max(p=>p.Center.Z+p.Radius);
+            var center=new NavPoint((minX+maxX)*.5,(minZ+maxZ)*.5);
+            double halfX=(maxX-minX)*.5,halfZ=(maxZ-minZ)*.5;
+            // Projection onto a chamfer at 45 degrees costs sqrt(2) times the footprint radius.
+            double cornerLimit=footprints.Min(p=>halfX+halfZ-Math.Abs(p.Center.X-center.X)-Math.Abs(p.Center.Z-center.Z)-Math.Sqrt(2)*p.Radius);
+            return new SitePad{Center=center,Hub=hub,HalfX=(float)halfX,HalfZ=(float)halfZ,
+                Corner=(float)Math.Min(margin*2,Math.Min(Math.Min(halfX,halfZ),cornerLimit)),IsOutpost=outpost};
+        }
+        public static float PadDistance(NavPoint point,SitePad pad)
+        {
+            double edgeX=Math.Abs(point.X-pad.Center.X)-pad.HalfX;
+            double edgeZ=Math.Abs(point.Z-pad.Center.Z)-pad.HalfZ;
+            return (float)Math.Max(Math.Max(edgeX,edgeZ),(edgeX+edgeZ+pad.Corner)*.70710678);
         }
         public static bool Clear(Placement p,BasaltCrownMap map,PlayableProfile profile,BasaltCrownArtProfile art)
+            =>Clear(p,map,profile,art,BasaltCrownRoads.Plaza(map,profile));
+        private static bool Clear(Placement p,BasaltCrownMap map,PlayableProfile profile,BasaltCrownArtProfile art,BasaltCrownRoads.RelayPlaza plaza)
         {
-            if(p.Type==Kind.Kerb)foreach(int x in new[]{-1,1})foreach(int z in new[]{-1,1})
-                if(BasaltCrownRoads.SignedDistance((float)p.Center.X+x*p.HalfX,(float)p.Center.Z+z*p.HalfZ,art)<0)return false;
+            if(p.Type==Kind.Kerb){
+                double cos=Math.Cos(p.Heading),sin=Math.Sin(p.Heading);
+                double dx=plaza.Center.x-p.Center.X,dz=plaza.Center.y-p.Center.Z;
+                double localX=Math.Max(0,Math.Abs(dx*cos+dz*sin)-p.HalfX);
+                double localZ=Math.Max(0,Math.Abs(-dx*sin+dz*cos)-p.HalfZ);
+                if(localX*localX+localZ*localZ<plaza.Radius*plaza.Radius)return false;
+                foreach(int x in new[]{-1,1})foreach(int z in new[]{-1,1}){
+                    float cornerX=(float)(p.Center.X+x*p.HalfX*cos-z*p.HalfZ*sin);
+                    float cornerZ=(float)(p.Center.Z+x*p.HalfX*sin+z*p.HalfZ*cos);
+                    if(BasaltCrownRoads.SignedDistance(cornerX,cornerZ,art)<0)return false;
+                }
+            }
             // Full circumscribed footprint is conservative even for rotated chips.
             // Leave a real visual gate through the kerb towards each relocated flank mine.
             if(p.Type==Kind.Kerb&&Math.Abs(p.Center.Z)<art.siteLinkWidth*.5f+p.HalfZ&&Math.Abs(p.Center.X)>BasaltCrownRoads.RingX&&Mines(map,profile).Any(m=>map.SurfaceHeight(m.Position)==0&&Math.Abs(p.Center.X)<Math.Abs(m.Position.X)))return false;
@@ -70,13 +97,20 @@ namespace Spacewars.Presentation
         public static List<Placement> Plan(BasaltCrownMap map,PlayableProfile profile,BasaltCrownArtProfile art)
         {
             art.Validate();var result=new List<Placement>();
-            void Add(Placement p){if(Clear(p,map,profile,art))result.Add(p);}
+            var compounds=SitePads(map,profile,art);
+            var outposts=compounds.Where(pad=>pad.IsOutpost).ToArray();
+            var plaza=BasaltCrownRoads.Plaza(map,profile);
+            void Add(Placement p){
+                if(p.Type==Kind.Kerb&&compounds.Any(pad=>PadDistance(p.Center,pad)<p.Radius))return;
+                if(p.Type==Kind.Rubble&&outposts.Any(pad=>PadDistance(p.Center,pad)<p.Radius))return;
+                if(Clear(p,map,profile,art,plaza))result.Add(p);
+            }
             void Edge(bool horizontal,float fixedAxis,float lo,float hi){
                 float half=art.kerbLength*.5f;
                 for(float a=lo+half;a+half<=hi;a+=art.kerbLength+art.kerbGap){
                     float x=horizontal?a:fixedAxis,z=horizontal?fixedAxis:a;
                     // Preserve open intersections: edging only follows the union's outer edge.
-                    if(BasaltCrownRoads.SignedDistance(x,z,art)<art.kerbWidth*.45f)continue;
+                    if(BasaltCrownRoads.SignedDistance(x,z,art,plaza)<art.kerbWidth*.45f)continue;
                     Add(new Placement{Type=Kind.Kerb,Center=new NavPoint(x,z),HalfX=horizontal?half:art.kerbWidth*.5f,HalfZ=horizontal?art.kerbWidth*.5f:half,Height=art.kerbHeight});
                 }
             }
@@ -88,6 +122,15 @@ namespace Spacewars.Presentation
                     Edge(false,side*(BasaltCrownRoads.RingX+edge*(art.bypassWidth*.5f+offset)),-BasaltCrownRoads.RingZ,BasaltCrownRoads.RingZ);
                 }
             }
+            // Tangent blocks follow only the exposed arcs. Clear rejects both road openings.
+            float rim=plaza.Radius+offset;
+            int blocks=Mathf.FloorToInt(2*Mathf.PI*rim/(art.kerbLength+art.kerbGap));
+            for(int i=0;i<blocks;i++){
+                float angle=2*Mathf.PI*i/blocks;
+                var center=new NavPoint(plaza.Center.x+rim*Mathf.Cos(angle),plaza.Center.y+rim*Mathf.Sin(angle));
+                Add(new Placement{Type=Kind.Kerb,Center=center,HalfX=art.kerbLength*.5f,HalfZ=art.kerbWidth*.5f,
+                    Height=art.kerbHeight,Heading=angle+Mathf.PI*.5f});
+            }
             var rocks=map.Solids.Where(s=>!double.IsNaN(s.Top)).ToArray();float step=art.rubbleSize*2.3f;
             // Deterministic world grid with irregular jitter, not random global state.
             for(float z=-46;z<=46;z+=step)for(float x=-54;x<=54;x+=step){
@@ -95,7 +138,7 @@ namespace Spacewars.Presentation
                 var q=new NavPoint(x+(Hash(x+7,z)-.5f)*step*.6f,z+(Hash(x,z+11)-.5f)*step*.6f);
                 if(!rocks.Any(b=>b.BoundaryDistanceSquared(q)<art.rubbleBand*art.rubbleBand))continue;
                 float size=art.rubbleSize*(.45f+.55f*h);
-                if(BasaltCrownRoads.SignedDistance((float)q.X,(float)q.Z,art)<size+art.detailClearance)continue;
+                if(BasaltCrownRoads.SignedDistance((float)q.X,(float)q.Z,art,plaza)<size+art.detailClearance)continue;
                 Add(new Placement{Type=Kind.Rubble,Center=q,HalfX=size*.5f,HalfZ=size*(.3f+.15f*Hash(x+13,z)),Height=art.rubbleHeight*(.5f+.5f*h),Heading=h*Mathf.PI});
             }
             foreach(var site in Mines(map,profile))for(int i=0;i<12;i++){

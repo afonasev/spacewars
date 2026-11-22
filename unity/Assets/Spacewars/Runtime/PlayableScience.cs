@@ -13,6 +13,7 @@ namespace Spacewars.Runtime
         }
         private string UpgradeBlocked(Building b)
         {
+            if(BoostRemaining(b.Id)>0)return BoostBlockedMessage;
             if(b.Kind!=PlayableBuildingKind.Refinery||!b.Ready||b.Health<=0||b.Sale!=null)return "Нужен готовый собственный завод";
             if(b.Upgrade!=null)return b.Upgrade.Complete?"Завод уже улучшен":"Улучшение уже начато";
             if(!buildings.Values.Any(s=>ReadyResearchCenter(s.Id,b.Owner)&&CenterUpgraded(s.Id)))return "Нужен готовый собственный улучшенный научный центр";

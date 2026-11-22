@@ -24,6 +24,7 @@ namespace Spacewars.Simulation
     public sealed class NativeLobbyConfiguration
     {
         public List<NativeLobbyParticipant> Participants;
+        public bool Domination = true;
         public bool Spectator => Participants != null && Participants.All(p => !p.Human);
         public void InitializeParticipants()
         {
@@ -33,8 +34,8 @@ namespace Spacewars.Simulation
                 for(int i=0;i<6;i++)Participants.Add(new NativeLobbyParticipant{Name=i==0&&HumanPresent?HumanName:"ИИ",Human=i==0&&HumanPresent,Team=i+1,Color=i,Difficulty=Difficulty});
                 return;
             }
-            if(CrimsonGrove){
-                for(int i=0;i<8;i++)Participants.Add(new NativeLobbyParticipant{Name=i==0&&HumanPresent?HumanName:"ИИ",Human=i==0&&HumanPresent,Team=i+1,Color=i,Difficulty=Difficulty});
+            if(CrimsonGrove || DeafMirror){
+                for(int i=0;i<8;i++)Participants.Add(new NativeLobbyParticipant{Name=i==0&&HumanPresent?HumanName:"ИИ",Human=i==0&&HumanPresent,Team=DeafMirror?i/4+1:i+1,Color=i,Difficulty=Difficulty});
                 return;
             }
             if(WhiteMeridian){
@@ -67,6 +68,7 @@ namespace Spacewars.Simulation
         }
         private int NextParticipantTeam(int capacity)
         {
+            if(DeafMirror)return Enumerable.Range(1,2).OrderBy(t=>Participants.Count(p=>p.Team==t)).First();
             bool crossings=capacity==4&&!AntennaCity&&!MossHighland&&!BasaltCrown&&!WhiteMeridian;
             if(!Foundry&&!WhiteMeridian&&!crossings)return Enumerable.Range(1,8).First(team=>Participants.All(p=>p.Team!=team));
             if(crossings){
@@ -84,6 +86,7 @@ namespace Spacewars.Simulation
         public bool AiTestMap;
         public bool CrimsonGrove;
         public bool AntennaCity;
+        public bool DeafMirror;
         public bool BasaltCrown;
         public bool MossHighland;
         public bool WhiteMeridian;
@@ -99,17 +102,26 @@ namespace Spacewars.Simulation
         public int ExplicitSeed;
         public int ResolveSeed()=>AiMatchSeed.Resolve(HasExplicitSeed?(int?)ExplicitSeed:null);
         public string DifficultyLabel=>DifficultyNames[(int)Difficulty];
-        public static readonly string[] DifficultyNames = { "Кадет", "Боец", "Ветеран" };
+        public static readonly string[] DifficultyNames = { "Кадет", "Боец", "Ветеран", "Эксперт", "Читер" };
         public static readonly string[] ColorNames = { "Голубой", "Красный", "Лайм", "Жёлтый", "Фиолетовый", "Оранжевый", "Мятный", "Белый" };
         public static readonly string[] ColorHex = { "#59d8ff", "#ff5a73", "#a8ff53", "#ffd34e", "#c682ff", "#ff9e58", "#54f0c4", "#f1f1f1" };
         public int Capacity(PlayableProfile profile) => profile.AuthoredMap is ThreeCrossingsMap ? 4 : profile.AuthoredMap == null ? 0 : profile.AuthoredMap.Sites(profile).Count(s => s.Kind == PlayableBuildingKind.Headquarters);
+        public int LobbyCapacity(PlayableProfile profile) => profile.AuthoredMap is ThreeCrossingsMap ? 2 : Capacity(profile);
+        public string ValidateLobby(PlayableProfile profile, bool keyboardConnected, bool mouseConnected)
+        {
+            if (profile.AuthoredMap is ThreeCrossingsMap && Participants?.Count > LobbyCapacity(profile))
+                return "Переправа доступна только для матча 1×1.";
+            return Validate(profile, keyboardConnected, mouseConnected);
+        }
+
         public string Validate(PlayableProfile profile, bool keyboardConnected, bool mouseConnected)
         {
             if(Participants!=null)
             {
                 if(Participants.Any(p=>p==null))return "Укажите участников матча.";
                 if(profile.AuthoredMap is ThreeCrossingsMap&&(Participants.Count<2||Participants.Count>4||Participants.GroupBy(p=>p.Team).Count()!=2||Participants.GroupBy(p=>p.Team).Any(g=>g.Count()>2)))return "Для Переправы нужны 1×1, 1×2 или 2×2.";
-                if(WhiteMeridian&&(Participants.Count!=4||Participants.GroupBy(p=>p.Team).Count()!=2||Participants.GroupBy(p=>p.Team).Any(g=>g.Count()!=2)))return "Для Белого меридиана нужны две команды по два участника.";
+                if(profile.AuthoredMap is DeafMirrorMap&&(Participants.Any(p=>p.Team!=1&&p.Team!=2)||Participants.GroupBy(p=>p.Team).Any(g=>g.Count()>4)))
+                    return "В каждой из двух команд может быть до четырёх игроков.";
                 if(Participants.Count<2)return "Добавьте не менее двух участников.";
                 if(Participants.Count>Capacity(profile))return "Состав превышает вместимость карты. Освободите лишние места.";
                 if(Participants.Any(p=>p==null||p.Human&&(string.IsNullOrWhiteSpace(p.Name)||p.Name.Trim().Length>24)))return "Укажите имена участников: не более 24 символов.";

@@ -31,9 +31,9 @@ namespace Spacewars.Simulation
         private IReadOnlyDictionary<NavNameKey,int> byId; private IReadOnlyList<Seam> seams;
         private IReadOnlyList<Seam> exterior;
         internal int TracePortalBound=>checked((2*edges.Length+2)*Math.Max(0,regions.Length-1));
-        internal long TraceScratchBound
+        internal long TraceScratchBound { get; private set; }
+        private long ComputeTraceScratchBound()
         {
-            get{
                 long cuts=checked(2L*edges.Length+2),portals=checked(cuts*Math.Max(0,regions.Length-1)),legs=checked(portals+cuts+1);
                 long Rounded(long count){long cap=4;while(cap<count)cap=checked(cap*2);return cap;}
                 // Both Traverse and TryTrace build cuts; raw/deduplicated Lists and
@@ -46,8 +46,8 @@ namespace Spacewars.Simulation
                 long cutScratch=checked(2*(16*Rounded(cuts)+64*(3*cuts+4)+Math.Max(32L*edges.Length,candidateScratch)+256));
                 long trace=checked(256*legs+8*Rounded(legs)+8*legs+256);
                 long incident=checked(32*Seams.Count+128*(3L*regions.Length+4)+64L*regions.Length+8*Rounded(regions.Length)+512);
-                return checked(cutScratch+trace+incident+16*Rounded(portals)+16*portals+256);
-            }
+                return checked(cutScratch+trace+incident+16*Rounded(portals)+16*portals+256+
+                    NavStorageLayout.ObjectBytesBound(typeof(NavStorageLocalBirths)));
         }
         internal IReadOnlyList<MapSupport> Supports=>regions; internal NavGeometry Geometry=>geometry;
         internal IReadOnlyDictionary<NavNameKey,int> SurfaceIndex=>byId;
@@ -68,6 +68,12 @@ namespace Spacewars.Simulation
             internal readonly struct Query{
                 private readonly SegmentIndex index;private readonly int left,bottom,right,top;
                 internal Query(SegmentIndex index,int left,int bottom,int right,int top){this.index=index;this.left=left;this.bottom=bottom;this.right=right;this.top=top;}
+                // Each bucket was populated once per edge, in authored order.
+                internal bool TrySingleBucket(out int[] edges)
+                {
+                    edges=left==right&&bottom==top?index.buckets[left*16+bottom]??Array.Empty<int>():null;
+                    return edges!=null;
+                }
                 public Enumerator GetEnumerator()=>new Enumerator(index,left,bottom,right,top);
             }
             internal struct Enumerator{
@@ -83,6 +89,8 @@ namespace Spacewars.Simulation
         internal static Action<TerrainLocations> IndexedCutCandidateForTests;
         [ThreadStatic] internal static bool DisableFootprintOwnerReuseForTests;
         [ThreadStatic] internal static long OwnerIndexCallsForTests;
+        [ThreadStatic] internal static bool DisableUnindexedBoundaryPruningForTests;
+        [ThreadStatic] internal static long UnindexedBoundaryDistanceCallsForTests;
 #endif
         private const int RegionGridWidth=16;
         private readonly int[][] regionGrid;
@@ -157,6 +165,7 @@ namespace Spacewars.Simulation
             blockedBoundaries=exterior.Concat(seams.Where(x=>!x.Allowed)).ToArray();
             boundaryIndex=new SegmentIndex(geometry.HalfExtent,blockedBoundaries.Length,i=>blockedBoundaries[i].From,i=>blockedBoundaries[i].To);
             seamIndex=new SegmentIndex(geometry.HalfExtent,Seams.Count,i=>Seams[i].From,i=>Seams[i].To);
+            TraceScratchBound=ComputeTraceScratchBound();
             RegionIndexRetainedBytes=regionBytes+edgeIndex.RetainedBytes+boundaryIndex.RetainedBytes+seamIndex.RetainedBytes+8L*blockedBoundaries.Length+64+8L*edgeIndex.Entries;
         }
         // The authored arrangement is immutable. Dynamic movement exclusions and
@@ -169,6 +178,7 @@ namespace Spacewars.Simulation
             edgeIndex=arrangement.edgeIndex;boundaryIndex=arrangement.boundaryIndex;seamIndex=arrangement.seamIndex;
             blockedBoundaries=arrangement.blockedBoundaries;regionGrid=arrangement.regionGrid;RegionIndexRetainedBytes=arrangement.RegionIndexRetainedBytes;
             footprints=new Dictionary<FootprintKey,int>();footprintOrder=new Queue<FootprintKey>();
+            TraceScratchBound=arrangement.TraceScratchBound;
         }
         // Values, order and precedence all participate. Equal provider binding
         // text or terrain ID alone never establishes shared storage identity.
@@ -193,12 +203,13 @@ namespace Spacewars.Simulation
             OwnerIndexCallsForTests++;
 #endif
             if(double.IsNaN(p.X)||double.IsNaN(p.Z)||double.IsInfinity(p.X)||double.IsInfinity(p.Z))return -1;
+            if(UseOwnedQueries){foreach(int i in ownedQueries.Supports.Candidates(p.X,p.Z,p.X,p.Z))if(regions[i].Contains(p))return i;return -1;}
             if(regionGrid==null){for(int i=0;i<regions.Length;i++)if(regions[i].Contains(p))return i;return -1;}
             var candidates=regionGrid[RegionBucket(p.X)*RegionGridWidth+RegionBucket(p.Z)];
             if(candidates!=null)for(int i=0;i<candidates.Length;i++)if(regions[candidates[i]].Contains(p))return candidates[i];
             return -1;
         }
-        private MapSupport Owner(NavPoint p){int index=OwnerIndex(p);return index<0?null:regions[index];}
+        internal MapSupport Owner(NavPoint p){int index=OwnerIndex(p);return index<0?null:regions[index];}
         private bool Footprint(NavPoint point,double radius)=>FootprintOwner(point,radius)>=0;
         private int FootprintOwner(NavPoint point,double radius)
         {
@@ -219,9 +230,32 @@ namespace Spacewars.Simulation
             if(radius<0||double.IsNaN(radius)||double.IsInfinity(radius))return -1;
             int owner=OwnerIndex(point);if(owner<0||!geometry.IsFree(point,radius))return -1;
             double r2=radius*radius,reach=radius+1e-9;
-            if(boundaryIndex==null)return !exterior.Any(e=>Distance2(point,e.From,e.To)<r2-1e-9)&&!seams.Any(e=>!e.Allowed&&Distance2(point,e.From,e.To)<r2-1e-9)?owner:-1;
+            if(boundaryIndex==null)return UnindexedFootprintBoundaryClear(point,radius,r2)?owner:-1;
             foreach(int i in boundaryIndex.Candidates(point.X-reach,point.Z-reach,point.X+reach,point.Z+reach)){var e=blockedBoundaries[i];if(NearPoint(point,radius,e.From,e.To)&&Distance2(point,e.From,e.To)<r2-1e-9)return -1;}
             return owner;
+        }
+        // Read the same immutable sequences in their original order and keep
+        // Any's first-hit short circuit. Indexing avoids both the captured
+        // predicate object and the owned IReadOnlyList enumerator allocation.
+        // It also keeps those captures out of indexed callers altogether.
+        private bool UnindexedFootprintBoundaryClear(NavPoint point,double radius,double r2)
+        {
+            if(UseOwnedQueries)return !OwnedBoundaryBlocked(point,point,radius,r2,true);
+            for(int i=0;i<exterior.Count;i++)if(UnindexedPointBoundaryHit(point,radius,r2,exterior[i]))return false;
+            for(int i=0;i<seams.Count;i++){var e=seams[i];if(!e.Allowed&&UnindexedPointBoundaryHit(point,radius,r2,e))return false;}
+            return true;
+        }
+        private bool UnindexedIncidentLocation(NavLocation location,NavPoint p)
+        {
+            for(int i=0;i<Seams.Count;i++){var seam=Seams[i];if(seam.Allowed&&(seam.FromSurface==location.SurfaceId||seam.ToSurface==location.SurfaceId)&&NearPoint(p,1e-8,seam.From,seam.To)&&Distance2(p,seam.From,seam.To)<=1e-16)return true;}
+            return false;
+        }
+        private bool UnindexedSegmentBoundaryBlocked(NavPoint from,NavPoint to,double radius,double r2)
+        {
+            if(UseOwnedQueries)return OwnedBoundaryBlocked(from,to,radius,r2,false);
+            for(int i=0;i<exterior.Count;i++)if(UnindexedSegmentBoundaryHit(from,to,radius,r2,exterior[i]))return true;
+            for(int i=0;i<seams.Count;i++){var e=seams[i];if(!e.Allowed&&UnindexedSegmentBoundaryHit(from,to,radius,r2,e))return true;}
+            return false;
         }
         internal bool TryLocate(NavPoint point,double radius,out NavLocation location)
         {location=default;var region=Owner(point);if(region==null||!Footprint(point,radius))return false;location=region.OwnedLocation(point);return true;}
@@ -230,6 +264,31 @@ namespace Spacewars.Simulation
         // the map's own geometry, without touching its owner-confined memo.
         internal bool TryLocatePoint(NavPoint point,out NavLocation location)
         {location=default;var region=Owner(point);if(region==null||!geometry.IsFree(point,0))return false;location=region.OwnedLocation(point);return true;}
+        // Certify an entire convex box once, against this immutable partition.
+        // Reject any ambiguous support boundary, including allowed seams.
+        internal int ClearSectionSupport(NavLocation first,NavLocation last,double radius)
+        {
+            if(first.SurfaceId!=last.SurfaceId || !(radius>0))return -1;
+            var a=first.Position;var b=last.Position;
+            double pad=2*radius+1e-9;
+            double left=Math.Min(a.X,b.X)-pad,right=Math.Max(a.X,b.X)+pad;
+            double bottom=Math.Min(a.Z,b.Z)-pad,top=Math.Max(a.Z,b.Z)+pad;
+            if(!(left > -geometry.HalfExtent && right < geometry.HalfExtent &&
+                 bottom > -geometry.HalfExtent && top < geometry.HalfExtent))return -1;
+            int owner=OwnerIndex(a);
+            if(owner<0 || regions[owner].SurfaceId!=first.SurfaceId)return -1;
+            bool Disjoint(double x0,double z0,double x1,double z1) =>
+                x1<left || x0>right || z1<bottom || z0>top;
+            bool Outside(NavPoint p,NavPoint q) =>
+                Disjoint(Math.Min(p.X,q.X),Math.Min(p.Z,q.Z),Math.Max(p.X,q.X),Math.Max(p.Z,q.Z));
+            foreach(var edge in edges)if(!Outside(edge.Item1,edge.Item2))return -1;
+            for(int i=0;i<exterior.Count;i++)if(!Outside(exterior[i].From,exterior[i].To))return -1;
+            for(int i=0;i<seams.Count;i++)if(!Outside(seams[i].From,seams[i].To))return -1;
+            for(int i=0;i<geometry.Obstacles.Count;i++){
+                var obs=geometry.Obstacles[i];if(!Disjoint(obs.MinX,obs.MinZ,obs.MaxX,obs.MaxZ))return -1;
+            }
+            return owner;
+        }
         internal NavLocation OwnedCheckpointLocation(NavLocation location)
         {if(location.SurfaceId==null)return location;if(!byId.TryGetValue(new NavNameKey(location.SurfaceId),out int index))throw new ArgumentException("Unknown partition checkpoint surface.");return regions[index].OwnedLocation(location.Position);}
         internal bool Valid(NavLocation location,double radius)
@@ -241,7 +300,7 @@ namespace Spacewars.Simulation
             if(!ReuseFootprintOwner)canonicalIndex=OwnerIndex(location.Position);
             if(canonicalIndex==regionIndex)return true;
             double reach=1e-8+1e-9;var p=location.Position;
-            if(seamIndex==null)return Seams.Any(seam=>seam.Allowed&&(seam.FromSurface==location.SurfaceId||seam.ToSurface==location.SurfaceId)&&NearPoint(p,1e-8,seam.From,seam.To)&&Distance2(p,seam.From,seam.To)<=1e-16);
+            if(seamIndex==null)return UnindexedIncidentLocation(location,p);
             foreach(int i in seamIndex.Candidates(p.X-reach,p.Z-reach,p.X+reach,p.Z+reach)){var seam=Seams[i];if(seam.Allowed&&(seam.FromSurface==location.SurfaceId||seam.ToSurface==location.SurfaceId)&&NearPoint(p,1e-8,seam.From,seam.To)&&Distance2(p,seam.From,seam.To)<=1e-16)return true;}
             return false;
         }
@@ -262,9 +321,9 @@ namespace Spacewars.Simulation
             }
             return true;
         }
-        private bool TraverseCore(NavLocation from,NavPoint to,double radius,out NavLocation location,out List<double> cuts,out bool crossed,bool certifiedEndpoints=false)
+        private bool TraverseCore(NavLocation from,NavPoint to,double radius,out NavLocation location,out IReadOnlyList<double> cuts,out bool crossed,bool certifiedEndpoints=false)
             =>TraverseCore(from,to,radius,out location,out cuts,out crossed,out _,certifiedEndpoints);
-        private bool TraverseCore(NavLocation from,NavPoint to,double radius,out NavLocation location,out List<double> cuts,out bool crossed,out int blocker,bool certifiedEndpoints=false)
+        private bool TraverseCore(NavLocation from,NavPoint to,double radius,out NavLocation location,out IReadOnlyList<double> cuts,out bool crossed,out int blocker,bool certifiedEndpoints=false)
         {
             cuts=null;crossed=false;location=default;blocker=-1;int endIndex=-1;
             if(certifiedEndpoints){if(!geometry.SegmentFreeBetweenFreeEndpoints(from.Position,to,radius,out blocker))return false;}
@@ -273,7 +332,7 @@ namespace Spacewars.Simulation
             else if(!Valid(from,radius)||(endIndex=FootprintOwner(to,radius))<0||!geometry.SegmentFreeBetweenFreeEndpoints(from.Position,to,radius,out blocker))return false;
             double r2=radius*radius;
             double reach=radius+1e-9;
-            if(boundaryIndex==null){if(exterior.Any(e=>SegmentDistance2(from.Position,to,e.From,e.To)<r2-1e-9)||seams.Any(e=>!e.Allowed&&SegmentDistance2(from.Position,to,e.From,e.To)<r2-1e-9))return false;}
+            if(boundaryIndex==null){if(UnindexedSegmentBoundaryBlocked(from.Position,to,radius,r2))return false;}
             else foreach(int i in boundaryIndex.Candidates(Math.Min(from.Position.X,to.X)-reach,Math.Min(from.Position.Z,to.Z)-reach,Math.Max(from.Position.X,to.X)+reach,Math.Max(from.Position.Z,to.Z)+reach)){var edge=blockedBoundaries[i];if(NearSegment(from.Position,to,radius,edge.From,edge.To)&&SegmentDistance2(from.Position,to,edge.From,edge.To)<r2-1e-9)return false;}
             cuts=IndexedCuts(from.Position,to);string current=from.SurfaceId;
             for(int i=1;i<cuts.Count;i++){
@@ -298,6 +357,11 @@ namespace Spacewars.Simulation
             =>TraceCore(from,to,radius,portalsOnly,out endpoint,out trace,out _,certifiedEndpoints,reservation,provider);
         internal bool TryGraphTrace(NavLocation from,NavPoint to,double radius,out NavLocation endpoint,out IReadOnlyList<NavTypedLeg> trace,out int blocker)
             =>TraceCore(from,to,radius,true,out endpoint,out trace,out blocker);
+        internal bool ConnectsWithoutPortal(NavLocation from,NavLocation to,double radius,INavStorageReservation reservation)
+        {
+            using var scratch=NavStorageScratch.Reserve(reservation,TraceScratchBound);
+            return TraverseCore(from,to.Position,radius,out var reached,out _,out bool crossed)&&!crossed&&reached.Equals(to);
+        }
         private bool TraceCore(NavLocation from,NavPoint to,double radius,bool portalsOnly,out NavLocation endpoint,out IReadOnlyList<NavTypedLeg> trace,out int blocker,bool certifiedEndpoints=false,INavStorageReservation reservation=null,ILayeredNavigationProvider provider=null)
         {
             using(var scratch=reservation==null?null:NavStorageScratch.Reserve(reservation,TraceScratchBound)){
@@ -305,19 +369,38 @@ namespace Spacewars.Simulation
             if(!TraverseCore(from,to,radius,out endpoint,out var cuts,out bool crossed,out blocker,certifiedEndpoints))return false;
             if(portalsOnly&&!crossed)return true;
             var legacy=reservation==null?new List<NavTypedLeg>():null;
-            var owned=reservation==null?null:NavPagedList<NavTypedLeg>.Create(reservation.TryReserve);bool escaped=false;
+            using var births=reservation is INavStorageLocalBirthAllocator?new NavStorageLocalBirths(reservation):null;
+            var traceReservation=births??reservation;
+            var owned=traceReservation==null?null:NavPagedList<NavTypedLeg>.Create(traceReservation.TryReserve,pageSize:NavTypedLeg.TracePageSlots);bool escaped=false;
             try{
-            if(!TryTraceSegments(from,to,endpoint,Append,cuts))return false;
+            if(!EmitTraversal(from,to,endpoint,cuts,crossed,Append))return false;
             if(owned==null)trace=Array.AsReadOnly(legacy.ToArray());else{owned.Seal();trace=owned;escaped=true;}return true;
             void Append(NavLocation start,NavLocation end,double cost,NavTypedLegKind kind,string portal)
             {
                 if(owned==null){legacy.Add(new NavTypedLeg(start,end,cost,kind,portal));return;}
-                var leg=NavTypedLeg.CreateOwned(start,end,cost,kind,portal,reservation,provider);try{owned.Add(leg);}finally{leg.ReleaseStorage();}
+                var leg=NavTypedLeg.CreateOwned(start,end,cost,kind,portal,traceReservation,provider);try{owned.Add(leg);}finally{leg.ReleaseStorage();}
             }
             }finally{if(!escaped)owned?.ReleaseStorage();}
             }
         }
-        private bool TryTraceSegments(NavLocation from,NavPoint to,NavLocation endpoint,Action<NavLocation,NavLocation,double,NavTypedLegKind,string> append,List<double> cuts=null)
+        // Synchronous observation of the SAME certified segment transcript.
+        // The caller consumes values only; no leg/container or selector escapes.
+        internal bool TryObserveTrace(NavLocation from,NavPoint to,double radius,INavStorageReservation reservation,Action<NavLocation,NavLocation,double,NavTypedLegKind,string> observe,out NavLocation reached)
+        {
+            using(NavStorageScratch.Reserve(reservation,TraceScratchBound)){
+                if(!TraverseCore(from,to,radius,out reached,out var cuts,out bool crossed,out _))return false;
+                return EmitTraversal(from,to,reached,cuts,crossed,observe);
+            }
+        }
+        private bool EmitTraversal(NavLocation from,NavPoint to,NavLocation endpoint,IReadOnlyList<double> cuts,bool crossed,Action<NavLocation,NavLocation,double,NavTypedLegKind,string> append)
+        {
+            if(crossed)return TryTraceSegments(from,to,endpoint,append,cuts);
+            // TraverseCore checked every interval, including the endpoint. With
+            // no surface change, the complete transcript is a single surface leg.
+            append(new NavLocation(from.Position,from.SurfaceId),endpoint,LayeredNavigationProvider.Distance(from.Position,to),NavTypedLegKind.Surface,null);
+            return true;
+        }
+        private bool TryTraceSegments(NavLocation from,NavPoint to,NavLocation endpoint,Action<NavLocation,NavLocation,double,NavTypedLegKind,string> append,IReadOnlyList<double> cuts=null)
         {
             if(cuts==null)cuts=IndexedCuts(from.Position,to);string current=from.SurfaceId;var last=from.Position;
             for(int i=1;i<cuts.Count;i++){
@@ -338,6 +421,14 @@ namespace Spacewars.Simulation
                 foreach(var seam in path){string next=seam.FromSurface==current?seam.ToSurface:seam.FromSurface;append(new NavLocation(point,current),new NavLocation(point,next),0,NavTypedLegKind.Portal,seam.Id);current=next;}
                 last=point;return true;
             }
+        }
+        // The executor has already paid one full trace scratch per concurrent lane.
+        // Emit through the same segment iterator as the physical owned trace.
+        internal bool PrepareSurfaceTrace(NavLocation from, NavPoint target, double radius,
+            Action<NavLocation,NavLocation,double,NavTypedLegKind,string> emit)
+        {
+            return TraverseCore(from,target,radius,out var reached,out var cuts,out bool crossed) &&
+                !crossed && TryTraceSegments(from,target,reached,emit,cuts);
         }
         // Non-emitting BODY validation shares the actual traversal transcript.
         // No leg/container is created or registered in the restore transaction.
@@ -390,13 +481,18 @@ namespace Spacewars.Simulation
         internal const double IncidentBoxReach=IncidentTolerance+1e-9;
         private List<NavPartitionSeam> Incident(NavPoint point){
             var result=new List<NavPartitionSeam>();double reach=IncidentBoxReach;
-            if(seamIndex==null){foreach(var seam in Seams)if(seam.Allowed&&NearPoint(point,IncidentTolerance,seam.From,seam.To)&&Distance2(point,seam.From,seam.To)<=1e-14)result.Add(seam);return result;}
-            foreach(int i in seamIndex.Candidates(point.X-reach,point.Z-reach,point.X+reach,point.Z+reach)){var seam=Seams[i];if(seam.Allowed&&NearPoint(point,IncidentTolerance,seam.From,seam.To)&&Distance2(point,seam.From,seam.To)<=1e-14)result.Add(seam);}
+            if(seamIndex==null){
+                if(CanUseOwnedIncident&&!double.IsNaN(point.X)&&!double.IsNaN(point.Z)&&!double.IsInfinity(point.X)&&!double.IsInfinity(point.Z)){AppendOwnedIncident(point,result);return result;}
+                foreach(var seam in Seams)if(IncidentMatches(seam,point))result.Add(seam);return result;
+            }
+            foreach(int i in seamIndex.Candidates(point.X-reach,point.Z-reach,point.X+reach,point.Z+reach)){var seam=Seams[i];if(IncidentMatches(seam,point))result.Add(seam);}
             return result;
         }
-        private List<double> IndexedCuts(NavPoint a,NavPoint b){
-            if(edgeIndex==null)return Cuts(a,b,edges);
-            var cuts=new List<double>{0,1};double dx=b.X-a.X,dz=b.Z-a.Z,length=dx*dx+dz*dz;if(length==0)return cuts;
+        private static readonly IReadOnlyList<double> UncutSweep=Array.AsReadOnly(new[]{0d,1d});
+        private IReadOnlyList<double> IndexedCuts(NavPoint a,NavPoint b){
+            if(edgeIndex==null)return UseOwnedQueries?OwnedIndexedCuts(a,b):Cuts(a,b,edges);
+            double dx=b.X-a.X,dz=b.Z-a.Z,length=dx*dx+dz*dz;if(length==0)return UncutSweep;
+            List<double> cuts=null;
             double margin=1e-7+(1e-10+1e-12)/Math.Sqrt(length),reach=margin+1e-9;
             bool original=edges.Length>4096;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -410,10 +506,15 @@ namespace Spacewars.Simulation
                 // The old sorted list invokes AddCuts once for each distinct
                 // index in ascending order. Reproduce precisely that sequence,
                 // using at most512B of private stack, with no geometry changes.
+                var candidates=edgeIndex.Candidates(Math.Min(a.X,b.X)-reach,Math.Min(a.Z,b.Z)-reach,Math.Max(a.X,b.X)+reach,Math.Max(a.Z,b.Z)+reach);
+                if(candidates.TrySingleBucket(out var bucket)){
+                    foreach(int i in bucket)AddCuts(ref cuts,a,b,dx,dz,length,margin,edges[i]);
+                    return SortUniqueCuts(cuts);
+                }
                 Span<ulong> seen=stackalloc ulong[(edges.Length+63)/64];seen.Clear();
-                foreach(int i in edgeIndex.Candidates(Math.Min(a.X,b.X)-reach,Math.Min(a.Z,b.Z)-reach,Math.Max(a.X,b.X)+reach,Math.Max(a.Z,b.Z)+reach))seen[i>>6]|=1UL<<(i&63);
+                foreach(int i in candidates)seen[i>>6]|=1UL<<(i&63);
                 for(int word=0;word<seen.Length;word++){
-                    ulong pending=seen[word];while(pending!=0){int i=word*64+LowestSetBit(pending);AddCuts(cuts,a,b,dx,dz,length,margin,edges[i]);pending&=pending-1;}
+                    ulong pending=seen[word];while(pending!=0){int i=word*64+LowestSetBit(pending);AddCuts(ref cuts,a,b,dx,dz,length,margin,edges[i]);pending&=pending-1;}
                 }
                 return SortUniqueCuts(cuts);
             }
@@ -424,7 +525,7 @@ namespace Spacewars.Simulation
 #if UNITY_INCLUDE_TESTS
                 IndexedCutCandidateForTests?.Invoke(this);
 #endif
-                if(i==previous)continue;previous=i;AddCuts(cuts,a,b,dx,dz,length,margin,edges[i]);}
+                if(i==previous)continue;previous=i;AddCuts(ref cuts,a,b,dx,dz,length,margin,edges[i]);}
             return SortUniqueCuts(cuts);
         }
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -444,8 +545,9 @@ namespace Spacewars.Simulation
             if((value&1UL)==0)bit++;
             return bit;
         }
-        private static List<double> SortUniqueCuts(List<double> cuts)
+        private static IReadOnlyList<double> SortUniqueCuts(List<double> cuts)
         {
+            if(cuts==null)return UncutSweep;
             cuts.Sort();int count=0;
             // Sorted equal doubles are adjacent. Preserve the first value's
             // exact bits, including signed zero, as Distinct did after Sort.
@@ -453,10 +555,17 @@ namespace Spacewars.Simulation
             if(count<cuts.Count)cuts.RemoveRange(count,cuts.Count-count);
             return cuts;
         }
-        private static void AddCuts(List<double> cuts,NavPoint a,NavPoint b,double dx,double dz,double length,double margin,Tuple<NavPoint,NavPoint> edge){
+        private static void AddCuts(ref List<double> cuts,NavPoint a,NavPoint b,double dx,double dz,double length,double margin,Tuple<NavPoint,NavPoint> edge){
             var c=edge.Item1;var d=edge.Item2;if(!NearSegment(a,b,margin,c,d))return;double ex=d.X-c.X,ez=d.Z-c.Z,den=Cross2(dx,dz,ex,ez);
-            if(Math.Abs(den)>1e-12){double t=Cross2(c.X-a.X,c.Z-a.Z,ex,ez)/den,u=Cross2(c.X-a.X,c.Z-a.Z,dx,dz)/den;if(t>=0&&t<=1&&u>=0&&u<=1)cuts.Add(t);}
-            else if(Math.Abs(Cross2(c.X-a.X,c.Z-a.Z,dx,dz))<=1e-10){foreach(var p in new[]{c,d}){double t=((p.X-a.X)*dx+(p.Z-a.Z)*dz)/length;if(t>0&&t<1)cuts.Add(t);}}
+            if(Math.Abs(den)>1e-12){
+                double t=Cross2(c.X-a.X,c.Z-a.Z,ex,ez)/den,u=Cross2(c.X-a.X,c.Z-a.Z,dx,dz)/den;
+                if(t>=0&&t<=1&&u>=0&&u<=1)(cuts??=new List<double>{0,1}).Add(t);
+            }else if(Math.Abs(Cross2(c.X-a.X,c.Z-a.Z,dx,dz))<=1e-10){
+                double first=((c.X-a.X)*dx+(c.Z-a.Z)*dz)/length;
+                if(first>0&&first<1)(cuts??=new List<double>{0,1}).Add(first);
+                double second=((d.X-a.X)*dx+(d.Z-a.Z)*dz)/length;
+                if(second>0&&second<1)(cuts??=new List<double>{0,1}).Add(second);
+            }
         }
         // Current providers author one combat family. This query does not replace
         // the existing GroundFireClear, ballistics or owner/team fog predicates.
@@ -465,16 +574,45 @@ namespace Spacewars.Simulation
         {var vertices=bounds.Footprint.Vertices;for(int i=0;i<vertices.Count;i++)yield return Tuple.Create(vertices[i],vertices[(i+1)%vertices.Count]);}
         private static NavPoint Lerp(NavPoint a,NavPoint b,double t)=>new NavPoint(a.X+(b.X-a.X)*t,a.Z+(b.Z-a.Z)*t);
         private static double Cross2(double x,double z,double xx,double zz)=>x*zz-z*xx;
-        private static List<double> Cuts(NavPoint a,NavPoint b,Tuple<NavPoint,NavPoint>[] edges)
+        private static IReadOnlyList<double> Cuts(NavPoint a,NavPoint b,Tuple<NavPoint,NavPoint>[] edges)
         {
-            var cuts=new List<double>{0,1};double dx=b.X-a.X,dz=b.Z-a.Z,length=dx*dx+dz*dz;if(length==0)return cuts;
+            double dx=b.X-a.X,dz=b.Z-a.Z,length=dx*dx+dz*dz;if(length==0)return UncutSweep;
+            List<double> cuts=null;
             // Preserve the collinearity tolerance even for extremely short segments.
             double margin=1e-7+(1e-10+1e-12)/Math.Sqrt(length);
-            foreach(var edge in edges){var c=edge.Item1;var d=edge.Item2;if(!NearSegment(a,b,margin,c,d))continue;double ex=d.X-c.X,ez=d.Z-c.Z,den=Cross2(dx,dz,ex,ez);
-                if(Math.Abs(den)>1e-12){double t=Cross2(c.X-a.X,c.Z-a.Z,ex,ez)/den,u=Cross2(c.X-a.X,c.Z-a.Z,dx,dz)/den;if(t>=0&&t<=1&&u>=0&&u<=1)cuts.Add(t);}
-                else if(Math.Abs(Cross2(c.X-a.X,c.Z-a.Z,dx,dz))<=1e-10){foreach(var p in new[]{c,d}){double t=((p.X-a.X)*dx+(p.Z-a.Z)*dz)/length;if(t>0&&t<1)cuts.Add(t);}}
-            }
+            foreach(var edge in edges)AddCuts(ref cuts,a,b,dx,dz,length,margin,edge);
             return SortUniqueCuts(cuts);
+        }
+        // Owned/cold BODY partitions deliberately retain source declarations,
+        // without the authored map's spatial indexes. Use the same conservative
+        // box predicate before their original distance arithmetic as indexed
+        // queries do. No index/cache, geometry result or saved state is added.
+        // For very large coordinate domains retain the old scan: the existing
+        // 1e-9 box padding must dominate coordinate-rounding error.
+        private bool PruneUnindexedBoundaries
+        {
+            get{
+#if UNITY_INCLUDE_TESTS
+                if(DisableUnindexedBoundaryPruningForTests)return false;
+#endif
+                return geometry.HalfExtent*(64*2.2204460492503131e-16)<=1e-9;
+            }
+        }
+        private bool UnindexedPointBoundaryHit(NavPoint point,double radius,double squared,Seam edge)
+        {
+            if(PruneUnindexedBoundaries&&!NearPoint(point,radius,edge.From,edge.To))return false;
+#if UNITY_INCLUDE_TESTS
+            UnindexedBoundaryDistanceCallsForTests++;
+#endif
+            return Distance2(point,edge.From,edge.To)<squared-1e-9;
+        }
+        private bool UnindexedSegmentBoundaryHit(NavPoint from,NavPoint to,double radius,double squared,Seam edge)
+        {
+            if(PruneUnindexedBoundaries&&!NearSegment(from,to,radius,edge.From,edge.To))return false;
+#if UNITY_INCLUDE_TESTS
+            UnindexedBoundaryDistanceCallsForTests++;
+#endif
+            return SegmentDistance2(from,to,edge.From,edge.To)<squared-1e-9;
         }
         private static bool NearPoint(NavPoint point,double radius,NavPoint a,NavPoint b)
         {double reach=radius+1e-9;return point.X+reach>=Math.Min(a.X,b.X)&&point.X-reach<=Math.Max(a.X,b.X)&&point.Z+reach>=Math.Min(a.Z,b.Z)&&point.Z-reach<=Math.Max(a.Z,b.Z);}

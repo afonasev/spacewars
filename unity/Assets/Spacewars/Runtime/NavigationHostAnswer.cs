@@ -13,13 +13,75 @@ namespace Spacewars.Runtime
         private NavigationHostRequest requestRoot;
         private NavRetainedArray<NavPoint> routeRoot;
         private NavigationHostCorridor corridorRoot;
+        internal NavRetainedArray<NavPoint> ExecutionPoints { get; private set; }
         internal NavigationAnswer Answer {get;private set;}
         internal NavigationHostRequest RequestOwner=>requestRoot;
         internal NavigationHostCorridor CorridorOwner=>corridorRoot;
+        internal bool HasGeometryQualification { get; private set; }
+        internal string QualificationFailure { get; private set; }
+        private IPlayableTerrain checkedTerrain;
+        private bool entrySuffixQualified;
+        private NavLocation firstEntry;
+        internal bool HasBoundedEntryFor(IPlayableTerrain terrain) =>
+            checkedTerrain != null && ReferenceEquals(checkedTerrain, terrain);
+        internal bool CanInstallFrom(NavCrowd crowd, NavUnit actor, IPlayableTerrain terrain)
+        {
+            var request = Answer.Request;
+            if (!entrySuffixQualified || !HasBoundedEntryFor(terrain) ||
+                !ReferenceEquals(request.BaseGeometry, crowd.Geometry) || actor.Radius != request.Profile.Radius ||
+                !request.GoalLocation.HasValue) return false;
+            var first = routeRoot[0];
+            int layer = crowd.PhysicalLayer(actor.Location);
+            return crowd.Geometry.IsFree(request.Goal, actor.Radius, crowd.PhysicalLayer(actor.GoalLocation ?? actor.Location)) &&
+                request.Geometry.SegmentFree(actor.Position, first, actor.Radius) &&
+                crowd.Geometry.IsFree(first, actor.Radius, layer) &&
+                crowd.Geometry.SegmentFree(actor.Position, first, actor.Radius, layer) &&
+                crowd.Traverse(actor.Location, first, actor.Radius, out var reached, actor.Id) && reached.Equals(firstEntry);
+        }
+        internal void QualifyBeforePublication(INavStorageReservation reservation,IPlayableTerrain terrain)
+        {
+            if (HasGeometryQualification) throw new InvalidOperationException("Route was already qualified.");
+            QualificationFailure = NavigationSession.QualifyOwnedRoute(this, reservation);
+            if (QualificationFailure == null && Answer.Request.Entity >= 0)
+                ExecutionPoints = NavRetainedArray<NavPoint>.CopyAppending(routeRoot, Answer.Request.Goal, reservation.TryReserve);
+            PrepareEntryQualification(reservation, terrain);
+            HasGeometryQualification = true;
+        }
+
+        internal void RequalifyRestoredExecution(INavStorageReservation reservation, IPlayableTerrain terrain)
+        {
+            if (HasGeometryQualification || ExecutionPoints == null) return;
+            QualificationFailure = NavigationSession.QualifyOwnedRoute(this, reservation);
+            if (QualificationFailure != null)
+                throw new ArgumentException("Restored execution failed route qualification: " + QualificationFailure);
+            PrepareEntryQualification(reservation, terrain);
+            HasGeometryQualification = true;
+        }
+
+        private void PrepareEntryQualification(INavStorageReservation reservation, IPlayableTerrain terrain)
+        {
+            var request = Answer.Request;
+            if (ExecutionPoints != null && terrain != null && !(terrain is IRecastPhysicalTerrain) &&
+                request.StartLocation.HasValue && request.GoalLocation.HasValue)
+            {
+                // Validate the unchanged suffix against the immutable physical geometry. Installation
+                // checks this geometry identity and the connection from the actor's current location.
+                using (NavStorageScratch.Reserve(reservation, 4096))
+                {
+                    var crowd = new NavCrowd(request.BaseGeometry, request.Profile, terrain);
+                    var actor = new NavUnit(request.Entity, request.Start, request.Profile.Radius, 0, 0)
+                        { Location = request.StartLocation.Value };
+                    checkedTerrain = terrain;
+                    entrySuffixQualified =
+                        crowd.ValidateRoute(actor, request.Start, actor.Location, request.Goal, routeRoot, request.GoalLocation, out _) &&
+                        crowd.Traverse(actor.Location, routeRoot[0], actor.Radius, out firstEntry);
+                }
+            }
+        }
         private bool released;
         internal override bool IsImmutableCaptureRoot=>Answer!=null;
         private bool LegacyReady=>Answer?.Status==NavSolveStatus.Ready&&routeRoot!=null&&corridorRoot==null;
-        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(LegacyReady?NavPhysicalStorageKind.LegacyProbeAnswer:NavPhysicalStorageKind.HostAnswer,value:Answer?.Status==NavSolveStatus.Partial?NavPhysicalValueKind.HostPartialAnswerV1:NavPhysicalValueKind.None);
+        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(LegacyReady?NavPhysicalStorageKind.LegacyProbeAnswer:NavPhysicalStorageKind.HostAnswer,value:ExecutionPoints!=null?NavPhysicalValueKind.ReadyExecutionPointsV1:Answer?.Status==NavSolveStatus.Partial?NavPhysicalValueKind.HostPartialAnswerV1:NavPhysicalValueKind.None);
         private static long Charge(int count)=>checked(LayoutBase+16L*count);
         private NavigationHostAnswer(int count,bool ownerReference):base(Charge(count))
         {if(ownerReference)Retain();}
@@ -99,8 +161,9 @@ namespace Spacewars.Runtime
             NavPhysicalMacro.WriteEdge(writer,this,requestRoot);
             NavPhysicalMacro.WriteEdge(writer,this,routeRoot,true);
             NavPhysicalMacro.WriteEdge(writer,this,corridorRoot,true);
+            if (ExecutionPoints != null) NavPhysicalMacro.WriteEdge(writer,this,ExecutionPoints);
         }
-        internal static NavigationHostAnswer ReadPhysicalBody(NavPhysicalBodyReader reader,bool legacyProbe=false,bool partial=false)
+        internal static NavigationHostAnswer ReadPhysicalBody(NavPhysicalBodyReader reader,bool legacyProbe=false,bool partial=false,bool execution=false)
         {
             var status=(NavSolveStatus)reader.Input.ReadInt32();
             var request=NavPhysicalMacro.ReadEdge<NavigationHostRequest>(reader);
@@ -120,9 +183,20 @@ namespace Spacewars.Runtime
                     }
                 if(at!=route.Count)throw new ArgumentException("Physical Ready route point count changed.");
             }
+            NavRetainedArray<NavPoint> executionPoints = null;
+            if (execution)
+            {
+                executionPoints = NavPhysicalMacro.ReadEdge<NavRetainedArray<NavPoint>>(reader);
+                if (status != NavSolveStatus.Ready || route == null || executionPoints.Count != route.Count + 1 ||
+                    !executionPoints[route.Count].Equals(request.Request.Goal))
+                    throw new ArgumentException("Invalid installed execution endpoint.");
+                for (int i = 0; i < route.Count; i++)
+                    if (!route[i].Equals(executionPoints[i])) throw new ArgumentException("Execution points differ from the accepted route.");
+            }
             var owner=Allocate(route?.Count??0,reader.Reservation,false);
             owner.requestRoot=NavPhysicalMacro.Acquire(owner,request);
             owner.routeRoot=NavPhysicalMacro.Acquire(owner,route);
+            owner.ExecutionPoints=NavPhysicalMacro.Acquire(owner,executionPoints);
             owner.corridorRoot=NavPhysicalMacro.Acquire(owner,corridor);
             owner.Answer=new NavigationAnswer(request.Request,route?.ReadOnlyBacking??Array.Empty<NavPoint>(),
                 status,corridor?.Corridor);owner.Answer.BindStorageOwner(owner);
@@ -130,6 +204,6 @@ namespace Spacewars.Runtime
         }
         internal void ReleaseStorage(){if(released)return;released=true;Release();}
         internal override void ReleaseOwner()=>ReleaseStorage();
-        protected override void ReleaseEdges(){requestRoot?.Release();routeRoot?.Release();corridorRoot?.Release();}
+        protected override void ReleaseEdges(){requestRoot?.Release();routeRoot?.Release();corridorRoot?.Release();ExecutionPoints?.Release();}
     }
 }

@@ -6,8 +6,9 @@ using Spacewars.Simulation;
 
 namespace Spacewars.Runtime
 {
+    public enum MatchVictoryReason { Destruction, Surrender, Domination }
     public enum MatchAiDecisionKind { Opening, OpeningCompleted, OpeningAborted, Strategy }
-    public enum MatchFactKind { Income, UnitCompleted, BuildingCompleted, UnitDestroyed, BuildingDestroyed, Army, HumanAction, AiDecision, UnitOrdered, BuildingOrdered, RefineryUpgradeOrdered, ResearchOrdered, ResearchCompleted, RefineryUpgradeCompleted, BuildingLost, BuildingSold, PlayerDefeated, PlayerLeft, BuildingCount, UnitCount, BuildingInventoryAtOrder, UnitInventoryAtOrder, RelayCaptured, RelayNeutralized }
+    public enum MatchFactKind { Income, UnitCompleted, BuildingCompleted, UnitDestroyed, BuildingDestroyed, Army, HumanAction, AiDecision, UnitOrdered, BuildingOrdered, RefineryUpgradeOrdered, ResearchOrdered, ResearchCompleted, RefineryUpgradeCompleted, BuildingLost, BuildingSold, PlayerDefeated, PlayerLeft, BuildingCount, UnitCount, BuildingInventoryAtOrder, UnitInventoryAtOrder, RelayCaptured, RelayNeutralized, RelayTransferredOut, RelayTransferredIn, DominationPoints, DominationLeadGained, DominationLeadLost }
     public sealed class MatchFact
     {
         public long Tick{get;} public long Sequence{get;} public double Seconds{get;} public PlayableOwner Owner{get;}
@@ -30,9 +31,24 @@ namespace Spacewars.Runtime
         private readonly Dictionary<(PlayableOwner,MatchFactKind,int),MatchFact[]> entityCounts=new();
         private readonly Dictionary<PlayableOwner,double[]> actions=new Dictionary<PlayableOwner,double[]>();
         public long Tick{get;} public double Duration{get;} public int Seed{get;} public string Profile{get;} public string ProfileLabel{get;} public int? WinnerTeam{get;} public bool Manual{get;}
+        public PlayableProfile Terms{get;}
+        public MatchVictoryReason? VictoryReason{get;}
+        public bool Domination{get;}
+        private readonly Dictionary<PlayableOwner,MatchFact[]> dominationPoints=new();
+        public double DominationPoints(PlayableOwner teamKey,double seconds)
+        {
+            if(!dominationPoints.TryGetValue(teamKey,out var values))return 0;
+            int lo=0,hi=values.Length;
+            while(lo<hi){int mid=(lo+hi)/2;if(values[mid].Seconds<=seconds+1e-8)lo=mid+1;else hi=mid;}
+            return lo==0?0:values[lo-1].Value;
+        }
         public IReadOnlyList<MatchResultPlayer> Players{get;} public IReadOnlyList<MatchFact> Facts{get;}
         internal MatchResult(long tick,double duration,int seed,string profile,int? winner,bool manual,MatchResultPlayer[] players,MatchFact[] facts,string profileLabel=null)
-        {Tick=tick;Duration=duration;Seed=seed;Profile=profile;ProfileLabel=profileLabel??profile;WinnerTeam=winner;Manual=manual;Players=Array.AsReadOnly(players);Facts=Array.AsReadOnly(facts);foreach(var g in facts.Where(f=>f.Kind==MatchFactKind.BuildingCount||f.Kind==MatchFactKind.UnitCount||f.Kind==MatchFactKind.BuildingInventoryAtOrder||f.Kind==MatchFactKind.UnitInventoryAtOrder).GroupBy(f=>(f.Owner,f.Kind,f.EntityKind)))entityCounts[g.Key]=g.ToArray();foreach(var player in players){var owned=facts.Where(f=>f.Owner==player.Owner).ToArray();income[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.Income).GroupBy(f=>(int)Math.Floor(f.Seconds+1e-8)).ToDictionary(g=>g.Key,g=>g.Sum(f=>f.Value));army[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.Army).ToArray();actions[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.HumanAction).Select(f=>f.Seconds).ToArray();}}
+            :this(tick,duration,seed,profile,winner,manual,players,facts,profileLabel,null){}
+        internal MatchResult(long tick,double duration,int seed,string profile,int? winner,bool manual,MatchResultPlayer[] players,MatchFact[] facts,string profileLabel,PlayableProfile terms,MatchVictoryReason? victoryReason=null,bool domination=false)
+        {Terms=terms;VictoryReason=winner.HasValue?victoryReason??MatchVictoryReason.Destruction:null;Domination=domination;
+            foreach(var group in facts.Where(f=>f.Kind==MatchFactKind.DominationPoints).GroupBy(f=>f.Owner))dominationPoints[group.Key]=group.ToArray();
+            Tick=tick;Duration=duration;Seed=seed;Profile=profile;ProfileLabel=profileLabel??profile;WinnerTeam=winner;Manual=manual;Players=Array.AsReadOnly(players);Facts=Array.AsReadOnly(facts);foreach(var g in facts.Where(f=>f.Kind==MatchFactKind.BuildingCount||f.Kind==MatchFactKind.UnitCount||f.Kind==MatchFactKind.BuildingInventoryAtOrder||f.Kind==MatchFactKind.UnitInventoryAtOrder).GroupBy(f=>(f.Owner,f.Kind,f.EntityKind)))entityCounts[g.Key]=g.ToArray();foreach(var player in players){var owned=facts.Where(f=>f.Owner==player.Owner).ToArray();income[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.Income).GroupBy(f=>(int)Math.Floor(f.Seconds+1e-8)).ToDictionary(g=>g.Key,g=>g.Sum(f=>f.Value));army[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.Army).ToArray();actions[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.HumanAction).Select(f=>f.Seconds).ToArray();}}
         public IEnumerable<MatchResultPlayer> Ranked=>Players.OrderByDescending(x=>x.Score).ThenBy(x=>x.Slot);
         public bool TeamsVisible=>Players.GroupBy(x=>x.Team).Any(x=>x.Count()>1);
         public bool IsMaximum(MatchResultPlayer player,int column)=>player.Column(column)>0&&player.Column(column)==Players.Max(x=>x.Column(column));
@@ -61,6 +77,7 @@ namespace Spacewars.Runtime
         private readonly Dictionary<PlayableOwner,string> matchAiIdentities=new Dictionary<PlayableOwner,string>();
         private readonly Dictionary<PlayableOwner,string> matchAiStrategies=new Dictionary<PlayableOwner,string>();
         private long matchFactSequence; private int matchSeed; private bool matchManual; private MatchResult frozenResult;
+        private bool dominationVictory;
         internal MatchResult Result=>frozenResult;
         internal void BindMatchSeed(int seed){matchSeed=seed;}
         private void Fact(PlayableOwner owner,MatchFactKind kind,double value,int entityKind=0,string name="")
@@ -115,7 +132,9 @@ namespace Spacewars.Runtime
             if(frozenResult!=null)return;
             var facts=matchFacts.ToArray();var players=Owners.Select((owner,index)=>new MatchResultPlayer(index,owner,TeamOf(owner),OwnerName(owner),OwnerName(owner),offline==null?owner==PlayableOwner.Enemy:offline.Roster[index].Control==OfflineControl.Ai,matchAiIdentities.TryGetValue(owner,out var identity)?identity+(matchAiStrategies.TryGetValue(owner,out var strategy)?" · итог "+strategy:""):"",facts,profile.MatchScoreEarnedCreditsDivisor)).ToArray();
             int? winner=matchManual?null:WinnerTeam??(Outcome==PlayableMatchOutcome.PlayerWon?(int?)TeamOf(PlayableOwner.Player):Outcome==PlayableMatchOutcome.PlayerLost?(int?)TeamOf(PlayableOwner.Enemy):null);
-            frozenResult=new MatchResult(Tick,elapsed,matchSeed,profile.ProfileId+"@"+profile.Revision,winner,matchManual,players,facts,profile.DisplayName+" · "+profile.Revision);
+            var lastExit=facts.LastOrDefault(f=>f.Kind is MatchFactKind.PlayerDefeated or MatchFactKind.PlayerLeft);
+            var reason=dominationVictory?MatchVictoryReason.Domination:lastExit?.Kind==MatchFactKind.PlayerLeft?MatchVictoryReason.Surrender:MatchVictoryReason.Destruction;
+            frozenResult=new MatchResult(Tick,elapsed,matchSeed,profile.ProfileId+"@"+profile.Revision,winner,matchManual,players,facts,profile.DisplayName+" · "+profile.Revision,profile,reason,DominationEnabled);
         }
         private void WriteMatchHistory(BinaryWriter w)
         {

@@ -23,6 +23,7 @@ namespace Spacewars.Presentation
         private readonly Func<MatchFact,string> factIcon;
         private readonly double? apmWindow;
         private readonly bool showAiApm;
+        private readonly PlayableProfile matchProfile;
         private readonly Button[] tabs=new Button[3];
         private readonly int[] logSlots={0,1};private readonly bool[] aiLogs={false,false};
         public Button FirstTab=>tabs[0];
@@ -30,7 +31,7 @@ namespace Spacewars.Presentation
             Func<MatchResultPlayer,string> playerName=null,Func<MatchResultPlayer,Color> playerColor=null,
             Func<MatchFact,string> factName=null,Func<MatchFact,string> factIcon=null,double? apmWindow=60,bool showAiApm=false)
         {
-            Result=result??throw new ArgumentNullException(nameof(result));this.apmWindow=apmWindow;this.showAiApm=showAiApm;
+            Result=result??throw new ArgumentNullException(nameof(result));this.apmWindow=apmWindow;this.showAiApm=showAiApm;this.matchProfile=result.Terms??PlayableProfile.Default;
             this.playerName=playerName??(p=>p.Name!=p.Id?p.Name:(p.IsAi?"ИИ ":"Игрок ")+(p.Slot+1));this.playerColor=playerColor??(p=>Palette[p.Slot%Palette.Length]);
             this.factName=factName??FactLabel;this.factIcon=factIcon??(f=>f.Kind==MatchFactKind.AiDecision?"◆":f.Kind==MatchFactKind.ResearchOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered?"◆":f.Kind==MatchFactKind.BuildingOrdered?"⬡":f.EntityKind==(int)PlayableEntityKind.Explorer?"◇":f.EntityKind==(int)PlayableEntityKind.Shkval?"△":"▣");
             visible=new HashSet<PlayableOwner>(result.Players.Select(p=>p.Owner));logSlots[1]=Math.Min(1,result.Players.Count-1);
@@ -38,6 +39,13 @@ namespace Spacewars.Presentation
             var header=Row();header.style.flexShrink=0;header.style.justifyContent=Justify.SpaceBetween;header.style.alignItems=Align.Center;Root.Add(header);
             var heading=new VisualElement();header.Add(heading);
             var title=Text(result.Manual?"МАТЧ ЗАВЕРШЁН":result.WinnerTeam.HasValue?"ПОБЕДА · КОМАНДА "+(result.WinnerTeam.Value+ (result.Players.Any(p=>p.Team==0)?1:0)):"РЕЗУЛЬТАТЫ МАТЧА",22,OrbitalTheme.Ink);title.name="result-title";heading.Add(title);
+            string reason=result.VictoryReason switch {
+                MatchVictoryReason.Domination=>"Победа по доминированию",
+                MatchVictoryReason.Surrender=>"Победа по сдаче соперников",
+                MatchVictoryReason.Destruction=>"Победа по уничтожению",
+                _=>null
+            };
+            if(reason!=null)heading.Add(Text(reason,13,OrbitalTheme.Muted));
             var metadata=Text(TimeLabel(result.Duration)+"  ·  Профиль: "+result.ProfileLabel,11,OrbitalTheme.Muted);metadata.style.maxWidth=Length.Percent(48);metadata.style.whiteSpace=WhiteSpace.Normal;header.Add(metadata);
             var nav=Row();nav.style.flexShrink=0;nav.style.marginTop=6;nav.style.marginBottom=8;Root.Add(nav);
             string[] names={"Результаты","Графики","Лог действий"};for(int i=0;i<3;i++){int page=i;tabs[i]=OrbitalTheme.Action(names[i],()=>ShowTab(page),"result-tab-"+i);CompactButton(tabs[i]);tabs[i].style.flexGrow=1;nav.Add(tabs[i]);}
@@ -57,7 +65,7 @@ namespace Spacewars.Presentation
         public static string TimeLabel(double seconds){int n=(int)Math.Floor(seconds+1e-8);return (n/60).ToString("00")+":"+(n%60).ToString("00");}
         public void ShowTab(int index)
         {
-            RememberFocus();CloseDetails(false);graphTip.style.display=DisplayStyle.None;inspecting=false;SelectedTab=index;content.Clear();graphs.Clear();activeMetric=-1;for(int i=0;i<tabs.Length;i++)tabs[i].EnableInClassList("orbital-primary",i==index);
+            RememberFocus();CloseDetails(false);graphTip.style.display=DisplayStyle.None;inspecting=false;SelectedTab=index;content.Clear();graphs.Clear();activeGraphIndex=-1;for(int i=0;i<tabs.Length;i++)tabs[i].EnableInClassList("orbital-primary",i==index);
             if(index==0)ShowTable();else if(index==1)ShowGraphs();else ShowLogs();
         }
         private void ShowLogs()
@@ -71,9 +79,9 @@ namespace Spacewars.Presentation
             var player=Result.Players[logSlots[side]];selector.style.color=playerColor(player);
             var toggle=new Toggle("Решения ИИ"){value=aiLogs[side],name="result-ai-log-"+side};ConfigureFilterToggle(toggle,OrbitalTheme.Ink);toggle.style.display=player.IsAi?DisplayStyle.Flex:DisplayStyle.None;column.Add(toggle);
             var scroll=OrbitalTheme.Scroll();scroll.style.flexGrow=1;scroll.style.minHeight=0;column.Add(scroll);
-            void Render(){scroll.Clear();foreach(var f in Result.Facts.Where(f=>f.Owner==player.Owner&&(f.Kind==MatchFactKind.UnitOrdered||f.Kind==MatchFactKind.BuildingOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered||f.Kind==MatchFactKind.ResearchOrdered||player.IsAi&&aiLogs[side]&&f.Kind==MatchFactKind.AiDecision)).OrderBy(f=>f.Tick).ThenBy(f=>f.Sequence)){var entry=Row();entry.name="result-log-event-"+f.Sequence;entry.style.alignItems=Align.Center;
+            void Render(){HideDescription();scroll.Clear();foreach(var f in Result.Facts.Where(f=>f.Owner==player.Owner&&(f.Kind==MatchFactKind.UnitOrdered||f.Kind==MatchFactKind.BuildingOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered||f.Kind==MatchFactKind.ResearchOrdered||player.IsAi&&aiLogs[side]&&f.Kind==MatchFactKind.AiDecision)).OrderBy(f=>f.Tick).ThenBy(f=>f.Sequence)){var entry=Row();entry.name="result-log-event-"+f.Sequence;entry.style.alignItems=Align.Center;
                 entry.Add(Text(TimeLabel(f.Seconds)+"   ",14,OrbitalTheme.Muted));
-                if(f.Kind==MatchFactKind.AiDecision)entry.Add(Text(factIcon(f)+"   ",14,OrbitalTheme.Cyan));else{var icon=MakeEventIcon(f,25,true,includeOrders:true);icon.style.marginRight=4;entry.Add(icon);}
+                if(f.Kind==MatchFactKind.AiDecision)entry.Add(Text(factIcon(f)+"   ",14,OrbitalTheme.Cyan));else{var icon=MakeEventIcon(f,DetailIconSize,true,includeOrders:true);icon.style.marginRight=4;entry.Add(icon);BindDirectDescription(icon,f);}
                 var description=Text(factName(f),14,f.Kind==MatchFactKind.AiDecision?OrbitalTheme.Cyan:OrbitalTheme.Ink);description.style.whiteSpace=WhiteSpace.Normal;description.style.flexShrink=1;entry.Add(description);entry.style.paddingTop=8;entry.style.paddingBottom=8;entry.style.borderBottomWidth=1;entry.style.borderBottomColor=OrbitalTheme.Line;scroll.Add(entry);}if(scroll.childCount==0)scroll.Add(Text("Нет заказанных действий",13,OrbitalTheme.Muted));}
             toggle.RegisterValueChangedCallback(e=>{aiLogs[side]=e.newValue;Render();});selector.RegisterValueChangedCallback(_=>{logSlots[side]=selector.index;ShowTab(2);});Render();
         }
@@ -87,7 +95,7 @@ namespace Spacewars.Presentation
             switch((MatchAiDecisionKind)fact.EntityKind){
                 case MatchAiDecisionKind.Opening:return "Стартовый план: "+((PlayableAiOpening)(int)fact.Value switch {
                     PlayableAiOpening.Safe=>"безопасное развитие",PlayableAiOpening.GreedySafe=>"экономическое развитие",
-                    PlayableAiOpening.GreedyMine=>"захват шахты",PlayableAiOpening.BlindRush=>"танковая атака",
+                    PlayableAiOpening.GreedyMine=>"захват шахты",PlayableAiOpening.BlindRush=>"атака Вепрей",
                     PlayableAiOpening.ExplorerAllIn=>"атака исследователями",PlayableAiOpening.DoubleMineExplorerRush=>"две шахты и исследователи",
                     PlayableAiOpening.Air=>"воздушная атака",_=>"неизвестный план ("+fact.Value.ToString("0")+")"});
                 case MatchAiDecisionKind.OpeningCompleted:return "Стартовый план завершён";

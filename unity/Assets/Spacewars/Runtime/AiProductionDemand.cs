@@ -36,8 +36,18 @@ namespace Spacewars.Runtime
         }
         internal static IEnumerable<PlayableBuildingSnapshot> Lines(PlayableAiObservation o,AiRosterCatalog catalog=null,PlayableEntityKind productionKind=PlayableEntityKind.Tank)=>
             AiEconomyAdmission.Producers(o,(catalog??AiRosterCatalog.Initial).For(productionKind)).Where(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState!=null&&b.PrivateState.Lifecycle?.Selling!=true);
-        internal static bool Blocked(PlayableBuildingSnapshot b)=>b.PrivateState.Orders.Any(q=>q.Active&&q.Remaining<=0);
-        internal static bool Productive(PlayableBuildingSnapshot b)=>b.PrivateState.Orders.Any(q=>q.Active&&q.Remaining>0);
+        internal static bool Blocked(PlayableBuildingSnapshot b)
+        {
+            var head=b.PrivateState.Orders.FirstOrDefault();
+            return head?.Active==true&&!head.IsUpgrade&&head.Remaining<=0&&head.BlockedReason!=PlayableDomain.ProducerPopulationExceeded&&
+                (b.LaunchPhase==0||head.BlockedReason==PlayableDomain.ProducerExitObstructed);
+        }
+        internal static bool Productive(PlayableBuildingSnapshot b)
+        {
+            var head=b.PrivateState.Orders.FirstOrDefault();
+            return head?.Active==true&&head.BlockedReason!=PlayableDomain.ProducerPopulationExceeded&&
+                (head.Remaining>0||!head.IsUpgrade&&!Blocked(b));
+        }
         public long IdleTicks(int id,long tick)=>idleSince.TryGetValue(id,out var start)?tick-start:0;
         public AiProductionCapacity Assess(PlayableAiObservation o,PlayableProfile p,AiProfile ai,long available,AiRosterCatalog catalog=null,PlayableEntityKind productionKind=PlayableEntityKind.Tank)
         {
@@ -51,7 +61,7 @@ namespace Spacewars.Runtime
             {
                 var head=b.PrivateState.Orders.FirstOrDefault();
                 if(Blocked(b)){blocked++;continue;}
-                if(head!=null&&!head.Active){waiting++;continue;}
+                if(head!=null&&(!head.Active||head.BlockedReason==PlayableDomain.ProducerPopulationExceeded)){waiting++;continue;}
                 if(head!=null)capacity+=head.PaidCost/head.Duration;
                 else if(free>=pop&&string.IsNullOrWhiteSpace(descriptor.exclusionReason)&&descriptor.unlockDependencies.All(r=>o.OwnerResearch.Any(q=>q.Kind==r&&q.Complete)))capacity+=cost/catalog.ProductionSeconds(productionKind,p);
             }
@@ -62,7 +72,8 @@ namespace Spacewars.Runtime
             double utilization=lineTime==0?0:busyTime/lineTime;
             long fund=(long)TerritoryRules.Cost(p,PlayableBuildingKind.Factory)+(long)ai.Value("economy.factoryLaunchCycles")*PlayableUnitRules.Cost(p,productionKind);
             bool constructing=o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Factory&&b.Health>0&&b.Phase!=ConstructionPhase.Ready);
-            string reason=lines.Length==0?"no existing live line":blocked>0?"producer exit blocked":waiting>0||free<pop?"population capacity":constructing?"factory construction pending":lines.Any(b=>b.PrivateState.QueueCount==0)?"fill existing idle line":span<window?"income window warming":utilization<ai.Value("economy.factoryUtilization")?"line utilization below scaling threshold":income<=capacity?"income within sustained spend capacity":o.Credits<=samples[0].Bank?"bank not growing":available<fund?"factory startup fund unavailable":null;
+            double projectedSpend=AiEconomicInvestmentPlanner.QueueSpend(o,p,productionKind)+AiEconomicInvestmentPlanner.UnitSpend(p,productionKind);
+            string reason=lines.Length==0?"no existing live line":blocked>0?"producer exit blocked":waiting>0||free<pop?"population capacity":constructing?"factory construction pending":lines.Any(b=>b.PrivateState.QueueCount==0)?"fill existing idle line":span<window?"income window warming":utilization<ai.Value("economy.factoryUtilization")?"line utilization below scaling threshold":!AiEconomicInvestmentPlanner.CoversSpend(AiEconomicInvestmentPlanner.SustainableIncome(o,p,ai),projectedSpend,ai)?"recurring income below projected production spend":o.Credits<=samples[0].Bank?"bank not growing":available<fund?"factory startup fund unavailable":null;
             return new AiProductionCapacity(income,capacity,utilization,span,blocked,waiting,fund,reason);
         }
         internal void Validate(long tick,double settled,IReadOnlyList<int> idleProducers)

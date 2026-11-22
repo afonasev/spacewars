@@ -15,9 +15,16 @@ namespace Spacewars.Runtime
         internal long Applied {get;private set;}
         internal long LastTick=>tick;
         internal long Credit=>credit;
+        internal static long RefillTicks(AiProfile profile,AiDifficulty difficulty)
+        {
+            long rate=(long)profile.DifficultyValue(difficulty,"control.ordersPerMinute");
+            return (Order+rate-1)/rate;
+        }
+        private static long Capacity(AiProfile p,AiDifficulty d)=>checked((long)p.DifficultyValue(d,"control.burst")*Order);
+        internal void ClampToProfile(AiProfile p,AiDifficulty d)=>credit=Math.Min(credit,Capacity(p,d));
         internal void Advance(long now,AiProfile p,AiDifficulty d)
         {
-            long capacity=checked((long)p.DifficultyValue(d,"control.burst")*Order);
+            long capacity=Capacity(p,d);
             if(tick<0){credit=capacity;tick=now;return;}
             if(now<tick)throw new InvalidOperationException("Attention clock reversed.");
             long rate=(long)p.DifficultyValue(d,"control.ordersPerMinute");
@@ -40,7 +47,7 @@ namespace Spacewars.Runtime
         internal static AiCombatMicroAttention Read(BinaryReader r,long now,AiProfile p,AiDifficulty d)
         {
             var a=new AiCombatMicroAttention{tick=r.ReadInt64(),credit=r.ReadInt64(),streak=r.ReadInt32(),lastMicro=WorldWire.Boolean(r),Applied=r.ReadInt64()};
-            AiStateWire.Require(a.tick>=-1&&a.tick<=now&&a.credit>=0&&a.credit<=(long)p.DifficultyValue(d,"control.burst")*Order&&a.streak>=0&&a.Applied>=0&&(a.tick!=-1||a.credit==0&&a.Applied==0&&a.streak==0),"combat attention state");return a;
+            AiStateWire.Require(a.tick>=-1&&a.tick<=now&&a.credit>=0&&a.credit<=Capacity(p,d)&&a.streak>=0&&a.Applied>=0&&(a.tick!=-1||a.credit==0&&a.Applied==0&&a.streak==0),"combat attention state");return a;
         }
     }
 }

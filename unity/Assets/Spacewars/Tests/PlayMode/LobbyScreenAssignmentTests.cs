@@ -36,7 +36,7 @@ public sealed class LobbyScreenAssignmentTests:InputTestFixture
         root.Q<Button>("lobby-screen-0").Focus();nav.Activate();Assert.IsNull(root.Q("lobby-screen-option--1"),"human screen is mandatory");Call("CloseLobbyScreenPicker",true);
         yield return Capture("lobby-halves");
         setup.Participants[0].Human=false;Call("RebuildRoster");yield return null;
-        Assert.True(setup.Spectator);Assert.True(setup.Participants.All(p=>p.ScreenSlot==-1));Assert.False(root.Q<Button>("lobby-screen-0").enabledSelf);Assert.False(root.Q<Button>("lobby-screen-1").enabledSelf);
+        Assert.True(setup.Spectator);CollectionAssert.AreEqual(new[]{0,1},setup.Participants.Select(p=>p.ScreenSlot));Assert.True(root.Q<Button>("lobby-screen-0").enabledSelf);Assert.True(root.Q<Button>("lobby-screen-1").enabledSelf);
         yield return Capture("lobby-spectator-exclusive");
     }
     [UnityTest] public IEnumerator MixedViewsUseAssignedCornersAndBotIsReadOnlyThroughOrdinaryLaunch()
@@ -58,11 +58,53 @@ public sealed class LobbyScreenAssignmentTests:InputTestFixture
         Assert.NotNull(runtime.BotCameraFocus("foundry-2"),"real authority publishes applied AI activity");Assert.Greater(runtime.Latest.Tick,0);Assert.IsNull(runtime.Latest.Failure);
         yield return Capture("mixed-corners");
     }
-    [UnityTest] public IEnumerator SpectatorRemainsFullscreenAndSelectedBotLocksManualCamera()
+    [UnityTest] public IEnumerator EightBotsRetainFourObserverViewsAtX4()
     {
-        var setup=Get<NativeLobbyConfiguration>("lobbySetup");setup.Participants[0].Human=false;setup.Participants[1].ScreenSlot=1;Call("RebuildRoster");Put("matchSetup",setup.Copy());Call("StartSession");Put("inLobby",false);Call("ReadPresentationFrame");Call("SetSpectatorPerspective",PlayableOwner.Enemy);Call("UpdateBotCamera");
+        Get<VisualElement>("lobbyScreen").Q<DropdownField>("lobby-map-choice").value="Полигон (8)";
+        var setup=Get<NativeLobbyConfiguration>("lobbySetup");
+        for(int i=0;i<8;i++){setup.Participants[i].Human=false;setup.Participants[i].ScreenSlot=i<4?i:-1;}
+        Call("RebuildRoster");Call("LaunchLobbyMatch");
+        float deadline=Time.realtimeSinceStartup+60;
+        while((Get<bool>("preparing")||Get<PlayableRuntime>("runtime")==null)&&Time.realtimeSinceStartup<deadline){Call("UpdateFrame");yield return null;}
+        Assert.False(Get<bool>("preparing"));var runtime=Get<PlayableRuntime>("runtime");Assert.NotNull(runtime);
+        runtime.SetSpectatorSpeed(PlayableRuntime.LocalSpectatorId,4);Put("spectatorRate",4d);Call("OnApplicationFocus",true);
+        for(int i=0;i<3;i++){Call("UpdateFrame");yield return null;}
+        var seats=Get<List<PlayableBootstrap>>("localPresentations");Assert.AreEqual(4,seats.Count);Assert.AreEqual(120,runtime.TargetTicksPerSecond);
+        CollectionAssert.AreEquivalent(Enumerable.Range(0,4),seats.Select(s=>Seat<int>(s,"localViewportIndex")));
+        foreach(var seat in seats){
+            Assert.True(Seat<bool>(seat,"spectatorMode"));Assert.AreEqual(4,Seat<double>(seat,"spectatorRate"));
+            Assert.False(Seat<PlayableInput>(seat,"input").CommandInputEnabled);
+            Assert.AreEqual(.5f,Seat<Camera>(seat,"cameraView").rect.width);Assert.AreEqual(.5f,Seat<Camera>(seat,"cameraView").rect.height);
+            Assert.AreEqual(Seat<int>(seat,"localRosterIndex"),(int)Seat<PlayableSnapshot>(seat,"view").Owner);
+        }
+        Assert.AreEqual(1,seats.Select(s=>Seat<PlayableSnapshot>(s,"view").Tick).Distinct().Count(),"all four views consume one captured spectator frame");
+        Assert.AreEqual(StyleKeyword.Auto,Get<VisualElement>("top").style.left.keyword,"primary observer resources must use the opposite corner from speed controls");
+        Assert.IsNull(runtime.Latest.Failure);
+        bool oldFps=NativeDevicePreferences.ShowFps,oldTps=NativeDevicePreferences.ShowTps;
+        try{
+            NativeDevicePreferences.ShowFps=NativeDevicePreferences.ShowTps=true;
+            var panel=Get<VisualElement>("panelRoot");
+            var fps=panel.Q<Label>("device-fps");var tps=panel.Q<Label>("device-tps");
+            float countersReady=Time.realtimeSinceStartup+2;
+            while((string.IsNullOrEmpty(fps.text)||string.IsNullOrEmpty(tps.text))&&Time.realtimeSinceStartup<countersReady){Call("UpdateFrame");yield return null;}
+            Call("UpdateFrame");yield return null;
+            Assert.AreEqual(DisplayStyle.Flex,fps.resolvedStyle.display);
+            Assert.AreEqual(DisplayStyle.Flex,tps.resolvedStyle.display);
+            Assert.That((fps.worldBound.xMin+tps.worldBound.xMax)/2,Is.EqualTo(panel.worldBound.center.x).Within(.5f));
+            Assert.Greater(panel.IndexOf(fps),panel.IndexOf(Get<VisualElement>("sharedMapFrame")));
+            foreach(var seat in seats){
+                var header=Seat<VisualElement>(seat,"top");
+                Assert.False(fps.worldBound.Overlaps(header.worldBound));
+                Assert.False(tps.worldBound.Overlaps(header.worldBound));
+            }
+            yield return Capture("observer-four-x4-counters");
+        }finally{NativeDevicePreferences.ShowFps=oldFps;NativeDevicePreferences.ShowTps=oldTps;}
+    }
+    [UnityTest] public IEnumerator UnassignedSpectatorRemainsFullscreenAndManualInputReleasesFollow()
+    {
+        var setup=Get<NativeLobbyConfiguration>("lobbySetup");setup.Participants[0].Human=false;foreach(var p in setup.Participants)p.ScreenSlot=-1;Call("RebuildRoster");Put("matchSetup",setup.Copy());Call("StartSession");Put("inLobby",false);Call("ReadPresentationFrame");Call("SetSpectatorPerspective",PlayableOwner.Enemy);Call("UpdateBotCamera");
         Assert.AreEqual(new Rect(0,0,1,1),Get<Camera>("cameraView").rect);Assert.AreEqual(1,Get<List<PlayableBootstrap>>("localPresentations").Count);Assert.True(Get<NativeLobbyConfiguration>("matchSetup").Participants.All(p=>p.ScreenSlot==-1));
-        var cam=Get<Camera>("cameraView");var position=cam.transform.position;float zoom=cam.orthographicSize;Call("Pan",Vector2.one);Call("Zoom",1f);Assert.AreEqual(position,cam.transform.position);Assert.AreEqual(zoom,cam.orthographicSize);
+        var cam=Get<Camera>("cameraView");var position=cam.transform.position;float zoom=cam.orthographicSize;Call("Pan",Vector2.one);Assert.AreNotEqual(position,cam.transform.position);Assert.True(Get<bool>("spectatorManualCamera"));Call("UpdateBotCamera");Assert.IsNull(Get<string>("botCameraOwner"));
         Call("SetSpectatorPerspective",PlayableOwner.Enemy);Call("UpdateBotCamera");Call("Pan",Vector2.one);Assert.IsNull(Get<string>("botCameraOwner"));yield return null;
     }
     IEnumerator Capture(string label)

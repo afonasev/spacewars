@@ -26,9 +26,16 @@ namespace Spacewars.Tests.EditMode
         private sealed class World : IDisposable
         {
             internal readonly PlayableProfile Profile;internal PlayableDomain Domain;internal NavigationSession Nav;internal CertifiedRouteKernel Kernel=new CertifiedRouteKernel();
-            internal World(bool policy15=false)
+            internal World(bool policy15=false,bool certifiedFlat=false)
             {
-                if(policy15){var data=PlayableProfile.Default.CopyData();data.groupCorridorMaximumExcessPercent=15;Profile=PlayableProfile.Create(data);}else Profile=PlayableProfile.Default;
+                if(policy15||certifiedFlat)
+                {
+                    var data=PlayableProfile.Default.CopyData();
+                    if(policy15)data.groupCorridorMaximumExcessPercent=15;
+                    if(certifiedFlat)data.groundRouteBackend=0;
+                    Profile=PlayableProfile.Create(data);
+                }
+                else Profile=PlayableProfile.Default;
                 Domain=new PlayableDomain(Profile,1,false);Nav=Domain.Navigation;Domain.MeasureTacticalCommitForQa=true;Domain.LastTacticalCommitAllocatedBytesForQa=-1;
             }
             internal PlayableRouteBinding Binding()=>new PlayableRouteBinding(Domain.Geometry,Profile,Nav.Admission,Nav.RoutePort);
@@ -101,7 +108,7 @@ namespace Spacewars.Tests.EditMode
         [TestCase("source")][TestCase("stage")][TestCase("commit")]
         public void SameQuantumCompletionPreservesCurrentHostBankAndColdState(string boundary)
         {
-            using(var w=new World()){
+            using(var w=new World(certifiedFlat:true)){
                 StartAccruedScan(w);NavigationHostRoot closed=null,observed=null;NavPagedList<long> bank=null;NavigationRetentionBudget.Scope scope=null;NavigationSession.MovementReadSet inputs=null;
                 byte[] body=null;long[] bankValues=null;long progress=0;CertifiedRouteKernel.PumpFrontier frontier=default;int reached=0;
                 void CaptureClosed(){reached++;CompleteActualQuantum(w);closed=w.Nav.PinCommittedHostRoot();bank=w.Nav.PinCreditBank();Assert.NotNull(bank);body=HostBody(w.Nav,closed);bankValues=BankValues(bank);progress=w.Kernel.ProgressSequence;frontier=w.Kernel.CapturePumpFrontier();}
@@ -138,7 +145,7 @@ namespace Spacewars.Tests.EditMode
         [TestCase("source",true,PlayableCommandKind.AttackMove)]
         public void AllocationStartPreservesCurrentHostBankAndColdState(string boundary,bool credit,PlayableCommandKind kind)
         {
-            using(var w=new World()){
+            using(var w=new World(certifiedFlat:true)){
                 if(credit){
                     var authority=new PlayableAuthorityTick(w.Domain,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),7,asynchronousRoutes:true);authority.EnableAccruedCredits();
                 }
@@ -225,7 +232,7 @@ namespace Spacewars.Tests.EditMode
         [TestCase("stage",true,PlayableCommandKind.AttackMove)][TestCase("commit",true,PlayableCommandKind.AttackMove)]
         public void NextIdleQuantumPreservesCurrentHostBankAndColdState(string boundary,bool complete,PlayableCommandKind kind)
         {
-            using(var w=new World()){
+            using(var w=new World(certifiedFlat:true)){
                 PrepareNextIdleCredit(w);NavigationHostRoot advanced=null;NavPagedList<long> bank=null;byte[] body=null;long[] values=null;
                 long progress=0;CertifiedRouteKernel.PumpFrontier frontier=default;int reached=0;
                 void Advance(){reached++;Assert.AreEqual(NavigationCreditPromotion.Promoted,w.Nav.TryPromoteAccruedCredit());if(complete)CompleteActualQuantum(w);
@@ -312,7 +319,7 @@ namespace Spacewars.Tests.EditMode
         [TestCase("stage",true,PlayableCommandKind.AttackMove)][TestCase("commit",true,PlayableCommandKind.AttackMove)]
         public void ActivePhasePreservesCurrentHostBankAndColdState(string boundary,bool complete,PlayableCommandKind kind)
         {
-            using(var w=new World()){
+            using(var w=new World(certifiedFlat:true)){
                 PrepareActivePhase(w,complete);NavigationHostRoot advanced=null;NavPagedList<long> bank=null;byte[] body=null;long[] values=null;
                 long progress=0;CertifiedRouteKernel.PumpFrontier frontier=default;int reached=0;
                 void Advance(){reached++;w.PumpTo(complete?CertifiedRouteKernel.PumpStage.PostFlush:CertifiedRouteKernel.PumpStage.PreFlush);
@@ -451,7 +458,7 @@ namespace Spacewars.Tests.EditMode
         }
         [TestCase(false,false)][TestCase(true,false)][TestCase(false,true)][TestCase(true,true)] public void NonemptySolverReadyProjectionAndTransferToEndCommute(bool policy15,bool firstGate)
         {
-            using(var w=new World(policy15)){
+            using(var w=new World(policy15,certifiedFlat:true)){
                 Assert.AreEqual(policy15?15:0,w.Profile.Navigation.GroupCorridorMaximumExcessPercent);
                 // A real independent ordinary request supplies nonempty work; no fake frame/header or credits.
                 var enemy=w.Position(4);Assert.True(w.Nav.Move(4,new NavPoint(enemy.X-3,enemy.Z+3)));w.PumpTo(CertifiedRouteKernel.PumpStage.Transfer);
@@ -615,11 +622,20 @@ namespace Spacewars.Tests.EditMode
                 Assert.True(Wait(()=>runtime.IsPrepared&&runtime.Latest.Paused));var d=(PlayableDomain)Field(runtime,"domain");nav=d.Navigation;
                 d.AfterTacticalPreparationForQa=payload=>scope=(NavigationRetentionBudget.Scope)Field(nav,"preparedCommandScope");
                 if(fault=="observer")nav.MovementCancelled+=id=>{notifications++;throw new InvalidOperationException(marker);};
-                if(fault=="resolve"){nav.BeforeTacticalResolveForQa=()=>scope.RelinquishOwner();restoreOwner=()=>{nav.HostChanged-=restoreOwner;notifications++;scope.AcquireOwner();};nav.HostChanged+=restoreOwner;marker="Navigation preparation belongs to another owner thread.";}
+                if(fault=="resolve")
+                {
+                    restoreOwner=()=>{nav.HostChanged-=restoreOwner;notifications++;scope.AcquireOwner();};
+                    nav.BeforeTacticalResolveForQa=()=>
+                    {
+                        scope.RelinquishOwner();
+                        nav.HostChanged+=restoreOwner;
+                    };
+                    marker="Navigation preparation belongs to another owner thread.";
+                }
                 if(fault=="cleanup")nav.AfterTacticalCleanupForQa=()=>{notifications++;throw new InvalidOperationException(marker);};
                 if(fault=="terminal"){nav.MovementCancelled+=id=>throw new InvalidOperationException(marker);restoreOwner=()=>{notifications++;throw new InvalidOperationException("terminal-secondary");};nav.AfterTacticalCleanupForQa=()=>nav.HostChanged+=restoreOwner;}
                 runtime.RequestPause(false);Assert.True(Wait(()=>!runtime.Latest.Paused));Assert.True(runtime.TrySubmit(new PlayableCommand(1,1,PlayableDomain.PlayerId,PlayableCommandKind.Hold,new[]{3}).AsHuman()).Accepted);
-                Assert.True(Wait(()=>runtime.Latest.Failure!=null));Assert.True(runtime.Latest.Failure.Contains(marker),runtime.Latest.Failure);if(fault=="terminal")Assert.True(runtime.Latest.Failure.Contains("terminal-secondary"),runtime.Latest.Failure);var receipt=runtime.ReceiptsAfter(0).Single(r=>r.Sequence==1);Assert.AreEqual(PlayableCommandStatus.Applied,receipt.Status);Assert.AreEqual(1,notifications);Assert.AreEqual(1,((PlayableOrderStamp)Field(Unit(d,3),"LastOrder")).Sequence);Assert.True(nav.Crowd.TryGet(3,out var actor));Assert.True(actor.Held);
+                Assert.True(Wait(()=>runtime.Latest.Failure!=null),$"Post-commit failure was not published for {fault}. Notifications: {notifications}; held: {nav.PhysicalHostBudget.HeldBytes}; scopes: {nav.PhysicalHostBudget.ActiveScopes}.");Assert.True(runtime.Latest.Failure.Contains(marker),runtime.Latest.Failure);if(fault=="terminal")Assert.True(runtime.Latest.Failure.Contains("terminal-secondary"),runtime.Latest.Failure);var receipt=runtime.ReceiptsAfter(0).Single(r=>r.Sequence==1);Assert.AreEqual(PlayableCommandStatus.Applied,receipt.Status);Assert.AreEqual(1,notifications);Assert.AreEqual(1,((PlayableOrderStamp)Field(Unit(d,3),"LastOrder")).Sequence);Assert.True(nav.Crowd.TryGet(3,out var actor),"Actor survived post-commit exception.");Assert.True(actor.Held,"Committed Hold survives post-commit exception.");
             }catch(Exception error){primary=error;throw;}
             finally{
                 Exception cleanup=null;void Attempt(Action action){try{action();}catch(Exception error){if(cleanup==null)cleanup=error;else PlayableDomain.PreserveTacticalSecondary(cleanup,error);}}

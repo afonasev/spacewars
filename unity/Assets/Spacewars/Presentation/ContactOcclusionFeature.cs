@@ -19,6 +19,55 @@ namespace Spacewars.Presentation
         }
         [Serializable] private sealed class Adapter {public Settings m_Settings;}
         private float intensity=-1,radius=-1,falloff=-1;
+        private TemporalContactOcclusionPass temporalPass;
+        private bool attemptedTemporalSetup;
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        private static readonly bool disableTemporal =
+            Environment.GetEnvironmentVariable("SPACEWARS_QA_DISABLE_TEMPORAL_SSAO") == "1";
+#endif
+#if UNITY_EDITOR
+        internal static bool? TemporalTestOverride { get; set; }
+        internal (int frames, bool reused, bool retained) TemporalStatus(Camera camera) =>
+            temporalPass?.Status(camera) ?? default;
+        internal void ForgetTemporalTestCamera(Camera camera) => temporalPass?.Forget(camera);
+#endif
+
+        private bool TryEnqueueTemporal(ScriptableRenderer renderer, CameraData data, ContactOcclusionCamera control)
+        {
+            bool enabled = control.TemporalEnabled;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            enabled &= !disableTemporal;
+#endif
+#if UNITY_EDITOR
+            enabled = TemporalTestOverride ?? enabled;
+#endif
+            if (!enabled) return false;
+            if (!TemporalContactOcclusionPass.Supports(data))
+            {
+                temporalPass?.Forget(data.camera);
+                return false;
+            }
+
+            if (!attemptedTemporalSetup)
+            {
+                temporalPass = TemporalContactOcclusionPass.CreateIfSupported();
+                attemptedTemporalSetup = true;
+            }
+            if (temporalPass == null || !temporalPass.ObserveStationaryView(data)) return false;
+            temporalPass.SetProfile(control.Profile);
+            renderer.EnqueuePass(temporalPass);
+            return true;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            temporalPass?.Dispose();
+            temporalPass = null;
+            attemptedTemporalSetup = false;
+            base.Dispose(disposing);
+        }
+
         public override void AddRenderPasses(ScriptableRenderer renderer,ref RenderingData renderingData)
         {
             var camera=renderingData.cameraData.camera;
@@ -31,6 +80,7 @@ namespace Spacewars.Presentation
                 intensity=p.intensity;radius=p.radius;falloff=p.falloff;
             }
             if(p.intensity<=0)return;
+            if (TryEnqueueTemporal(renderer, renderingData.cameraData, control)) return;
             base.AddRenderPasses(renderer,ref renderingData);
         }
     }

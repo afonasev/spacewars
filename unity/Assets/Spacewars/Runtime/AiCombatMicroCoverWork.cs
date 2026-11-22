@@ -36,7 +36,7 @@ namespace Spacewars.Runtime
         {
             // Include every scalar used by Covers, not a hash/reference shortcut.
             WorldWire.String(w,Profile.ProfileId);w.Write(Profile.Revision);WorldWire.String(w,BuildingCombatGeometry.Version);
-            w.Write(DirectHeight);w.Write(Profile.GaussRange);w.Write(Profile.ExplorerRange);w.Write(Profile.TurretRangeMultiplier);w.Write(Profile.HawkModelScale);w.Write(Profile.TurretModelScale);w.Write(Profile.TurretDepression);w.Write(Profile.GaussBeamRadius);w.Write(Profile.BallisticWallHeight);
+            w.Write(DirectHeight);w.Write(Profile.GaussRange);w.Write(Profile.UsesIndependentLabStats?Profile.TurretRange:Profile.ExplorerRange);w.Write(Profile.UsesIndependentLabStats?Profile.RepairTowerRange:Profile.TurretRangeMultiplier);w.Write(Profile.HawkModelScale);w.Write(Profile.TurretModelScale);w.Write(Profile.TurretDepression);w.Write(Profile.GaussBeamRadius);w.Write(Profile.BallisticWallHeight);
             foreach(PlayableBuildingKind kind in Enum.GetValues(typeof(PlayableBuildingKind)))w.Write(BuildingCombatGeometry.ModelScale(Profile,kind));
             Supports.WriteBinding(w);
         }
@@ -97,7 +97,7 @@ namespace Spacewars.Runtime
         bool Step()
         {
             var p=scene.Profile;
-            if(phase==0){double range=towerKind==PlayableBuildingKind.GaussTower?p.GaussRange:p.ExplorerRange*p.TurretRangeMultiplier;if(unitKind==PlayableEntityKind.Hawk&&towerKind==PlayableBuildingKind.GaussTower||AiCombatMicroSafety.Distance(tower,at)>range){Finish(false);return true;}if(!BeginSupport(tower))return false;phase=1;return true;}
+            if(phase==0){double range=TerritoryRules.AiDefenseRange(p,towerKind);if(unitKind==PlayableEntityKind.Hawk&&towerKind==PlayableBuildingKind.GaussTower||AiCombatMicroSafety.Distance(tower,at)>range){Finish(false);return true;}if(!BeginSupport(tower))return false;phase=1;return true;}
             if(phase==1||phase==3||phase==7||phase==15){
                 if(!supportWork.Complete){supportWork.Advance(1);return true;}if(!supportWork.Supported){Unsupported();return true;}
                 double height=supportWork.Height;EndSupport();if(phase==1){ground=height;phase=2;}else if(phase==3){targetGround=height;phase=4;}else if(phase==7){heights[heightCursor++]=height;phase=6;}else{buildingGround=height;phase=16;}return true;

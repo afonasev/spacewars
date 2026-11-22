@@ -5,6 +5,8 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using NUnit.Framework;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
 using Spacewars.Simulation.Ai;
@@ -18,24 +20,51 @@ namespace Spacewars.Tests.EditMode
         static object Field(object o,string key)=>o.GetType().GetField(key,F).GetValue(o);
         sealed class World:IDisposable
         {
-            internal readonly PlayableProfile P=PlayableProfile.Create(PlayableProfile.Default.CopyData(),new AiTestMap());
+            internal readonly PlayableProfile P;
             internal readonly PlayableDomain D;internal readonly PlayableAiOwnerLoop Owner;internal readonly OfflineMatchConfiguration Config;
             internal readonly int Patient;internal readonly int[] Members;
             internal AiCombatMicroExecutionOwner Registry=>Owner.ExecutionOwner;
-            internal World(int units=4,bool returning=false)
+            internal World(int units=4,bool returning=false,bool recast=false,bool repair=false,bool useTowerApproach=false)
             {
+                var data=PlayableProfile.Default.CopyData();
+                if(recast)data.groundRouteBackend=1;
+                P=PlayableProfile.Create(data,new AiTestMap());
                 var map=(AiTestMap)P.AuthoredMap;var authored=map.Configuration(P,7,new[]{new OfflineParticipant("player-1",1,1,OfflineControl.Ai),new OfflineParticipant("enemy-1",2,2,OfflineControl.Human)});var starts=authored.Starts.ToArray();
                 var points=new System.Collections.Generic.List<NavPoint>{new NavPoint(-96,-36),new NavPoint(-92,-36),new NavPoint(-96,-32),new NavPoint(-92,-32)};
                 double radius=PlayableUnitRules.Radius(P,PlayableEntityKind.Tank),slot=Math.Max(P.ScienceFootprintRadius,Math.Max(P.FactoryFootprintRadius,P.RefineryFootprintRadius));
                 for(int x=-120;x<=120&&points.Count<units;x+=8)for(int z=-120;z<=120&&points.Count<units;z+=8){var at=new NavPoint(x,z);if(points.Any(q=>AiCombatMicroSafety.Distance(q,at)<4)||authored.Sites.Any(site=>AiCombatMicroSafety.Distance(site.Position,at)<TerritoryRules.Radius(P,site.Kind)+radius+1||site.Slots.Any(q=>AiCombatMicroSafety.Distance(q.Position,at)<slot+radius+1))||starts.Any(start=>AiCombatMicroSafety.Distance(start.ExplorerAnchor,at)<P.ExplorerCollisionRadius+radius+1))continue;points.Add(at);}
-                Assert.AreEqual(units,points.Count,"legal authored scenario capacity");var scenario=points.Select(at=>new OfflineScenarioUnit(1,PlayableEntityKind.Tank,at)).ToArray();var costs=new double[starts.Length,starts.Length];for(int i=0;i<starts.Length;i++)for(int j=0;j<starts.Length;j++)costs[i,j]=AiCombatMicroSafety.Distance(starts[i].Position,starts[j].Position);
-                Config=new OfflineMatchConfiguration(P,"execution-owner-controls",map.Id,authored.RouteProvenance,7,authored.Roster.ToArray(),starts,authored.Sites.ToArray(),authored.Obstacles.ToArray(),costs,scenario:scenario,terrain:map.Id);
+                Assert.AreEqual(units,points.Count,"legal authored scenario capacity");var costs=new double[starts.Length,starts.Length];for(int i=0;i<starts.Length;i++)for(int j=0;j<starts.Length;j++)costs[i,j]=AiCombatMicroSafety.Distance(starts[i].Position,starts[j].Position);
+                var home=authored.Sites.Single(site=>site.Id==starts[authored.Assignments[0]].SiteId);
+                OfflineScenarioBuilding[] towers=null;
+                if(repair){
+                    var pad=home.DefenseSlots(P).OrderBy(slot=>AiCombatMicroSafety.Distance(slot.Position,points[0])).First();
+                    towers=new[]{new OfflineScenarioBuilding(1,PlayableBuildingKind.RepairTower,home.Id,pad.Id,pad.Position,pad.Heading)};
+                }
+                if(useTowerApproach)
+                {
+                    var center=towers[0].Position;
+                    var direction=points[0];
+                    double f=(P.RepairTowerRange+8)/AiCombatMicroSafety.Distance(direction,center);
+                    points[0]=new NavPoint(center.X+(direction.X-center.X)*f,center.Z+(direction.Z-center.Z)*f);
+                }
+                var scenario=points.Select(at=>new OfflineScenarioUnit(1,PlayableEntityKind.Tank,at)).ToArray();
+                Config=new OfflineMatchConfiguration(P,"execution-owner-controls",map.Id,authored.RouteProvenance,7,authored.Roster.ToArray(),starts,authored.Sites.ToArray(),authored.Obstacles.ToArray(),costs,scenario:scenario,terrain:map.Id,scenarioBuildings:towers);
                 D=new PlayableDomain(P,Gen,Config);Owner=new PlayableAiOwnerLoop(P,PlayableAiOpeningComposition.Initialize(7,"player-1",aiProfile:AiProfile.Initial),Gen,null,AiProfile.Initial,AiDifficulty.Veteran);
                 var before=View();Members=before.Entities.Where(u=>u.Owner==PlayableOwner.Player&&u.Kind==PlayableEntityKind.Tank).OrderBy(u=>u.Id).Take(4).Select(u=>u.Id).ToArray();Patient=Members[0];var armies=(AiArmyRegistry)Field(Owner,"armies");Assert.True(armies.TryCreate(before,AiArmyRole.Attack,AiArmyPlanner.Policy,Members,out var army));
                 var kind=returning?PlayableCommandKind.Follow:PlayableCommandKind.Move;var goal=new NavPoint(-88,-34);int target=returning?Members[1]:0;
+                var repairTower=repair?before.Buildings.Single(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.RepairTower):null;
+                int tower=repairTower?.Id??0;
+                if(useTowerApproach)
+                {
+                    var center=repairTower.Position;
+                    var start=before.Entities.Single(u=>u.Id==Patient).Position;
+                    double fraction=0.8*P.RepairTowerRange/AiCombatMicroSafety.Distance(start,center);
+                    goal=new NavPoint(center.X+(start.X-center.X)*fraction,center.Z+(start.Z-center.Z)*fraction);
+                }
+                var phase=repair?AiCombatMicroPhase.Repair:returning?AiCombatMicroPhase.Return:AiCombatMicroPhase.Withdraw;
                 Assert.AreEqual(PlayableCommandStatus.Applied,D.Apply(new PlayableCommand(Gen,12,"player-1",kind,new[]{Patient},goal,targetId:target,origin:PlayableOrderOrigin.Ai,source:PlayableAiOpeningComposition.SourceIdentity,jobId:88,actionId:88),out var message),message);
-                var o=View();var micro=(AiCombatMicroPolicy)Field(Owner,"combatMicro");var local=new PlayableAiAction(1,"player-1",P.ProfileId,P.Revision,Gen,o.SnapshotSequence,kind,new[]{Patient},goal,targetId:target,seed:7,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
-                micro.Commit(new AiCombatMicroPlan{Action=local,Army=army,Phase=returning?AiCombatMicroPhase.Return:AiCombatMicroPhase.Withdraw},Gen,0);var actual=new PlayableAiAction(88,"player-1",P.ProfileId,P.Revision,Gen,o.SnapshotSequence,kind,new[]{Patient},goal,targetId:target,seed:7,sourceIdentity:local.SourceIdentity);var receipt=new AiReceiptIdentity(Gen,"player-1",1,1);micro.Applied(actual,12,0,receipt);micro.Receipt(new PlayableAiTraceRecord(o.Identity,1,0,12,0,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"fixture applied command",o.OwnerId,local.SourceIdentity,receipt,AiCombatMicroPolicy.Policy,kind));
+                var o=View();var micro=(AiCombatMicroPolicy)Field(Owner,"combatMicro");var local=new PlayableAiAction(1,"player-1",P.ProfileId,P.Revision,Gen,o.SnapshotSequence,kind,new[]{Patient},goal,targetId:target,parentId:tower,seed:7,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+                micro.Commit(new AiCombatMicroPlan{Action=local,Army=army,Phase=phase},Gen,0);var actual=new PlayableAiAction(88,"player-1",P.ProfileId,P.Revision,Gen,o.SnapshotSequence,kind,new[]{Patient},goal,targetId:target,parentId:tower,seed:7,sourceIdentity:local.SourceIdentity);var receipt=new AiReceiptIdentity(Gen,"player-1",1,1);micro.Applied(actual,12,0,receipt,repair?before.Entities.Single(u=>u.Id==Patient).Location:null);micro.Receipt(new PlayableAiTraceRecord(o.Identity,1,0,12,0,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"fixture applied command",o.OwnerId,local.SourceIdentity,receipt,AiCombatMicroPolicy.Policy,kind));
                 Owner.ReconcileBudget(D);Owner.BindExecutionDomain(D);
             }
             internal PlayableAiObservation View()=>PlayableAiObservation.From(D.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,PlayableOwner.Player));
@@ -76,6 +105,377 @@ namespace Spacewars.Tests.EditMode
                 grant=1000000;Assert.True(w.Registry.TryDescribe(w.Patient,ref grant,out var descriptor));using(descriptor)Assert.True(descriptor.Withdrawal);
                 Assert.AreEqual(PlayableCommandStatus.Applied,w.D.Apply(new PlayableCommand(Gen,13,"player-1",PlayableCommandKind.Move,new[]{w.Patient},new NavPoint(-87,-28),origin:PlayableOrderOrigin.Ai,source:PlayableAiOpeningComposition.SourceIdentity,jobId:89,actionId:89),out var message),message);grant=1000000;Assert.False(w.Registry.TryDescribe(w.Patient,ref grant,out _));Assert.AreEqual(baseline,w.Registry.Retained);}
         }
+        [Test,Timeout(30000)]
+        public void DefaultGroundResponseMovesAfterAppliedMicroWithdrawalArrives()
+        {
+            using var w=new World(recast:true);
+            var d=w.D;
+            var nav=d.Navigation;
+            nav.TickQuantaEnabled=true;
+            nav.SuspendPendingMovement=true;
+            d.NonblockingNavigationPreparation=true;
+            d.ConfigureCombatExecutionOwners(()=>new[]{w.Owner});
+            nav.RoutePort.PrepareRecastStartup(w.P,null);
+            d.BindCombatMotionAuthority(()=>new[]{w.Owner});
+            var binding=new PlayableRouteBinding(d.Geometry,w.P,nav.Admission,nav.RoutePort);
+            using var host=new CertifiedRouteWorker(binding,8);
+            bool staleReceiver=false;
+            void Step()
+            {
+                d.BindCombatMotionAuthority(()=>new[]{w.Owner});
+                nav.PrepareDeliveryBarrier();
+                nav.PrepareTickQuantum(d.Tick+1,w.P.NavigationRequestsPerFrame,true);
+                d.Step(1d/30);
+                staleReceiver|=d.CombatMotionAuthority.LastRefusal?.Contains("Stale applied micro receiver.")==true;
+                Assert.IsNull(host.Publication.Failure);
+                Thread.Sleep(1);
+            }
+            try
+            {
+                var start=d.CombatExecutionActor(w.Patient).Position;
+                long firstRequest=nav.PendingRequestFor(w.Patient).Request;
+                Assert.True(SpinWait.SpinUntil(()=>nav.HasCertifiedHost||host.Publication.Failure!=null,5000));
+                Assert.IsNull(host.Publication.Failure);
+                void Until(Func<bool> predicate,int horizon,string failure)
+                {
+                    for(int i=0;i<horizon&&!predicate();i++)Step();
+                    var actor=d.CombatExecutionActor(w.Patient);
+                    Assert.True(predicate(),$"{failure} tick={d.Tick} pending={nav.PendingCount} pumps={host.Publication.Pumps} applied={nav.AppliedResults} outcome={actor.NavigationOutcome} runnable={nav.QuantumRunnable} host_attached={nav.HasCertifiedHost} world_refusal={d.CombatMotionAuthority.LastRefusal} route_refusal={host.Publication.ProjectionFailure}");
+                }
+                Until(()=>d.SpatialCompletion(w.Patient,PlayableOwner.Player)?.Order.Sequence==12,420,"The applied Micro Move must physically arrive through the certified worker.");
+                var arrived=d.CombatExecutionActor(w.Patient);
+                Assert.Greater(AiCombatMicroSafety.Distance(start,arrived.Position),2);
+                Assert.True(w.Owner.ReservesExecutionSubject(w.Patient));
+                Assert.IsNull(arrived.CurrentOrder);
+                Assert.AreEqual(12,arrived.OrderStamp.Sequence);
+
+                var hit=typeof(PlayableDomain).GetMethod("ObserveCombatHit",F);
+                hit.Invoke(d,new object[]{w.Patient,PlayableOwner.Player,arrived.Position,0,PlayableOwner.Enemy,new NavPoint(0,-1)});
+                bool issued=false,translated=false;
+                for(int tick=0;tick<90&&!translated;tick++){
+                    Step();
+                    var actor=d.CombatExecutionActor(w.Patient);
+                    long request=nav.InstalledExecutionFor(w.Patient)?.Corridor.Request??0;
+                    issued|=(nav.PendingRequestFor(w.Patient)?.Request??0)>firstRequest||request>firstRequest;
+                    if(request>firstRequest&&actor.Position.Z<arrived.Position.Z-.4)translated=true;
+                }
+                TestContext.WriteLine($"MICRO_DEFAULT_RESPONSE issued={issued} translated={translated} stale_receiver={staleReceiver} pumps={host.Publication.Pumps}");
+                Assert.True(issued,"A normal hidden-hit response must issue its own Native move.");
+                Assert.False(staleReceiver,"The completed withdrawal must not claim the ordinary response's movement.");
+                Assert.True(translated,"The hit response must physically move away from the incoming direction.");
+            }
+            finally
+            {
+                host.Dispose();
+                Assert.True(SpinWait.SpinUntil(()=>host.IsStopped,5000));
+                d.StopCombatMotionAuthority();
+            }
+        }
+        [TestCase(false,TestName="GroundRepairWithSafeActualRouteArrives")]
+        [TestCase(true,TestName="GroundRepairWithDeniedActualRouteReleasesCustody")]
+        [Timeout(30000)]
+        public void GroundRepairRecoversFromPaidPathVerdict(bool denied)
+        {
+            using var w=new World(recast:true,repair:true,useTowerApproach:true);
+            var d=w.D;
+            var n=d.Navigation;
+            n.TickQuantaEnabled=true;
+            n.SuspendPendingMovement=true;
+            d.ConfigureCombatExecutionOwners(()=>new[]{w.Owner});
+            n.RoutePort.PrepareRecastStartup(w.P,null);
+            d.BindCombatMotionAuthority(()=>new[]{w.Owner});
+            var start=d.CombatExecutionActor(w.Patient);
+            if(denied)
+            {
+                var goal=n.PendingRequestFor(w.Patient).GoalLocation.Value.Position;
+                var enemyView=d.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,PlayableOwner.Enemy);
+                int id=enemyView.Buildings.Single(b=>b.Kind==PlayableBuildingKind.Headquarters&&b.Owner==PlayableOwner.Enemy).Id;
+                var kind=PlayableBuildingKind.SentryTurret;
+                double range=TerritoryRules.AiDefenseRange(w.P,kind);
+                double length=AiCombatMicroSafety.Distance(start.Position,goal);
+                double dx=(goal.X-start.Position.X)/length,dz=(goal.Z-start.Position.Z)/length;
+                var at=new NavPoint(goal.X+range*(0.45*dx+0.53*dz),goal.Z+range*(0.45*dz-0.53*dx));
+                var tower=new PlayableBuildingSnapshot(id,PlayableOwner.Enemy,kind,at,100,1,0,0,default);
+                var vision=new PlayableVision(0,144,144,1,1);
+                vision.Refresh(new[]{new VisionSource(default,300)},Array.Empty<KnownBuilding>());
+                var observation=PlayableAiObservation.From(new PlayableSnapshot(w.P.ProfileId,w.P.Revision,Gen,7,0,0,RuntimeStatus.Running,false,
+                    PlayableMatchOutcome.Playing,0,null,new[]{start},new[]{tower},Array.Empty<PlayableProjectileSnapshot>(),
+                    new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision.Snapshot(),ownerId:"player-1",participants:w.Config.Roster.ToArray()));
+                Assert.True(AiCombatMicroSafety.Covers(observation,w.P,tower,start,goal));
+                ((AiKnowledgeTracker)Field(w.Owner,"knowledge")).Observe(observation,AiProfile.Initial);
+            }
+            var binding=new PlayableRouteBinding(d.Geometry,w.P,n.Admission,n.RoutePort);
+            using var host=new CertifiedRouteWorker(binding,8);
+            bool? rejectedRemainingBranch=null;
+            w.Registry.PaidPathDenialForQa=(id,rejectedBranch)=>{if(id==w.Patient)rejectedRemainingBranch=rejectedBranch;};
+            try
+            {
+                Assert.True(SpinWait.SpinUntil(()=>n.HasCertifiedHost||host.Publication.Failure!=null,5000));
+                for(int i=0;i<630&&!rejectedRemainingBranch.HasValue;i++)
+                {
+                    d.BindCombatMotionAuthority(()=>new[]{w.Owner});
+                    n.PrepareDeliveryBarrier();
+                    n.PrepareTickQuantum(d.Tick+1,w.P.NavigationRequestsPerFrame,true);
+                    d.Step(1d/30);
+                    Assert.IsNull(host.Publication.Failure);
+                    if(d.SpatialCompletion(w.Patient,PlayableOwner.Player)!=null)break;
+                    Thread.Sleep(2);
+                }
+                var result=d.CombatExecutionActor(w.Patient);
+                TestContext.WriteLine($"REPAIR_PATH denied={denied} tick={d.Tick} rejected_after_preparation={rejectedRemainingBranch} pending={n.IsPending(w.Patient)} reserved={w.Owner.ReservesExecutionSubject(w.Patient)} outcome={result.NavigationOutcome}");
+                if(!denied)
+                {
+                    Assert.IsNull(rejectedRemainingBranch);
+                    Assert.AreEqual(12,d.SpatialCompletion(w.Patient,PlayableOwner.Player)?.Order.Sequence);
+                    return;
+                }
+                Assert.AreEqual(true,rejectedRemainingBranch,"The real Native route's remaining branch must fail the paid threat check.");
+                Assert.AreEqual(start.Position,result.Position);
+                Assert.IsNull(d.SpatialCompletion(w.Patient,PlayableOwner.Player));
+                Assert.IsFalse(w.Owner.ReservesExecutionSubject(w.Patient),"A denied repair path must release the exact applied job after publication rolls back.");
+                Assert.IsFalse(n.IsPending(w.Patient));
+                Assert.IsNull(result.CurrentOrder);
+                Assert.AreEqual(NavigationOutcome.Stopped,result.NavigationOutcome);
+            }
+            finally
+            {
+                host.Dispose();
+                Assert.True(SpinWait.SpinUntil(()=>host.IsStopped,5000));
+                d.StopCombatMotionAuthority();
+            }
+        }
+
+        [TestCase("busy")][TestCase("cold")][TestCase("capacity")][TestCase("replacement")][TestCase("available")]
+        public void BusyRepairTowerCancelsTheExactGroundMoveBeforePublication(string condition)
+        {
+            using var w=new World(recast:true,repair:true);
+            var authority=new PlayableAuthorityTick(w.D,new AiAuthorityScheduler(new[]{w.Owner}),7,w.Config);
+            PlayableAuthorityTick restored=null;
+            try
+            {
+                if(condition=="cold"){
+                    var bytes=authority.CaptureBytes();
+                    restored=PlayableAuthorityTick.RestoreBytes(bytes,w.Config);
+                    CollectionAssert.AreEqual(bytes,restored.CaptureBytes());
+                    authority=restored;
+                }
+                ExerciseRepairCancellation(authority,w.Patient,w.Members[1],condition);
+            }
+            finally
+            {
+                if(restored!=null){
+                    restored.Stop();
+                    restored.Domain.Navigation.ReleaseCommittedHostRoot();
+                    restored.Domain.DestroyOwnedNavigation();
+                }
+            }
+        }
+        private static void ExerciseRepairCancellation(PlayableAuthorityTick authority,int patient,int recipient,string condition)
+        {
+            var domain=authority.Domain;
+            var owner=authority.Scheduler.Owners.Single();
+            var nav=domain.Navigation;
+            var view=authority.ParticipantView("player-1");
+            var tower=view.Buildings.Single(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.RepairTower);
+            Assert.True(domain.CombatExecutionRepairReady(tower.Id,PlayableOwner.Player,patient));
+            var old=domain.CombatExecutionActor(patient);
+            Assert.AreEqual(12,old.Queue.Pending.CommandSequence);
+            Assert.True(owner.ReservesExecutionSubject(patient));
+            if(condition=="replacement")
+                Assert.AreEqual(PlayableCommandStatus.Applied,domain.Apply(new PlayableCommand(Gen,13,"player-1",PlayableCommandKind.Move,new[]{patient},new NavPoint(-87,-28)).AsHuman(),out _));
+
+            var buildings=(IDictionary)Field(domain,"buildings");
+            var building=buildings[tower.Id];
+            var healing=building.GetType().GetField("Healing",F);
+            var beam=Activator.CreateInstance(healing.FieldType,true);
+            void OccupyTower()
+            {
+                beam.GetType().GetField("Target",F).SetValue(beam,recipient);
+                healing.SetValue(building,beam);
+                Assert.False(domain.CombatExecutionRepairReady(tower.Id,PlayableOwner.Player,patient));
+            }
+            if(condition!="available")OccupyTower();
+            if(condition=="capacity"){
+                nav.PhysicalHostBudget.AllocationAdmission=_=>false;
+                try{domain.Step(1d/30);}
+                finally{nav.PhysicalHostBudget.AllocationAdmission=null;}
+                Assert.True(nav.IsPending(patient));
+                Assert.True(owner.ReservesExecutionSubject(patient));
+                OccupyTower();
+            }
+
+            domain.Step(1d/30);
+            var next=domain.CombatExecutionActor(patient);
+            TestContext.WriteLine($"BUSY_REPAIR condition={condition} cancelled={next.Queue?.Pending==null} pending={nav.IsPending(patient)} outcome={next.NavigationOutcome} reserved={owner.ReservesExecutionSubject(patient)}");
+            if(condition is ("available" or "replacement")){
+                Assert.True(nav.IsPending(patient));
+                Assert.AreEqual(condition=="available"?12:13,next.Queue.Pending.CommandSequence);
+                return;
+            }
+            Assert.False(nav.IsPending(patient),"The old Move cannot keep receiving the same repair-tower refusal.");
+            Assert.IsNull(next.CurrentOrder);
+            Assert.AreEqual(NavigationOutcome.Stopped,next.NavigationOutcome);
+            Assert.False(owner.ReservesExecutionSubject(patient));
+            Assert.AreEqual(old.Position,next.Position);
+            Assert.IsNull(domain.SpatialCompletion(patient,PlayableOwner.Player));
+        }
+        [TestCase(false)]
+        [TestCase(true)]
+        public void GroundRepairMoveThatCannotFinishWithinItsPhaseStopsBeforePublication(bool canFinish)
+        {
+            using var w=new World(recast:true,repair:true);
+            var authority=new PlayableAuthorityTick(w.D,new AiAuthorityScheduler(new[]{w.Owner}),7,w.Config);
+            var units=(IDictionary)Field(w.D,"units");
+            var unit=units[w.Patient];
+            unit.GetType().GetField("Health",F).SetValue(unit,40d);
+            var old=w.D.CombatExecutionActor(w.Patient);
+            var target=w.D.Navigation.PendingRequestFor(w.Patient).Goal;
+            var profile=AiProfile.Initial;
+            long limit=AiProfile.SecondsToTicks(profile.DifficultyValue(AiDifficulty.Veteran,"micro.maxPhaseSeconds"),30);
+            double length=AiCombatMicroSafety.Distance(old.Position,target);
+            double estimate=AiCombatMicroPolicy.RepairSeconds(w.P,profile,AiDifficulty.Veteran,old,length);
+            long travel=(long)Math.Ceiling(estimate*30);
+            long tick=limit-travel+(canFinish?-2:2);
+            Assert.Greater(tick,0);
+            Assert.Less(tick+1,limit,"The phase is live, but repair can exceed the remaining time.");
+            typeof(PlayableDomain).GetProperty("Tick",F).SetValue(w.D,tick);
+            w.D.EnableRepairCancellationJournal();
+
+            w.D.Step(1d/30);
+
+            var next=w.D.CombatExecutionActor(w.Patient);
+            Assert.AreEqual(canFinish,w.D.Navigation.IsPending(w.Patient),"Only a repair that can still finish keeps the route.");
+            Assert.AreEqual(canFinish,w.Owner.ReservesExecutionSubject(w.Patient));
+            Assert.AreEqual(old.Position,next.Position);
+            Assert.IsNull(w.D.SpatialCompletion(w.Patient,PlayableOwner.Player));
+            if(canFinish)
+            {
+                Assert.IsEmpty(w.D.DrainRepairCancellations());
+                return;
+            }
+            Assert.AreEqual(NavigationOutcome.Stopped,next.NavigationOutcome);
+            var cancelled=w.D.DrainRepairCancellations().Single();
+            Assert.AreEqual("travel-and-healing-exceed-phase",cancelled.Reason);
+            Assert.AreEqual(88,cancelled.ActionId);
+            Assert.AreEqual(0d,cancelled.Displacement);
+            Assert.True(cancelled.RetryBlocked);
+            Assert.IsEmpty(w.D.DrainRepairCancellations());
+
+            var micro=(AiCombatMicroPolicy)Field(w.Owner,"combatMicro");
+            var observation=w.View();
+            var state=WorldWire.Pack(micro.Write);
+            var restored=WorldWire.Unpack(state,reader=>AiCombatMicroPolicy.Read(reader,w.D.Tick,Gen));
+            CollectionAssert.AreEqual(state,WorldWire.Pack(restored.Write));
+            Assert.True(restored.BlocksRepairRetry(observation,w.P,next,cancelled.TowerId));
+            Assert.False(restored.BlocksRepairRetry(observation,w.P,next,cancelled.TowerId+1));
+            var moved=new PlayableEntitySnapshot(next.Id,next.Owner,next.Kind,
+                new NavPoint(next.Position.X+2*w.P.Navigation.ArrivalTolerance,next.Position.Z),next.Health,false,0,0,0,
+                location:next.Location);
+            Assert.False(restored.BlocksRepairRetry(observation,w.P,moved,cancelled.TowerId));
+        }
+        [Test, Explicit("Reconstructs the original Null Dock seed 19 AB repair order."), Timeout(30000)]
+        public void NullDock19ABStationaryVeprDoesNotReissueRepair()
+        {
+            const string ownerId="foundry-2";
+            const long generation=3,sequence=12,actionId=88;
+            var manifestPath=Environment.GetEnvironmentVariable("SPACEWARS_REPAIR_REPLAY_MANIFEST");
+            var mapPath=Environment.GetEnvironmentVariable("SPACEWARS_REPAIR_REPLAY_MAP");
+            Assert.That(manifestPath,Is.Not.Empty);
+            Assert.That(mapPath,Is.Not.Empty);
+            var manifest=JObject.Parse(File.ReadAllText(manifestPath));
+            Assert.AreEqual(19,(int)manifest["Seed"]);
+            Assert.AreEqual(generation,(long)manifest["Generation"]);
+            var map=new NullDockMap(JsonConvert.DeserializeObject<NullDockProfileData>(File.ReadAllText(mapPath)));
+            Assert.AreEqual((string)manifest["Map"],map.Id);
+            var profile=PlayableProfile.Create(manifest["Profile"].ToObject<PlayableProfileData>(),map);
+            var ai=new AiProfile(manifest["Ai"]["Data"].ToObject<AiProfileData>());
+            Assert.AreEqual((string)manifest["Ai"]["Hash"],ai.Hash);
+            var lobby=new NativeLobbyConfiguration{NullDock=true,HasExplicitSeed=true,ExplicitSeed=19,
+                Participants=new System.Collections.Generic.List<NativeLobbyParticipant>{
+                    new NativeLobbyParticipant{Name="ИИ",Team=1,Color=0,Difficulty=AiDifficulty.Veteran},
+                    new NativeLobbyParticipant{Name="ИИ",Team=2,Color=1,Difficulty=AiDifficulty.Expert}}};
+            var match=NativeLobbyMatch.Create(profile,lobby);
+            Assert.AreEqual(1,match.Starts[match.Assignments[0]].SiteId);
+            Assert.AreEqual(2,match.Starts[match.Assignments[1]].SiteId);
+            var pad=match.Sites.Single(site=>site.Id==2).DefenseSlots(profile).Single(slot=>slot.Id==1004);
+            Assert.AreEqual(new NavPoint(68.62664445218705,8.083980388508804),pad.Position);
+            var origin=new NavPoint(12.92182828863582,-4.412416403814545);
+            var goal=new NavPoint(63.03843791011044,10.127126894046807);
+            var scenario=new OfflineMatchConfiguration(profile,match.SourceIdentity,match.MapIdentity,match.RouteProvenance,
+                match.Seed,match.Roster.ToArray(),match.Starts.ToArray(),match.Sites.ToArray(),match.Obstacles.ToArray(),
+                new double[2,2],scenario:new[]{new OfflineScenarioUnit(2,PlayableEntityKind.Tank,origin,0.3625380222261859)},
+                terrain:map.Id,scenarioBuildings:new[]{new OfflineScenarioBuilding(2,PlayableBuildingKind.RepairTower,2,pad.Id,pad.Position,pad.Heading)});
+            var domain=new PlayableDomain(profile,generation,scenario);
+            var loop=new PlayableAiOwnerLoop(profile,PlayableAiOpeningComposition.Initialize(19,ownerId,
+                aiProfile:ai,forcedOpening:PlayableAiOpening.Safe,difficulty:AiDifficulty.Expert),generation,null,ai,AiDifficulty.Expert);
+            var authority=new PlayableAuthorityTick(domain,new AiAuthorityScheduler(new[]{loop}),19,scenario);
+            try
+            {
+                var faction=domain.OwnerFor(ownerId);
+                var initial=authority.ParticipantView(ownerId);
+                var tank=initial.Entities.Single(e=>e.Owner==faction&&e.Kind==PlayableEntityKind.Tank);
+                var tower=initial.Buildings.Single(b=>b.Owner==faction&&b.Kind==PlayableBuildingKind.RepairTower);
+                var unit=((IDictionary)Field(domain,"units"))[tank.Id];
+                unit.GetType().GetField("Health",F).SetValue(unit,28d);
+                var micro=(AiCombatMicroPolicy)Field(loop,"combatMicro");
+                var armies=(AiArmyRegistry)Field(loop,"armies");
+                var action=new PlayableAiAction(1,ownerId,profile.ProfileId,profile.Revision,generation,initial.Sequence,
+                    PlayableCommandKind.Move,new[]{tank.Id},goal,parentId:tower.Id,seed:19,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+                Assert.AreEqual(PlayableCommandStatus.Applied,domain.Apply(new PlayableCommand(generation,sequence,ownerId,
+                    action.Kind,new[]{tank.Id},goal,parentId:tower.Id,origin:PlayableOrderOrigin.Ai,source:action.SourceIdentity,
+                    jobId:actionId,actionId:actionId),out var message),message);
+                micro.Commit(new AiCombatMicroPlan{Action=action,Phase=AiCombatMicroPhase.Repair},generation,0);
+                var applied=new PlayableAiAction(actionId,ownerId,profile.ProfileId,profile.Revision,generation,initial.Sequence,
+                    action.Kind,new[]{tank.Id},goal,parentId:tower.Id,seed:19,sourceIdentity:action.SourceIdentity);
+                var receipt=new AiReceiptIdentity(generation,ownerId,1,1);
+                micro.Applied(applied,sequence,0,receipt,tank.Location);
+                micro.Receipt(new PlayableAiTraceRecord(PlayableAiObservation.From(initial).Identity,1,0,sequence,0,
+                    PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"Order accepted.",ownerId,action.SourceIdentity,
+                    receipt,AiCombatMicroPolicy.Policy,action.Kind));
+
+                // Isolate retirement before route publication. Advance only the already
+                // accepted order's clock until its straight-line repair budget is exhausted.
+                typeof(PlayableDomain).GetProperty("Tick",F).SetValue(domain,60L);
+                domain.EnableRepairCancellationJournal();
+                domain.Step(1d/30);
+                var cancelled=domain.DrainRepairCancellations().Single();
+                Assert.AreEqual(actionId,cancelled.ActionId);
+                Assert.AreEqual(tank.Id,cancelled.UnitId);
+                Assert.AreEqual(tower.Id,cancelled.TowerId);
+                Assert.AreEqual("travel-and-healing-exceed-phase",cancelled.Reason);
+                Assert.AreEqual(0d,cancelled.Displacement);
+                Assert.True(cancelled.RetryBlocked);
+                Assert.IsNull(domain.CombatExecutionActor(tank.Id).CurrentOrder);
+                Assert.IsFalse(domain.Navigation.IsPending(tank.Id));
+
+                // An unchanged decision should pass the cooldown without planning another Move.
+                for(int i=0;i<150;i++)domain.Step(1d/30);
+                var observed=PlayableAiObservation.From(authority.ParticipantView(ownerId),AiDifficulty.Expert);
+                var patient=observed.Entities.Single(u=>u.Id==tank.Id&&u.Owner==faction);
+                micro.Observe(observed,profile,ai,AiDifficulty.Expert,armies);
+                Assert.True(micro.BlocksRepairRetry(observed,profile,patient,tower.Id));
+                Assert.IsNull(micro.Propose(observed,profile,ai,AiDifficulty.Expert,armies));
+                Assert.IsEmpty(domain.DrainRepairCancellations());
+
+                var building=((IDictionary)Field(domain,"buildings"))[tower.Id];
+                var phase=building.GetType().GetField("Phase",F);
+                phase.SetValue(building,ConstructionPhase.Constructing);
+                var unavailable=PlayableAiObservation.From(authority.ParticipantView(ownerId),AiDifficulty.Expert);
+                Assert.AreEqual(ConstructionPhase.Constructing,unavailable.Buildings.Single(b=>b.Id==tower.Id).Phase);
+                micro.Observe(unavailable,profile,ai,AiDifficulty.Expert,armies);
+                phase.SetValue(building,ConstructionPhase.Ready);
+                var reopened=PlayableAiObservation.From(authority.ParticipantView(ownerId),AiDifficulty.Expert);
+                Assert.False(micro.BlocksRepairRetry(reopened,profile,patient,tower.Id));
+                TestContext.WriteLine($"Null Dock 19 AB: {cancelled.Reason}, displacement {cancelled.Displacement}, unchanged retries 0.");
+            }
+            finally
+            {
+                authority.Stop();
+                domain.Navigation.ReleaseCommittedHostRoot();
+                domain.DestroyOwnedNavigation();
+            }
+        }
+
         [Test]public void PaidHighUnitSmallCoreGuardRefusesUnderfundedActualNestedScans()
         {
             using(var w=new World(100,true)){long baseline=w.Registry.Retained;long grant=100*8+4*(8+4)+128+64;Assert.False(w.Registry.TryDescribe(w.Patient,ref grant,out _),"old U*8 plus M^2 charge cannot fund actual U*(M+R) scans");Assert.AreEqual(baseline,w.Registry.Retained);grant=1000000;Assert.True(w.Registry.TryDescribe(w.Patient,ref grant,out var descriptor));descriptor.Dispose();Assert.AreEqual(baseline,w.Registry.Retained);}
@@ -163,8 +563,8 @@ namespace Spacewars.Tests.EditMode
         {
             using(var w=new World())using(var entered=new ManualResetEventSlim())using(var release=new ManualResetEventSlim()){
                 var original=WorldWire.Unpack(WorldWire.Pack(w.Owner.WriteState),r=>PlayableAiOwnerLoop.ReadState(r,w.P,AiProfile.Initial,Gen,7,0));var scheduler=new AiAuthorityScheduler(new[]{original});scheduler.EnableBackgroundReviews();w.D.BeforeOwnerReviewForTests=()=>{entered.Set();if(!release.Wait(10000))throw new TimeoutException("Async adoption control not released.");};AiCombatMicroExecutionOwner live=null;
-                try{scheduler.Review(w.D,0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),7,_=>0);Assert.True(entered.Wait(5000));Assert.False(scheduler.ReviewWorkerStopped);scheduler.Deliver(w.D,_=>0,false);live=original.ExecutionOwner;long grant=1000000;var issuer=new NativeSource();var source=live.RegisterSource(issuer,"fixture-native-retention",ref grant);var native=new NativeInput(w,w.Proposal(),issuer);Assert.True(live.TrySubmit(Retain(live,source,native),ref grant,out var submission));if(invalidate)scheduler.Rebind(w.P);release.Set();Assert.True(SpinWait.SpinUntil(()=>scheduler.ReviewWorkerStopped,5000));scheduler.Deliver(w.D,_=>0,false);var current=scheduler.Owners.Single();if(invalidate)Assert.AreSame(original,current);else{Assert.AreNotSame(original,current);Assert.Throws<InvalidOperationException>(()=>original.BindExecutionDomain(w.D));}Assert.AreSame(live,current.ExecutionOwner);Finish(live,submission);Assert.True(live.TryIssue(submission,ref grant,out _));live.Cancel(submission);live.Unregister(source);Assert.Zero(native.Pins);
-                }finally{w.D.BeforeOwnerReviewForTests=null;release.Set();Assert.True(SpinWait.SpinUntil(()=>scheduler.ReviewWorkerStopped,5000));live?.Dispose();}
+                try{scheduler.Review(w.D,0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),7,_=>0);Assert.True(entered.Wait(5000));Assert.False(scheduler.ReviewIdle);scheduler.Deliver(w.D,_=>0,false);live=original.ExecutionOwner;long grant=1000000;var issuer=new NativeSource();var source=live.RegisterSource(issuer,"fixture-native-retention",ref grant);var native=new NativeInput(w,w.Proposal(),issuer);Assert.True(live.TrySubmit(Retain(live,source,native),ref grant,out var submission));if(invalidate)scheduler.Rebind(w.P);release.Set();Assert.True(SpinWait.SpinUntil(()=>scheduler.ReviewIdle,5000));scheduler.Deliver(w.D,_=>0,false);var current=scheduler.Owners.Single();if(invalidate)Assert.AreSame(original,current);else{Assert.AreNotSame(original,current);Assert.Throws<InvalidOperationException>(()=>original.BindExecutionDomain(w.D));}Assert.AreSame(live,current.ExecutionOwner);Finish(live,submission);Assert.True(live.TryIssue(submission,ref grant,out _));live.Cancel(submission);live.Unregister(source);Assert.Zero(native.Pins);
+                }finally{w.D.BeforeOwnerReviewForTests=null;release.Set();Assert.True(SpinWait.SpinUntil(()=>scheduler.ReviewIdle,5000));scheduler.Stop(w.D.Tick);live?.Dispose();}
             }
         }
         [Test]public void ConnectedNonemptyCoverageCursorColdRestoreResumesWithoutGeometryReplay()

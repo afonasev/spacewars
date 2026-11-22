@@ -41,6 +41,51 @@ namespace Spacewars.Tests.EditMode
         [SetUp] public void Setup(){sequence=0;Fresh(PlayableProfile.Default);}
         [TearDown] public void Cleanup(){d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();d=null;}
 
+        [TestCase(PlayableEntityKind.Tank)] [TestCase(PlayableEntityKind.Explorer)]
+        [TestCase(PlayableEntityKind.Shkval)] [TestCase(PlayableEntityKind.Hawk)]
+        public void ReturnedWoundedAttackerDoesNotStealThreateningAutomaticTarget(PlayableEntityKind kind)
+        {
+            int shooter=Spawn(PlayableOwner.Player,kind,new NavPoint(-20,26));
+            int current=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Explorer,new NavPoint(-14,26));
+            int wounded=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Explorer,new NavPoint(-15,29));
+            Set(current,"Reload",1000d);Set(wounded,"Reload",1000d);Set(wounded,"Health",12d);
+            Tick();Set(shooter,"Target",current);Set(wounded,"Target",shooter);Set(wounded,"LastCombatShotTarget",shooter);
+            Tick();Assert.AreEqual(current,Get<int>(shooter,"Target"));
+        }
+        [TestCase(false)] [TestCase(true)]
+        public void HawkRetaliatesFromIncapableTargetOnlyWithoutDirectAttack(bool explicitAttack)
+        {
+            int shooter=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,new NavPoint(-20,26));
+            int tank=Enemy(new NavPoint(-14,26));
+            int attacker=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Explorer,new NavPoint(-15,29));
+            Set(attacker,"Reload",1000d);Tick();
+            if(explicitAttack)Send(shooter,PlayableCommandKind.Attack,Actor(tank).Position,tank);
+            Set(shooter,"Target",tank);Set(attacker,"Target",shooter);Set(attacker,"LastCombatShotTarget",shooter);
+            Tick();Assert.AreEqual(explicitAttack?tank:attacker,Get<int>(shooter,"Target"));
+        }
+        [Test]
+        public void IncapableNonAttackerDoesNotStealAnExistingAutomaticTarget()
+        {
+            int hawk=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,new NavPoint(-20,26));
+            int tank=Enemy(new NavPoint(-14,26));
+            int wounded=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Shkval,new NavPoint(-16,29));
+            Set(wounded,"Health",12d);Tick();Set(hawk,"Target",tank);Tick();
+            Assert.AreEqual(tank,Get<int>(hawk,"Target"));
+        }
+        [Test]
+        public void RetreatYieldsToCloserCoverButReturnDoesNotStealItBack()
+        {
+            int shooter=Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-20,26));
+            int patient=Enemy(new NavPoint(-14,26)),cover=Enemy(new NavPoint(-14,29));
+            Tick();Set(shooter,"Target",patient);
+            Relocate(patient,new NavPoint(-12.5,26));Actor(patient).Moving=true;Set(patient,"Velocity",new NavPoint(1,0));
+            Call("CollectActiveAttackers");
+            Assert.AreEqual(cover,Call("PreferredAttacker",Units[shooter],Actor(shooter)));
+            Set(shooter,"Target",cover);Relocate(patient,new NavPoint(-14,26));Actor(patient).Moving=false;
+            Set(patient,"Target",shooter);Set(patient,"LastCombatShotTarget",shooter);Call("CollectActiveAttackers");
+            Assert.AreEqual(cover,Call("PreferredAttacker",Units[shooter],Actor(shooter)));
+        }
+
         [TestCase(PlayableEntityKind.Tank)] [TestCase(PlayableEntityKind.Explorer)] [TestCase(PlayableEntityKind.Shkval)] [TestCase(PlayableEntityKind.Hawk)]
         public void SharedVisionRevealsOtherwiseHiddenInRangeEnemyAndAllowsAutomaticFire(PlayableEntityKind kind)
         {
@@ -52,6 +97,36 @@ namespace Spacewars.Tests.EditMode
             Until(()=>View.Projectiles.Any(x=>x.OwnerId==shooter));Assert.AreEqual(enemy,Get<int>(shooter,"Target"));
             Assert.Greater(distance,PlayableUnitRules.Vision(p,kind));Assert.AreEqual(start,Actor(shooter).Position,"Idle defense must not approach an in-range enemy");
         }
+        [TestCase(PlayableEntityKind.Tank)] [TestCase(PlayableEntityKind.Explorer)]
+        [TestCase(PlayableEntityKind.Shkval)] [TestCase(PlayableEntityKind.Hawk)]
+        public void ThreateningTargetIsRetainedAndIncapableTargetYieldsAcrossRestore(PlayableEntityKind kind)
+        {
+            int unit=Spawn(PlayableOwner.Player,kind,new NavPoint(-20,26));
+            int tank=Enemy(new NavPoint(-20,22));
+            int explorer=Enemy(new NavPoint(-26,26),PlayableEntityKind.Explorer);
+            Set(unit,"Reload",1000d);
+            Tick();
+            Assert.AreEqual(tank,Get<int>(unit,"Target"),"Before hostile fire, ordinary target selection applies.");
+            var order=new PlayableCommand(1,++sequence,"enemy-1",PlayableCommandKind.Attack,new[]{explorer},targetId:unit);
+            Assert.AreEqual(PlayableCommandStatus.Applied,d.Apply(order,out _));
+            Set(explorer,"Reload",0d);
+            Until(()=>Get<int>(explorer,"LastCombatShotTarget")==unit);
+            Assert.AreEqual(tank,Get<int>(unit,"Target"),"Both sides use the same start-of-phase fire information.");
+            var bytes=d.CaptureWorldBytes(7,"direct-attacker");
+            var restored=PlayableDomain.RestoreWorldBytes(bytes,p,7,"direct-attacker");
+            try
+            {
+                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"direct-attacker"));
+                Tick();restored.Step(1d/30);
+                Assert.AreEqual(kind==PlayableEntityKind.Hawk?explorer:tank,Get<int>(unit,"Target"));
+                CollectionAssert.AreEqual(d.CaptureWorldBytes(7,"direct-attacker"),restored.CaptureWorldBytes(7,"direct-attacker"));
+                Send(unit,PlayableCommandKind.Attack,target:tank);
+                Tick();
+                Assert.AreEqual(tank,Get<int>(unit,"Target"),"Explicit Attack controls its own target.");
+            }
+            finally{restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
+        }
+
         [Test] public void BlockedNearestEnemyDoesNotMaskFartherClearTarget()
         {
             int shooter=Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-5,15));
@@ -105,6 +180,62 @@ namespace Spacewars.Tests.EditMode
             }
             finally{restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
         }
+        [Test]
+        public void HiddenHitWithdrawsOnlyVictimAndSavesExactContinuation()
+        {
+            var start=new NavPoint(-20,26);
+            int victim=Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,start);
+            int neighbor=Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-20,22));
+            int enemy=Enemy(new NavPoint(3,26));
+            Tick();
+            Assert.True((bool)Call("TryDamageWithOwner",victim,8d,enemy,PlayableOwner.Enemy,null,default(NavPoint),null,new NavPoint(-1,0)));
+            Assert.AreEqual("Withdrawal",Phase(victim));
+            Assert.AreEqual("Idle",Phase(neighbor));
+            Tick();
+            var bytes=d.CaptureWorldBytes(7,"combat-response");
+            var restored=PlayableDomain.RestoreWorldBytes(bytes,p,7,"combat-response");
+            var originalKernel=new CertifiedRouteKernel();
+            var restoredKernel=new CertifiedRouteKernel();
+            try
+            {
+                bool moved=false;
+                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"combat-response"));
+                for(int i=0;i<180;i++)
+                {
+                    originalKernel.Pump(new PlayableRouteBinding(d.Geometry,p,d.Navigation.Admission,d.Navigation.RoutePort),4);
+                    restoredKernel.Pump(new PlayableRouteBinding(restored.Geometry,p,restored.Navigation.Admission,restored.Navigation.RoutePort),4);
+                    Tick();
+                    restored.Step(1d/30);
+                    moved|=Actor(victim).Position.X<start.X-.5;
+                }
+                Assert.True(moved,"The hit unit must physically move away from the incoming direction.");
+                Assert.That(Actor(victim).Position.X,Is.EqualTo(start.X).Within(.3));
+                Assert.AreEqual(new NavPoint(-20,22),Actor(neighbor).Position);
+                CollectionAssert.AreEqual(d.CaptureWorldBytes(7,"combat-response"),restored.CaptureWorldBytes(7,"combat-response"));
+            }
+            finally
+            {
+                originalKernel.Clear();restoredKernel.Clear();
+                restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();
+            }
+        }
+
+        [Test]
+        public void CombatResponseParametersAreEditableAndBindSaves()
+        {
+            Assert.AreEqual(10.08,p.CombatResponseHelpRadius);
+            Assert.AreEqual(17,p.CombatResponsePursuitRadius);
+            var field=PlayableProfileMetadata.Fields.Single(f=>f.Path=="combat.response.pursuitRadius");
+            Assert.True(NativeBalanceFields.LabEditable(field));
+            var data=p.CopyData();
+            field.Write(data,15);
+            var tuned=PlayableProfile.Create(data);
+            var bytes=d.CaptureWorldBytes(7,"response-profile");
+            Assert.Throws<ArgumentException>(()=>PlayableDomain.RestoreWorldBytes(bytes,tuned,7,"response-profile"));
+            field.Write(data,15.001);
+            Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));
+        }
+
         [Test] public void PursuitParameterHasMetadataRangeStepAndSaveBinding()
         {
             var field=PlayableProfileMetadata.Fields.Single(f=>f.Path=="combat.default.pursuitSeconds");Assert.AreEqual(2,p.DefaultCombatPursuitSeconds);Assert.True(NativeBalanceFields.Editable(field));Assert.That(field.Group,Does.Contain("unit-default-combat-v1"));

@@ -1,0 +1,50 @@
+{
+  "id": "nuclear-aim-amber-v1",
+  "revision": 1,
+  "validColor": {
+    "r": 0.97,
+    "g": 0.77,
+    "b": 0.42,
+    "a": 1
+  },
+  "invalidColor": {
+    "r": 1,
+    "g": 0.3,
+    "b": 0.15,
+    "a": 1
+  },
+  "ringWidth": 2,
+  "fillOpacity": 0.035,
+  "innerInset": 0.06,
+  "innerArcDegrees": 24,
+  "tickPixels": 10,
+  "iconPixels": 25,
+  "compactIconPixels": 12,
+  "labelFontPixels": 12,
+  "labelWidthPixels": 178,
+  "reasonFontPixels": 10,
+  "mapLabelMinPixels": 350,
+  "glyphColor": {
+    "r": 0.96,
+    "g": 0.94,
+    "b": 0.87,
+    "a": 1
+  },
+  "panelColor": {
+    "r": 0.035,
+    "g": 0.075,
+    "b": 0.1,
+    "a": 0.9
+  },
+  "maxIconRadiusRatio": 0.55,
+  "minIconPixels": 3,
+  "aimDotPixels": 3,
+  "aimDotGapPixels": 3,
+  "missileOutlineColor": {
+    "r": 0.02,
+    "g": 0.03,
+    "b": 0.04,
+    "a": 1
+  },
+  "missileOutlinePixels": 2
+}

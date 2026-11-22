@@ -33,9 +33,9 @@ namespace Spacewars.Input.Tests
                 var cards=Get<VisualElement>(seat,"orbitalCards");var root=Get<VisualElement>(seat,"root");
                 foreach(var column in cards.Children())Inside(root.worldBound,column.worldBound,"choice block");
                 var scan=cards.Q("orbital-choice-1");Assert.AreEqual("Сканирование",scan.Q<Label>("orbital-choice-title").text);
-                var desc=scan.Q<Label>("orbital-choice-description");StringAssert.DoesNotContain("секунд",desc.text);StringAssert.DoesNotContain("3",desc.text);
+                var details=root.Q("orbital-choice-details");var desc=details.Q<Label>("orbital-choice-description");StringAssert.DoesNotContain("секунд",desc.text);StringAssert.DoesNotContain("3",desc.text);
                 Assert.GreaterOrEqual(desc.worldBound.yMin,scan.Q<Button>().worldBound.yMax,"description below card");
-                CollectionAssert.Contains(scan.Q("orbital-choice-stats").Query<Label>().ToList().Select(l=>l.text).ToArray(),"3 с");
+                CollectionAssert.Contains(details.Q("orbital-choice-stats").Query<Label>().ToList().Select(l=>l.text).ToArray(),"3 с");
             };
             yield return Capture("scan-choice-1600",captureWidth:1600,captureHeight:1000,captureChecks:CheckCards);
             yield return Capture("scan-choice-1280",captureWidth:1280,captureHeight:720,captureChecks:CheckCards);
@@ -71,7 +71,7 @@ namespace Spacewars.Input.Tests
             yield return Wait(()=>!Get<bool>(seat,"scanTargeting"),"minimap command receipt");Assert.AreEqual(beforeMini,camera.transform.position,"minimap confirmation preserves camera");
             Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
         }
-        [UnityTest] public IEnumerator ScanGamepadCursorMovesAndTabConfirmationIsOwnerBound()
+        [UnityTest] public IEnumerator ScanGamepadAimUsesCameraAndTabConfirmationIsOwnerBound()
         {
             yield return StartOrdinary(2);var seat=Seats[0];var other=Seats[1];var pad=pads[0];
             Runtime.RequestPause(true);yield return Wait(()=>Runtime.Latest.Paused,"seed pause");
@@ -80,9 +80,11 @@ namespace Spacewars.Input.Tests
             Runtime.RequestPause(false);yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").Orbital.Abilities.Count==1,"ready scan");
             Put(seat,"battleController",true);Assert.True((bool)Call(seat,"OpenOrbital",true));Call(seat,"SubmitOrbital",false,1);Assert.True(Get<bool>(seat,"scanTargeting"));
             InputSystem.Update();Call(seat,"PollOrdinaryPad");Call(seat,"PollOrdinaryPad");
-            var before=Get<Vector2>(seat,"battleCursor");Set(pad.rightStick,new Vector2(.7f,.2f));InputSystem.Update();yield return null;Call(seat,"PollOrdinaryPad");
-            Assert.Greater((Get<Vector2>(seat,"battleCursor")-before).magnitude,0,"scan cursor moves despite ordinary gesture neutral gate");
-            Set(pad.rightStick,Vector2.zero);InputSystem.Update();Call(seat,"PollOrdinaryPad");
+            var camera=Get<Camera>(seat,"cameraView");var before=Get<NavPoint>(seat,"padCursorGround");
+            Set(pad.leftStick,Vector2.right);InputSystem.Update();yield return null;Call(seat,"PollOrdinaryPad");
+            Assert.AreNotEqual(before,Get<NavPoint>(seat,"padCursorGround"),"LS pans to aim the scan despite the ordinary neutral gate");
+            Assert.AreEqual(camera.pixelRect.center,Get<Vector2>(seat,"battleCursor"));
+            Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(seat,"PollOrdinaryPad");
             ButtonFrame(pad,pad.selectButton,true);Assert.True(Get<bool>(seat,"mapOpen"));ButtonFrame(pad,pad.selectButton,false);
             var mapBefore=Get<NavPoint>(seat,"padCursorGround");Set(pad.leftStick,Vector2.right);InputSystem.Update();yield return null;Call(seat,"PollOrdinaryPad");
             Assert.Greater(Get<NavPoint>(seat,"padCursorGround").X,mapBefore.X,"TAB left stick moves scan target");Set(pad.leftStick,Vector2.zero);InputSystem.Update();

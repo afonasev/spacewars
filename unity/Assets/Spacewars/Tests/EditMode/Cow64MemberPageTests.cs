@@ -44,6 +44,38 @@ namespace Spacewars.Tests.EditMode
                 scope.Attach(next);scope.Commit(next,_=>{});done=true;return next;
             }finally{if(!done)next?.ReleaseStorage();member?.ReleaseStorage();scope.Discard();}
         }
+        [TestCase(1)][TestCase(8)][TestCase(16)][TestCase(17)]
+        public void SmallMemberPagesPreserveOldBodyColdContinuationAndRefusal(int count)
+        {
+            var hot=new NavigationRetentionBudget();NavigationAuthorityGroup source=null,next=null;
+            try{
+                source=CowSource(hot,count);
+                ContactPublishProfile.LegacyMemberPagesForQa=true;
+                var legacy=CowWrite(hot,source);source.ReleaseStorage();source=legacy;
+                ContactPublishProfile.LegacyMemberPagesForQa=false;
+                Assert.AreEqual(256,CowPageSlots(source));
+                var oldBody=CaptureGraph(hot,source);long baseline=hot.PhysicalBytes;
+                var requests=new List<long>();hot.AllocationAdmission=bytes=>{requests.Add(bytes);return true;};
+                next=CowWrite(hot,source);hot.AllocationAdmission=null;
+                Assert.AreEqual(count<=16?16:256,CowPageSlots(next));
+                CollectionAssert.AreEqual(oldBody,CaptureGraph(hot,source));
+                for(int i=1;i<count;i++)Assert.AreSame(source.Members[i],next.Members[i]);
+                var cold=new NavigationRetentionBudget();Assert.True(cold.TryOpenScope(NavigationPreparationKind.Decode,1,1,out var scope));
+                NavigationAuthorityGroup restored=null,continued=null;
+                try{
+                    restored=CowDecode(oldBody,scope.OwnedReservation());scope.Attach(restored);scope.Commit(restored,_=>{});
+                    Assert.AreEqual(256,CowPageSlots(restored));CollectionAssert.AreEqual(oldBody,CaptureGraph(cold,restored));
+                    continued=CowWrite(cold,restored);CollectionAssert.AreEqual(CaptureGraph(hot,next),CaptureGraph(cold,continued));
+                    Assert.AreEqual(hot.PhysicalBytes,cold.PhysicalBytes,"Same physical charges with both source and continuation pinned");
+                }finally{continued?.ReleaseStorage();restored?.ReleaseStorage();scope.Discard();Assert.Zero(cold.PhysicalBytes);Assert.Zero(cold.HeldBytes);Assert.Zero(cold.ActiveScopes);}
+                next.ReleaseStorage();next=null;Assert.AreEqual(baseline,hot.PhysicalBytes);
+                for(int nth=1;nth<=requests.Count;nth++){
+                    int seen=0;hot.AllocationAdmission=bytes=>{Assert.AreEqual(requests[seen],bytes);return ++seen!=nth;};
+                    try{Assert.Throws<InvalidOperationException>(()=>CowWrite(hot,source));}finally{hot.AllocationAdmission=null;}
+                    Assert.AreEqual(nth,seen);Assert.AreEqual(baseline,hot.PhysicalBytes);Assert.Zero(hot.HeldBytes);Assert.Zero(hot.ActiveScopes);CollectionAssert.AreEqual(oldBody,CaptureGraph(hot,source));
+                }
+            }finally{ContactPublishProfile.LegacyMemberPagesForQa=false;hot.AllocationAdmission=null;next?.ReleaseStorage();source?.ReleaseStorage();Assert.Zero(hot.PhysicalBytes);Assert.Zero(hot.HeldBytes);Assert.Zero(hot.ActiveScopes);}
+        }
         [Test] public void Cow64BodyOwnershipRefusalAndSaveRestore()
         {
             Assert.False(ContactPublishProfile.Enabled);Assert.False(ContactPublishProfile.LegacyMemberPagesForQa);

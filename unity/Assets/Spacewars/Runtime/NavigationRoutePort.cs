@@ -17,11 +17,13 @@ namespace Spacewars.Runtime
         private bool captureRequested;
         private bool resultPreparationRequested;
         private bool commandPreparationRequested;
+        private bool scheduledAiPreparationRequested;
         private int hostOperations;
         private Exception hostFailure;
-        internal bool CaptureRequested {get{lock(captureGate)return captureRequested||resultPreparationRequested||commandPreparationRequested;}}
+        internal bool CaptureRequested {get{lock(captureGate)return captureRequested||PreparationRequested;}}
+        private bool PreparationRequested=>resultPreparationRequested||commandPreparationRequested||scheduledAiPreparationRequested;
         internal bool TryBeginHostOperation(bool cleanup=false)
-        {lock(captureGate){if(captureRequested||(resultPreparationRequested||commandPreparationRequested)&&!cleanup)return false;hostOperations++;return true;}}
+        {lock(captureGate){if(captureRequested||PreparationRequested&&!cleanup)return false;hostOperations++;return true;}}
         internal void EndHostOperation()
         {lock(captureGate){if(hostOperations<=0)throw new InvalidOperationException("Missing host operation.");hostOperations--;Monitor.PulseAll(captureGate);}}
         internal void ReportHostFailure(Exception error)
@@ -54,9 +56,9 @@ namespace Spacewars.Runtime
         // to yield at its next safe boundary, then acquire that boundary on a
         // later tick. Until then the ordinary optimistic transactions retain all
         // source checks; a failed preparation cannot publish a partial result.
-        internal IDisposable TryAcquireResultPreparation(Func<bool> cancelled)
+        internal IDisposable TryAcquireResultPreparation(Func<bool> cancelled,bool recoverMotion=false)
         {
-            if(!session.HasAnswersForPreparation){CancelResultPreparation();return null;}
+            if(!recoverMotion&&!session.HasAnswersForPreparation){CancelResultPreparation();return null;}
             if(cancelled?.Invoke()==true){CancelResultPreparation();throw new OperationCanceledException("Result preparation stopped.");}
             bool signal=false;
             lock(captureGate){
@@ -67,28 +69,38 @@ namespace Spacewars.Runtime
             }
             if(signal)SignalHost();return null;
         }
-        internal void FinishResultPreparationTurn()
-        {if(!session.HasAnswersForPreparation)CancelResultPreparation();}
+        internal void FinishResultPreparationTurn(bool recoverMotion)
+        {
+            if(!recoverMotion){if(!session.HasAnswersForPreparation)CancelResultPreparation();return;}
+            bool signal;
+            lock(captureGate){signal=!resultPreparationRequested;resultPreparationRequested=true;}
+            if(signal)SignalHost();
+        }
         internal void CancelResultPreparation()
         {
             bool changed;lock(captureGate){changed=resultPreparationRequested;resultPreparationRequested=false;}
             if(changed)SignalHost();
         }
-        internal IDisposable TryAcquireCommandPreparation(Func<bool> cancelled)
+        internal IDisposable TryAcquireCommandPreparation(Func<bool> cancelled,bool scheduledAi=false)
         {
-            if(cancelled?.Invoke()==true){CancelCommandPreparation();throw new OperationCanceledException("Command preparation stopped.");}
+            if(cancelled?.Invoke()==true){CancelCommandPreparation(scheduledAi);throw new OperationCanceledException("Command preparation stopped.");}
             bool signal=false;
             lock(captureGate){
-                if(hostFailure!=null){commandPreparationRequested=false;throw new InvalidOperationException("Route host failed during command preparation.",hostFailure);}
+                ref bool requested=ref (scheduledAi?ref scheduledAiPreparationRequested:ref commandPreparationRequested);
+                if(hostFailure!=null){requested=false;throw new InvalidOperationException("Route host failed during command preparation.",hostFailure);}
                 if(captureRequested)return null;
-                if(hostOperations==0){commandPreparationRequested=false;captureRequested=true;return new CaptureExclusion(this);}
-                signal=!commandPreparationRequested;commandPreparationRequested=true;
+                if(hostOperations==0){requested=false;captureRequested=true;return new CaptureExclusion(this);}
+                signal=!requested;requested=true;
             }
             if(signal)SignalHost();return null;
         }
-        internal void CancelCommandPreparation()
+        internal void CancelCommandPreparation(bool scheduledAi=false)
         {
-            bool changed;lock(captureGate){changed=commandPreparationRequested;commandPreparationRequested=false;}
+            bool changed;
+            lock(captureGate){
+                ref bool requested=ref (scheduledAi?ref scheduledAiPreparationRequested:ref commandPreparationRequested);
+                changed=requested;requested=false;
+            }
             if(changed)SignalHost();
         }
         private void ReleaseCapture()
@@ -135,8 +147,8 @@ namespace Spacewars.Runtime
         internal void StageRetainedPhysicalArrivals(NavigationHostRoot root,INavStorageReservation reservation)=>session.StageRetainedPhysicalArrivals(root,reservation);
         internal NavigationHostRoot PinCommittedHostRoot()=>session.PinCommittedHostRoot();
         internal void PublishPhysicalHostRoot(NavigationRetentionBudget.Scope scope,
-            NavigationHostRoot expected,NavigationHostRoot candidate)
-            =>session.PublishPhysicalHostRoot(scope,expected,candidate,()=>{});
+            NavigationHostRoot expected,NavigationHostRoot candidate,NavigationRequest deferred=null)
+            =>session.PublishPhysicalHostRoot(scope,expected,candidate,()=>{},deferred);
         internal bool PublishCompletedPhysicalHost(NavigationRetentionBudget.Scope scope,
             NavigationHostRoot expected,NavigationHostRoot candidate,NavNameKey key)
             =>session.PublishCompletedPhysicalHost(scope,expected,candidate,key);
@@ -151,6 +163,7 @@ namespace Spacewars.Runtime
         internal bool PublishOwnedStaleIngress(NavigationRetentionBudget.Scope scope,NavigationHostRoot source,NavigationHostRoot next,NavigationRequest request)=>session.PublishOwnedStaleIngress(scope,source,next,request);
         internal bool TryObservePhysicalIngress(out NavigationRequest request,out NavigationAdmissionPin observed)
             =>session.TryObservePhysicalIngress(out request,out observed);
+        internal void PrioritizePhysicalRecastIngress()=>session.PrioritizePhysicalRecastIngress();
         internal void PublishRegisteredPhysicalHost(NavigationRetentionBudget.Scope scope,
             NavigationHostRoot expected,NavigationHostRoot candidate,NavigationAdmission observed,
             NavigationRequest ingress,NavNameKey key)

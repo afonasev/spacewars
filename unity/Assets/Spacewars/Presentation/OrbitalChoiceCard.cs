@@ -29,26 +29,97 @@ namespace Spacewars.Presentation
     }
     internal static class OrbitalChoiceCard
     {
-        internal static VisualElement Create(int id,PlayableProfileData data,Action choose)
+        internal static string Description(int id) => id switch
         {
-            var art=RadialCardProfile.Load();var column=new VisualElement{name="orbital-choice-"+id};column.style.marginLeft=column.style.marginRight=8;column.style.flexShrink=0;
+            OrbitalAbilities.AcceleratedProduction => "Когда срочно нужны кредиты, техника или исследование, форсируйте работу своего или союзного здания. На пределе оно изнашивается, а ремонт останавливается.",
+            OrbitalAbilities.NuclearStrike => "Запрашивайте удар по скоплению войск или укреплений. Держите цель в обзоре до спуска ракеты и выводите своих из зоны взрыва.",
+            OrbitalAbilities.RepairNanobots => "Разверните ремонтное поле там, где подбитый отряд держит позицию. Нанороботы чинят союзную технику и готовые здания прямо под огнём.",
+            OrbitalAbilities.Stasis => "Задержите рейд или спасите подбитый отряд. Поле останавливает ближайших бойцов с обеих сторон и защищает их от урона.",
+            OrbitalAbilities.Reinforcement => "Когда резерв нужен раньше, чем его выпустит фабрика, вызовите с орбиты три Исследователя или два Вепря. Состав волны чередуется.",
+            OrbitalAbilities.SystemFailure => "Перед штурмом запросите глушение с орбиты. Оно временно отключит вражеские башни и ближайшие крупные здания в зоне обзора.",
+            OrbitalAbilities.ControlHack => "Перехватите управление, пока цель ещё цела. Видимая шахта или техника врага навсегда переходит к вам, если её здоровье ниже порога.",
+            1 => "Перед вылазкой запросите разведку с орбиты. Сканер временно откроет район вам и союзникам даже в тумане войны.",
+            2 => "Оставьте мину на подступах к базе или на пути рейда. Она даёт обзор и взрывается под вражеской наземной машиной.",
+            _ => "Эффект способности пока не задан."
+        };
+
+        internal static (string Label,string Value)[] Stats(int id,PlayableProfileData data)
+        {
+            string N(double value)=>value.ToString("0.##");
+            string Seconds(double value)=>N(value)+" с";
+            string Meters(double value)=>N(value)+" м";
+            string Health(double value)=>N(value)+" HP";
+            switch(id)
+            {
+                case 1: return new[]{("Радиус",Meters(data.orbitalScanRadius)),("Время",Seconds(data.orbitalScanSeconds))};
+                case 2: return new[]{
+                    ("Обзор",Meters(data.orbitalMineVision)),("Радиус",Meters(data.orbitalMineBlastRadius)),
+                    ("Прямой урон",Health(data.orbitalMineDirectDamage)),("Урон в зоне",Health(data.orbitalMineSplashDamage)),
+                    ("Лимит мин",N(data.orbitalMineCapacity))};
+                case OrbitalAbilities.ControlHack: return new[]{("Здоровье цели","< "+N(data.orbitalHackHealthPercent)+"%")};
+                case OrbitalAbilities.SystemFailure: return new[]{
+                    ("Радиус",Meters(data.orbitalSystemFailureRadius)),("Время",Seconds(data.orbitalSystemFailureSeconds)),
+                    ("Лимит зданий",N(data.orbitalSystemFailureMaxTargets))};
+                case OrbitalAbilities.Reinforcement: return new[]{("Прибытие",Seconds(data.orbitalReinforcementSeconds))};
+                case OrbitalAbilities.Stasis: return new[]{
+                    ("Радиус",Meters(data.orbitalStasisRadius)),("Время",Seconds(data.orbitalStasisSeconds)),
+                    ("Лимит целей",N(data.orbitalStasisTargets))};
+                case OrbitalAbilities.RepairNanobots: return new[]{
+                    ("Радиус",Meters(data.orbitalNanobotsRadius)),("Время",Seconds(data.orbitalNanobotsSeconds)),
+                    ("Ремонт",Health(data.orbitalNanobotsHealthPerSecond)+"/с")};
+                case OrbitalAbilities.AcceleratedProduction: return new[]{
+                    ("Доход","×"+N(data.orbitalBoostIncomeMultiplier)),("Очередь","×"+N(data.orbitalBoostProductionMultiplier)),
+                    ("Время",Seconds(data.orbitalBoostSeconds))};
+                case OrbitalAbilities.NuclearStrike: return new[]{
+                    ("Радиус",Meters(data.orbitalNuclearRadius)),("Урон",Health(data.orbitalNuclearDamage)),
+                    ("Наведение",Seconds(data.orbitalNuclearWarningSeconds)),("Спуск ракеты",Seconds(data.orbitalNuclearFlightSeconds))};
+                default: return Array.Empty<(string,string)>();
+            }
+        }
+
+        internal static VisualElement Create(int id,Action choose)
+        {
+            var art=RadialCardProfile.Load();var column=new VisualElement{name="orbital-choice-"+id};column.style.marginLeft=column.style.marginRight=4;column.style.flexShrink=0;
             var button=new Button(choose){name="orbital-card-"+id};button.style.position=Position.Relative;button.style.paddingLeft=button.style.paddingRight=art.padding;button.style.paddingTop=art.padding;button.style.paddingBottom=art.padding;
             button.style.marginLeft=button.style.marginRight=button.style.marginTop=button.style.marginBottom=0;button.style.minHeight=0;button.style.flexShrink=0;
             button.style.backgroundImage=StyleKeyword.None;button.style.backgroundColor=Color.clear;button.style.borderLeftWidth=button.style.borderRightWidth=button.style.borderTopWidth=button.style.borderBottomWidth=0;
             button.Add(new OrbitalCardFinish());
-            var artwork=new OrbitalPlaceholderImage(id){name="orbital-choice-artwork",pickingMode=PickingMode.Ignore};artwork.style.alignSelf=Align.Center;artwork.style.flexGrow=1;artwork.style.flexShrink=1;button.Add(artwork);
+            var artwork=new OrbitalPlaceholderImage(id){name="orbital-choice-artwork",pickingMode=PickingMode.Ignore};artwork.style.alignSelf=Align.Center;artwork.style.flexShrink=0;button.Add(artwork);
             var header=new VisualElement{name="orbital-choice-header",pickingMode=PickingMode.Ignore};header.style.flexDirection=FlexDirection.Row;header.style.alignItems=Align.Center;header.style.backgroundColor=OrbitalTheme.Panel;header.style.paddingLeft=header.style.paddingRight=art.statColumnPadding;header.style.paddingTop=header.style.paddingBottom=art.statColumnPadding;
             var accent=new VisualElement{name="orbital-choice-accent",pickingMode=PickingMode.Ignore};accent.style.width=art.titleAccentWidth;accent.style.height=art.titleSize;accent.style.backgroundColor=OrbitalTheme.Cyan;accent.style.marginRight=art.statColumnPadding;header.Add(accent);
-            var title=new Label(OrbitalAbilities.Name(id)){name="orbital-choice-title",pickingMode=PickingMode.Ignore};title.style.color=OrbitalTheme.Ink;title.style.unityFontStyleAndWeight=FontStyle.Bold;title.style.whiteSpace=WhiteSpace.Normal;title.style.flexShrink=1;title.style.marginLeft=title.style.marginRight=0;header.Add(title);button.Add(header);column.Add(button);
-            var desc=new Label(id==OrbitalAbilities.SystemFailure?"Отключает два ближайших больших здания и все башни врага в области текущего обзора. Очереди сохраняются, действия недоступны.":id==OrbitalAbilities.ControlHack?"Навсегда захватывает видимую шахту или юнита врага. Сохраняет долю HP с вашими улучшениями.":id==1?"Открывает область вам и союзникам, в том числе в тумане войны.":id==2?"Даёт обзор и взрывается при наезде врага. Площадной урон подрывает мину.":"Эффект способности пока не задан."){name="orbital-choice-description",pickingMode=PickingMode.Ignore};desc.style.whiteSpace=WhiteSpace.Normal;desc.style.color=OrbitalTheme.Ink;desc.style.marginTop=art.padding;desc.style.marginBottom=art.statColumnPadding;desc.style.marginLeft=desc.style.marginRight=0;column.Add(desc);
-            var stats=new VisualElement{name="orbital-choice-stats",pickingMode=PickingMode.Ignore};stats.style.flexDirection=FlexDirection.Row;stats.style.borderTopWidth=1;stats.style.borderTopColor=OrbitalTheme.Line;stats.style.paddingTop=art.notePadding;column.Add(stats);if(id==2)stats.style.flexWrap=Wrap.Wrap;
-            void Stat(string label,string value){var cell=new VisualElement{pickingMode=PickingMode.Ignore};cell.style.flexGrow=id==2?0:1;cell.style.flexBasis=id==2?Length.Percent(50):new Length(0);if(id==2){cell.style.flexDirection=FlexDirection.Row;cell.style.alignItems=Align.Center;cell.style.paddingRight=art.statColumnPadding;}var key=new Label(label){pickingMode=PickingMode.Ignore};key.style.color=OrbitalTheme.Muted;key.style.fontSize=art.textSize;if(id==2){key.style.flexGrow=1;key.style.marginLeft=key.style.marginRight=key.style.marginTop=key.style.marginBottom=0;}cell.Add(key);var number=new Label(value){pickingMode=PickingMode.Ignore};number.style.color=OrbitalTheme.Ink;number.style.fontSize=id==2?art.textSize:art.valueSize;if(id==2){number.style.marginLeft=art.labelGap;number.style.marginRight=number.style.marginTop=number.style.marginBottom=0;}number.style.unityFontStyleAndWeight=FontStyle.Bold;cell.Add(number);stats.Add(cell);}
-            if(id==2){Stat("Обзор",data.orbitalMineVision.ToString("0.#"));Stat("Урон",data.orbitalMineDirectDamage+"/"+data.orbitalMineSplashDamage);Stat("Радиус",data.orbitalMineBlastRadius.ToString("0.#"));Stat("Лимит",data.orbitalMineCapacity.ToString("0"));}
-            if(id==OrbitalAbilities.SystemFailure){Stat("Радиус",data.orbitalSystemFailureRadius.ToString("0.#")+" м");Stat("Длительность",data.orbitalSystemFailureSeconds.ToString("0.#")+" с");}
-            else if(id==1){Stat("Радиус",data.orbitalScanRadius.ToString("0.#"));Stat("Длительность",data.orbitalScanSeconds.ToString("0.#")+" с");}
-            else if(id==OrbitalAbilities.ControlHack){Stat("HP цели","< "+data.orbitalHackHealthPercent.ToString("0.#")+"%");Stat("Откат",OrbitalAbilities.Duration(id,data).ToString("0.#")+" с");}
-            else Stat(id==2?"Откат":"Перезарядка",OrbitalAbilities.Duration(id,data).ToString("0.#")+" с");
+            var title=new Label(OrbitalAbilities.Name(id)){name="orbital-choice-title",pickingMode=PickingMode.Ignore};title.style.color=OrbitalTheme.Ink;title.style.unityFontStyleAndWeight=FontStyle.Bold;title.style.whiteSpace=WhiteSpace.Normal;title.style.flexShrink=1;title.style.marginLeft=title.style.marginRight=0;title.style.unityTextAlign=TextAnchor.MiddleCenter;header.Add(title);button.Add(header);column.Add(button);
             return column;
+        }
+
+        internal static void PopulateDetails(VisualElement panel,int id,PlayableProfileData data)
+        {
+            var art=RadialCardProfile.Load();
+            panel.Clear();
+            var desc=new Label(Description(id)){name="orbital-choice-description",pickingMode=PickingMode.Ignore};
+            desc.style.whiteSpace=WhiteSpace.Normal;
+            desc.style.color=OrbitalTheme.Ink;
+            desc.style.marginLeft=desc.style.marginRight=desc.style.marginTop=desc.style.marginBottom=0;
+            desc.style.flexBasis=Length.Percent(61);
+            desc.style.flexShrink=1;
+            desc.style.paddingRight=10;
+            panel.Add(desc);
+            var stats=new VisualElement{name="orbital-choice-stats",pickingMode=PickingMode.Ignore};
+            stats.style.flexDirection=FlexDirection.Column;stats.style.flexGrow=1;stats.style.minWidth=0;
+            stats.style.borderLeftWidth=1;stats.style.borderLeftColor=OrbitalTheme.Line;stats.style.paddingLeft=8;panel.Add(stats);
+            foreach(var stat in Stats(id,data))
+            {
+                var cell=new VisualElement{pickingMode=PickingMode.Ignore};
+                cell.style.flexDirection=FlexDirection.Row;cell.style.alignItems=Align.Center;
+                var key=new Label(stat.Label){pickingMode=PickingMode.Ignore};key.style.fontSize=art.textSize;key.style.color=OrbitalTheme.Muted;
+                key.style.whiteSpace=WhiteSpace.Normal;key.style.flexGrow=1;key.style.flexShrink=1;key.style.minWidth=0;
+                key.style.marginLeft=key.style.marginTop=key.style.marginBottom=0;key.style.marginRight=4;
+                key.style.paddingLeft=key.style.paddingRight=key.style.paddingTop=key.style.paddingBottom=0;cell.Add(key);
+                var number=new Label(stat.Value){pickingMode=PickingMode.Ignore};number.style.fontSize=art.textSize;number.style.color=OrbitalTheme.Ink;
+                number.style.unityFontStyleAndWeight=FontStyle.Bold;number.style.flexShrink=0;
+                number.style.marginLeft=number.style.marginRight=number.style.marginTop=number.style.marginBottom=0;
+                number.style.paddingLeft=number.style.paddingRight=number.style.paddingTop=number.style.paddingBottom=0;
+                cell.Add(number);stats.Add(cell);
+            }
         }
     }
 }

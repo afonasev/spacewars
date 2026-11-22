@@ -17,6 +17,7 @@
   "shotGain": 0.28,
   "explorerImpactGain": 0.045,
   "impactGain": 0.14,
+  "nuclearImpactGain": 0.38,
   "explosionGain": 0.3,
   "movementGain": 0.08,
   "baseGain": 0.16,

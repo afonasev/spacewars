@@ -22,6 +22,7 @@ namespace Spacewars.Presentation
         private string highlighted,heading;
         private double held;
         private float size=280;
+        private const float StandardPortraitHeight=70;
         readonly RadialCardProfile cardProfile=RadialCardProfile.Load();
         bool SingleDisc=>SingleCapturedSiteButton||inputMode=="baseWheel"&&actions.Length==1;
         public Action<string,bool> InvokeAction;
@@ -79,6 +80,76 @@ namespace Spacewars.Presentation
                     left=Mathf.Max(left,rowLeft);right=Mathf.Min(right,rowRight);
                 }
                 return new Vector2(left+inset,right-inset);
+            }
+            private VisualElement relayLabels;
+            public Vector2 RelayAnchor
+            {
+                get
+                {
+                    double angle=Index/(double)Count*Math.PI*2-Math.PI/2;
+                    return Vector2.one*Diameter/2+new Vector2((float)Math.Cos(angle),(float)Math.Sin(angle))*
+                        (Diameter*(InnerRatio+OuterRatio)/2);
+                }
+            }
+            private float RelayLineHeight=>Title.style.fontSize.value.value+4;
+            private float RelayWidthAt(float x,float top,float spacing)
+            {
+                var span=TextSpan(top,RelayLineHeight,x,spacing);
+                return Mathf.Max(0,2*Mathf.Min(x-span.x,span.y-x));
+            }
+            public bool NeedsStackedRelayLabels(float spacing)
+            {
+                if(string.IsNullOrEmpty(Price.text))return false;
+                // New buttons can report zero text width before their first layout pass.
+                float TextWidth(Label label)
+                {
+                    float measured=label.MeasureTextSize(label.text,0,MeasureMode.Undefined,0,MeasureMode.Undefined).x;
+                    float estimate=label.text.Length*label.style.fontSize.value.value*.7f;
+                    return float.IsNaN(measured)?estimate:Mathf.Max(measured,estimate);
+                }
+                var anchor=RelayAnchor;
+                return TextWidth(Title)+TextWidth(Price)+spacing>RelayWidthAt(anchor.x,anchor.y-RelayLineHeight/2,spacing);
+            }
+            public void FitRelayLabels(float spacing,bool stacked)
+            {
+                if(relayLabels==null)
+                {
+                    relayLabels=new VisualElement{name="radial-relay-labels",pickingMode=PickingMode.Ignore};
+                    relayLabels.style.position=Position.Absolute;
+                    relayLabels.style.justifyContent=Justify.Center;
+                    relayLabels.style.alignItems=Align.Center;
+                    Add(relayLabels);
+                    Title.RemoveFromHierarchy();Price.RemoveFromHierarchy();
+                    relayLabels.Add(Title);relayLabels.Add(Price);
+                }
+
+                var anchor=RelayAnchor;
+                float line=RelayLineHeight;
+                bool hasIncome=!string.IsNullOrEmpty(Price.text);
+                float top=anchor.y-(stacked?line:line/2);
+                float nameLimit=RelayWidthAt(anchor.x,top,spacing);
+                float incomeLimit=stacked?RelayWidthAt(anchor.x,anchor.y,spacing):nameLimit;
+                float width=Mathf.Max(nameLimit,incomeLimit);
+                relayLabels.style.flexDirection=stacked?FlexDirection.Column:FlexDirection.Row;
+                relayLabels.style.left=anchor.x-width/2;
+                relayLabels.style.top=top;
+                relayLabels.style.width=width;
+                relayLabels.style.height=stacked?2*line:line;
+                foreach(var label in new[]{Title,Price})
+                {
+                    label.style.position=Position.Relative;
+                    label.style.left=label.style.top=StyleKeyword.Auto;
+                    label.style.width=StyleKeyword.Auto;
+                    label.style.minWidth=0;
+                    label.style.height=line;
+                    label.style.flexGrow=0;
+                }
+                Title.style.maxWidth=nameLimit;
+                Title.style.flexShrink=1;
+                Price.style.maxWidth=incomeLimit;
+                Price.style.flexShrink=0;
+                Price.style.marginLeft=hasIncome&&!stacked?spacing:0;
+                Price.style.display=hasIncome?DisplayStyle.Flex:DisplayStyle.None;
             }
             bool fitCached;
             (Vector2 anchor,float width,float height,float padding,float gap,float priceHeight,float rowWidth) fitKey;
@@ -284,9 +355,11 @@ namespace Spacewars.Presentation
             for(int i=0;i<next.Length;i++){
                 var a=next[i];var b=buttons[i];b.Geometry(i,next.Length,size,SingleDisc,cardProfile.sectorGap,cardProfile.petalCorner);b.style.width=size;b.style.height=size;
                 double angle=i/(double)next.Length*Math.PI*2-Math.PI/2;
-                float radius=SingleDisc?0:next.Length==2?(InnerRatio+OuterRatio)/2:next.Length==1?.28f:.33f;
+                float radius=SingleDisc?0:next.Length==2||a.PlayerColor.HasValue?(InnerRatio+OuterRatio)/2:next.Length==1?.28f:.33f;
                 float x=size/2+(float)Math.Cos(angle)*size*radius,y=size/2+(float)Math.Sin(angle)*size*radius;
-                bool dense=size<220;float width=size*(SingleDisc?.9f:dense?.36f:.30f);bool portrait=a.Presentation?.Artwork!=null;float iconWidth=portrait?(dense?54:78):(dense?22:32),iconHeight=portrait?(dense?48:70):(dense?18:28);
+                bool dense=size<220;float width=size*(SingleDisc?.9f:dense?.36f:.30f);bool portrait=a.Presentation?.Artwork!=null;
+                bool productionUnit=ProductionPortrait(a);
+                float iconWidth=portrait?(dense?54:78):(dense?22:32),iconHeight=portrait?(dense?48:StandardPortraitHeight):(dense?18:28);
                 if(OrbitalGlyph.IsUtilityArtwork(OrbitalPrecision.Glyph(a.Sector.Id)))iconWidth=iconHeight=cardProfile.utilityIconSize;
                 b.Icon.style.left=x-iconWidth/2;b.Icon.style.top=y-(portrait?(dense?35:49):(dense?23:32));b.Icon.style.width=iconWidth;b.Icon.style.height=iconHeight;
                 b.Title.style.fontSize=b.Price.style.fontSize=SingleDisc?13:dense?10:13;
@@ -354,7 +427,18 @@ namespace Spacewars.Presentation
                     b.Lock.style.top=top+portraitHeight+gap+line;
                 }
                 b.Badge.text=a.Repeat?"∞":"";
-                if(portrait&&!construction&&!SingleDisc&&inputMode!="baseWheel"&&!group&&a.Sector.Hold!="repeat")
+                if(productionUnit)
+                {
+                    // All production silhouettes are fitted to a square. Keep its center
+                    // in the existing portrait slot and scale it with the compact layout.
+                    // Snap the common side before positioning, so UI Toolkit does
+                    // not round equal compact portraits to different pixel widths.
+                    float side=Mathf.Round(Mathf.Min(iconHeight,cardProfile.compositionSize*iconHeight/StandardPortraitHeight));
+                    b.Icon.style.left=x-side/2;
+                    b.Icon.style.top=b.Icon.style.top.value.value+(iconHeight-side)/2;
+                    b.Icon.style.width=b.Icon.style.height=side;
+                }
+                if(portrait&&!construction&&!SingleDisc&&inputMode!="baseWheel"&&!group&&!productionUnit)
                 {
                     float desired=a.Presentation.Upgrade?cardProfile.upgradePortraitSize:cardProfile.compositionSize;
                     float aspect=iconWidth/iconHeight;
@@ -368,9 +452,26 @@ namespace Spacewars.Presentation
                 bool utility=a.Sector.Id=="rally"||a.Sector.Id.EndsWith(":repair")||a.Sector.Id.EndsWith(":sale")||a.Sector.Id.EndsWith(":remove");
                 if(utility&&!SingleDisc)b.FitUtility(new Vector2(x,y),iconWidth,iconHeight,cardProfile.labelGap,cardProfile.sectorGap/2);
                 bool available=a.Sector.Enabled&&(a.Command!=null||a.Sector.Hold!="repeat");b.Title.style.color=available?OrbitalTheme.Ink:OrbitalTheme.Muted;
-                b.Icon.Set(a.Presentation?.Artwork??OrbitalPrecision.Glyph(a.Sector.Id),a.Presentation?.Upgrade==true,a.Sector.Id==highlighted,available);
+                b.Title.style.unityTextAlign=b.Price.style.unityTextAlign=TextAnchor.MiddleCenter;
+                b.Title.style.textOverflow=TextOverflow.Clip;
+                b.Title.style.overflow=Overflow.Visible;
+                if(a.PlayerColor is Color paint)
+                {
+                    b.Icon.style.display=DisplayStyle.None;
+                    b.Title.style.color=paint;
+                    b.Title.text=a.Label;
+                    b.Price.text=a.PlayerIncome??"";
+                    b.Title.style.overflow=Overflow.Hidden;
+                    b.Title.style.textOverflow=TextOverflow.Ellipsis;
+                }
                 b.tooltip=a.Detail;
                 // Disabled reasons remain discoverable; host rejects unavailable and stale actions.
+            }
+            if(next.Length>0&&next[0].PlayerColor.HasValue)
+            {
+                float spacing=cardProfile.labelGap/2;
+                bool stacked=buttons.Any(b=>b.NeedsStackedRelayLabels(spacing));
+                foreach(var b in buttons)b.FitRelayLabels(spacing,stacked);
             }
             Highlight(controller?selected:selected??highlighted);
         }
@@ -392,12 +493,21 @@ namespace Spacewars.Presentation
             if(id.EndsWith(":explorer"))return "Исслед.";if(id.EndsWith(":upgrade"))return "Улучшить";
             return a.Label.Replace("Произвести: ","").Replace("Построить: ","").Replace(" ∞","").Replace("Завод переработки","Перераб.").Replace("Научный центр","Научный");
         }
+        private static bool ProductionPortrait(OfflinePadAction action)=>action.Presentation?.Artwork!=null&&action.Sector.Hold=="repeat";
+
         void Highlight(string id)
         {
             highlighted=actions.Any(a=>a.Sector.Id==id)?id:null;var a=actions.FirstOrDefault(x=>x.Sector.Id==highlighted);
             // The small centre keeps building identity; hover detail holds full names/reasons.
             detailFrame.Set(a,controller,device,inputMode,compact);detailFrame.style.display=DisplayStyle.Flex;
-            for(int i=0;i<buttons.Count;i++){var item=actions[i];buttons[i].Icon.Set(item.Presentation?.Artwork??OrbitalPrecision.Glyph(item.Sector.Id),item.Presentation?.Upgrade==true,item.Sector.Id==highlighted,item.Sector.Enabled&&(item.Command!=null||item.Sector.Hold!="repeat"));}
+            for(int i=0;i<buttons.Count;i++)
+            {
+                var item=actions[i];
+                bool available=item.Sector.Enabled&&(item.Command!=null||item.Sector.Hold!="repeat");
+                buttons[i].Icon.Set(item.Presentation?.Artwork??OrbitalPrecision.Glyph(item.Sector.Id),
+                    item.Presentation?.Upgrade==true,item.Sector.Id==highlighted,available,
+                    fitProductionPortrait:ProductionPortrait(item));
+            }
             face.MarkDirtyRepaint();
         }
         Color OpticalFill(bool active,bool repeat=false)

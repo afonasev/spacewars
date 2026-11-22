@@ -1,10 +1,14 @@
 {
-  "id": "building-collapse-a-v1",
-  "authorship": "Local deterministic oscillator/noise synthesis",
-  "generator": "tools/generate_building_collapse_audio.py",
+  "id": "building-collapse-c-v1",
+  "variant": "C",
+  "authorship": "Local Stable Audio 3 Small-SFX, SAME-S decoder",
+  "source_seed": 11811,
+  "source_sha256": "c56aabd10f5207a85bcc02f3ff047cec5e9a5e3f338e3dc8ceeec4e436928bc6",
+  "audition_sha256": "5503599321cc159b29e50b2ab4da6035d4914a87eb28ce65994972d93c1a6eab",
+  "audition_start_seconds": 14.7,
   "sample_rate": 24000,
   "seconds": 2.4,
-  "sample_peak": 0.6,
-  "rms": 0.06389015446610731,
-  "sha256": "20fe843854af5f302ed1d4fde7d531aaa8386f08bdcf3f2e4b27071b02cae9a0"
+  "sample_peak": 0.5554063539536729,
+  "rms": 0.06825651171691352,
+  "sha256": "415182d3104c462dba7f359e89f9b915e63ce60709b0b21cb0ac723d0b1b551b"
 }

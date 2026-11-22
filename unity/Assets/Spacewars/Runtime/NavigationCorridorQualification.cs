@@ -140,6 +140,16 @@ namespace Spacewars.Runtime
                     candidate.RequireEdge(owner);candidate.RequireEdge(candidate.GroupObservations[index].Version);
                 }
             }
+            if (owned.HasGeometryQualification)
+            {
+                bool rootCurrent = answer.Corridor.Group == 0 || group.Exists &&
+                    answer.Corridor.RootRevision == group.RootRevision && answer.Corridor.CommandSequence == group.CommandSequence &&
+                    answer.Corridor.IssuedTick == group.IssuedTick;
+                candidate.QualificationFailures[index] = rootCurrent ? owned.QualificationFailure : "current root";
+                candidate.Qualified[index] = candidate.QualificationFailures[index] == null;
+                candidate.HasQualification[index] = true;
+                return;
+            }
             using(NavStorageScratch.Reserve(scope.OwnedReservation(),CorridorQualificationScratch(request,answer.Corridor,providerOwner.Provider,answer.RouteLength))){
                 candidate.Qualified[index]=QualifyCorridorPrepared(request,answer.ReadOnlyRouteBacking,answer.Corridor,
                     providerOwner.Provider,true,Generation,providerOwner.SurfaceProviderId,group,out var failure);
@@ -167,6 +177,21 @@ namespace Spacewars.Runtime
                 NavStorageLayout.Charge(NavigationInstalledExecutionOwner.Layout)+
                 2*NavStorageScratch.LeaseBytes+32L+8L*barrier+qualifier);
         }
+        internal static string QualifyOwnedRoute(NavigationHostAnswer owner, INavStorageReservation reservation)
+        {
+            var answer = owner.Answer;
+            var provider = owner.CorridorOwner.ProviderOwner;
+            using (NavStorageScratch.Reserve(reservation,
+                CorridorQualificationScratch(answer.Request, answer.Corridor, provider.Provider, answer.RouteLength)))
+            {
+                // The worker owns this immutable request/route/provider triple. Current group
+                // identity remains an authority check at installation.
+                QualifyCorridorPrepared(answer.Request, answer.ReadOnlyRouteBacking, answer.Corridor, provider.Provider,
+                    false, answer.Request.Session, provider.SurfaceProviderId, default, out var reason);
+                return reason;
+            }
+        }
+
         private static long CorridorQualificationScratch(NavigationRequest request,NavCorridorDescriptor corridor,ILayeredNavigationProvider provider,int routeCount)
         {
             long profileWire=checked(NavContract.StringWireBytes(request.Profile.ProfileId)+4L+8L*request.Profile.WireValueCount);

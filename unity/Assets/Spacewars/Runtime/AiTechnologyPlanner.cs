@@ -42,8 +42,33 @@ namespace Spacewars.Runtime
             return String.IsNullOrWhiteSpace(descriptor.exclusionReason)&&descriptor.unlockDependencies.All(kind=>o.OwnerResearch.Any(r=>r.Kind==kind&&r.Complete))&&
                 AiProductionDemand.Lines(o,catalog,research.Unit).Any();
         }
-        public static bool ArmySizeAllows(PlayableAiObservation o,PlayableProfile p,PlayableResearchKind kind,AiProfile ai=null)=>kind==PlayableResearchKind.ReinforcedConcrete|| (PlayableResearchRules.Global(kind)?o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0)>=p.ArmySystemsMinimumUnits:o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==AiResearchCatalog.For(kind).Unit)>=(ai??AiProfile.Initial).Value("openingsMidgame.specializedLiving"));
+        internal static bool MassAirThreat(PlayableAiObservation o,AiProfile ai,AiKnowledgeState knowledge)
+        {
+            var visible=o.Entities.Where(u=>o.IsHostile(u.Owner)&&u.Health>0&&(o.Vision==null||o.Vision.IsVisible(u.Position)));
+            var contacts=visible.Where(u=>u.Kind!=PlayableEntityKind.Skat)
+                .Select(u=>(u.Id,u.Owner,u.Kind)).ToDictionary(u=>u.Id);
+            if(knowledge!=null)
+                foreach(var contact in knowledge.Contacts)
+                    if(!contact.Building&&contact.Kind!=(int)PlayableEntityKind.Skat&&o.IsHostile(contact.Owner)&&
+                        o.Tick-contact.LastSeenTick<=30*ai.Value("scouting.contactHalfLifeSeconds")&&
+                        (o.Vision==null||!o.Vision.IsVisible(contact.Position)||contact.Visible))
+                        contacts.TryAdd(contact.Id,(contact.Id,contact.Owner,(PlayableEntityKind)contact.Kind));
+            int airOpponents=0;
+            foreach(var opponent in contacts.Values.GroupBy(u=>u.Owner))
+            {
+                int air=opponent.Count(u=>u.Kind==PlayableEntityKind.Hawk);
+                if(air>=ai.Value("technology.massAirMinimum")&&100d*air>=opponent.Count()*ai.Value("technology.massAirPercent"))return true;
+                if(air>=ai.Value("technology.massAirPerOpponent")&&++airOpponents>=2)return true;
+            }
+            return false;
+        }
+
+        public static bool ArmySizeAllows(PlayableAiObservation o,PlayableProfile p,PlayableResearchKind kind,AiProfile ai=null)=>kind==PlayableResearchKind.ExplorerRocketLauncher?
+            o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer)>=(ai??AiProfile.Initial).Value("technology.rocketExplorers"):
+            kind==PlayableResearchKind.ReinforcedConcrete||PlayableResearchRules.Local(kind)|| (PlayableResearchRules.Global(kind)?o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0)>=p.ArmySystemsMinimumUnits:o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==AiResearchCatalog.For(kind).Unit)>=(ai??AiProfile.Initial).Value("openingsMidgame.specializedLiving"));
         public AiTechnologyPlan Plan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState budget,bool emergency=false,AiRosterCatalog catalog=null,PlayableResearchKind? preferredFunding=null,AiArmyResearchPolicy armyPolicy=null,AiDoctrinePolicy doctrine=null)
+            =>PlanWithProduction(o,p,ai,budget,emergency,catalog,preferredFunding,armyPolicy,doctrine,false);
+        public AiTechnologyPlan PlanWithProduction(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState budget,bool emergency=false,AiRosterCatalog catalog=null,PlayableResearchKind? preferredFunding=null,AiArmyResearchPolicy armyPolicy=null,AiDoctrinePolicy doctrine=null,bool usefulProductionPending=false,bool massAirThreat=false)
         {
             if(o==null||p==null||ai==null||budget==null)throw new ArgumentNullException();
             if(budget.OwnerId!=o.OwnerId||budget.Generation!=o.Generation||p.ProfileId!=o.ProfileId||p.Revision!=o.ProfileRevision)throw new ArgumentException("Foreign technology context.");
@@ -58,11 +83,14 @@ namespace Spacewars.Runtime
             var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0).ToArray();
             double ownForce=AiDefensePlanner.Force(own,p,ai),hostileForce=AiDefensePlanner.Force(visible,p,ai);
             double danger=ownForce+hostileForce==0?0:hostileForce/(ownForce+hostileForce);
+            bool viableArmy=own.Count(u=>catalog.LineWeight(u.Kind)>0)>=p.ArmySystemsMinimumUnits;
+            bool militaryBasicsComplete=new[]{PlayableResearchKind.ImprovedWeaponSystems,PlayableResearchKind.ImprovedDefensiveSystems}.All(kind=>o.OwnerResearch.Any(r=>r.Kind==kind&&r.Complete));
             var branches=AiResearchCatalog.All.Concat(o.ResearchAvailability.Any(r=>r.Kind==PlayableResearchKind.ReinforcedConcrete)||o.OwnerResearch.Any(r=>r.Kind==PlayableResearchKind.ReinforcedConcrete)?new[]{AiResearchCatalog.BuildingDurability}:Array.Empty<AiResearchDescriptor>()).Select(d=>{
                 var order=o.OwnerResearch.SingleOrDefault(r=>r.Kind==d.Kind);
                 var progress=order==null?AiResearchProgress.Available:order.Complete?AiResearchProgress.Completed:order.Active?AiResearchProgress.Active:AiResearchProgress.Waiting;
                 // Each paid queue and accepted unpaid production command contributes once; paid ledger history never does.
-                double affected=own.Where(u=>d.Affects(u.Kind)&&(d.Global||!u.Upgraded)).Sum(u=>PlayableUnitRules.Cost(p,u.Kind)*Math.Min(1,PlayableUnitRules.HealthRatio(p,u)))+
+                bool rocket=d.Kind==PlayableResearchKind.ExplorerRocketLauncher;
+                double affected=own.Where(u=>d.Affects(u.Kind)&&(d.Global||!u.Upgraded||rocket&&!u.RocketLauncher)).Sum(u=>PlayableUnitRules.Cost(p,u.Kind)*Math.Min(1,PlayableUnitRules.HealthRatio(p,u)))+
                     o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&b.PrivateState!=null).SelectMany(b=>b.PrivateState.Orders).Where(q=>d.Affects(q.Kind)).Sum(q=>q.PaidCost)+
                     budget.Unpaid.Where(e=>!e.AwaitingPayment&&PlayableUnitRules.ProductionKind(e.Action.Kind).HasValue&&d.Affects(PlayableUnitRules.ProductionKind(e.Action.Kind).Value)).Sum(e=>(double)e.Amount);
                 if(d.Buildings)affected=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)
@@ -71,38 +99,49 @@ namespace Spacewars.Runtime
                     .Sum(b=>TerritoryRules.Cost(p,b.Kind)*Math.Min(1,b.Health/Math.Max(1,TerritoryRules.MaximumHealth(p,b))));
                 // One credit is the native ledger quantum used only for a finite free-upgrade denominator.
                 // Credit-valued fractional gameplay gain; common time discount and visible force penalty.
-                double utility=(progress!=AiResearchProgress.Available&&progress!=AiResearchProgress.Waiting)||emergency||armyPolicy?.Allows(d.Kind)==false||!PlayableResearchRules.Prerequisite(d.Kind,o.OwnerResearch)||(progress==AiResearchProgress.Available&&!ArmySizeAllows(o,p,d.Kind,ai))?0:affected*d.RelativeGain(p)/Math.Max(1,d.Cost(p)+missing)*horizon/(horizon+wait+d.Duration(p))*(1-danger);
+                double utility=(progress!=AiResearchProgress.Available&&progress!=AiResearchProgress.Waiting)||emergency||d.Buildings&&progress==AiResearchProgress.Available&&(!viableArmy||!militaryBasicsComplete||usefulProductionPending)||armyPolicy?.Allows(d.Kind)==false||!PlayableResearchRules.Prerequisite(d.Kind,o.OwnerResearch)||(progress==AiResearchProgress.Available&&!ArmySizeAllows(o,p,d.Kind,ai)&&!(rocket&&massAirThreat))?0:affected*d.RelativeGain(p)/Math.Max(1,d.Cost(p)+missing)*horizon/(horizon+wait+d.Duration(p))*(1-danger);
                 if(d.Global&&armyPolicy!=null)utility*=armyPolicy.UtilityScale;
                 return new AiResearchAssessment(d,progress,affected,utility,missing,wait);
             }).ToArray();
+            // Discretionary concrete cannot consume cash needed for a useful
+            // currently available military improvement, even when that upgrade
+            // still needs saving. Already paid research keeps its queue contract.
+            if(branches.Any(b=>!b.Descriptor.Buildings&&b.Utility>0&&b.Progress==AiResearchProgress.Available&&ProductivePrerequisiteReady(o,b.Descriptor,catalog)&&o.ResearchAvailability.Any(r=>r.Kind==b.Descriptor.Kind&&r.Available)))
+                branches=branches.Select(b=>b.Descriptor.Buildings&&b.Progress==AiResearchProgress.Available?new AiResearchAssessment(b.Descriptor,b.Progress,b.AffectedValue,0,b.MissingCost,b.WaitingSeconds):b).ToArray();
             if(centers.Length==0&&own.Length<ai.Value("technology.minimumUnitsForScienceCenter"))
                 return new AiTechnologyPlan(branches,null,null,"await own living units before science center");
             if(centers.Length==0&&!TerritoryRules.HasScienceProducer(o.Buildings,o.Owner))
                 return new AiTechnologyPlan(branches,null,null,"ready factory or hangar prerequisite");
+            if(centers.Length==0&&AiEconomicInvestmentPlanner.ScienceIncomeRejection(o,p,ai) is string incomeRejection)
+                return new AiTechnologyPlan(branches,null,null,incomeRejection);
             long available=(long)budget.Liquid-budget.SafetyReserve-budget.Reserved.Sum(e=>(long)e.Amount)-budget.Unpaid.Sum(e=>(long)e.Amount);
             // Existing-center proposals remain visible to shared admission/retry diagnostics.
             // Science and research are separate purchases. Preserve doctrine ranking
             // while funding only the currently actionable purchase stage.
-            var goal=branches.Where(b=>b.Progress==AiResearchProgress.Available&&b.Utility>0&&ProductivePrerequisiteReady(o,b.Descriptor,catalog)&&o.ResearchAvailability.Any(r=>r.Kind==b.Descriptor.Kind&&r.Available)).OrderBy(b=>doctrine?.ResearchRank(b.Descriptor.Kind)??int.MaxValue).ThenByDescending(b=>armyPolicy?.Prioritizes(b.Descriptor.Kind)==true).ThenByDescending(b=>b.Descriptor.Kind==preferredFunding).ThenByDescending(b=>b.Utility).ThenBy(b=>b.Descriptor.Cost(p)).ThenBy(b=>b.Descriptor.Kind).FirstOrDefault();
+            var goal=branches.Where(b=>b.Progress==AiResearchProgress.Available&&b.Utility>0&&ProductivePrerequisiteReady(o,b.Descriptor,catalog)&&o.ResearchAvailability.Any(r=>r.Kind==b.Descriptor.Kind&&r.Available)).OrderBy(b=>massAirThreat&&b.Descriptor.Kind==PlayableResearchKind.ExplorerRocketLauncher?-1:doctrine?.ResearchRank(b.Descriptor.Kind)??int.MaxValue).ThenByDescending(b=>armyPolicy?.Prioritizes(b.Descriptor.Kind)==true).ThenByDescending(b=>b.Descriptor.Kind==preferredFunding).ThenByDescending(b=>b.Utility).ThenBy(b=>b.Descriptor.Cost(p)).ThenBy(b=>b.Descriptor.Kind).FirstOrDefault();
             var fundingGoal=goal==null?null:new InfrastructureRequest(goal.Descriptor.Kind,goal.Utility);
             bool priority=goal!=null&&armyPolicy?.Prioritizes(goal.Descriptor.Kind)==true;
             var best=branches.Where(b=>(!priority||armyPolicy.Prioritizes(b.Descriptor.Kind))&&b.Utility>0&&ProductivePrerequisiteReady(o,b.Descriptor,catalog)&&(b.Progress==AiResearchProgress.Waiting||o.ResearchAvailability.Any(r=>r.Kind==b.Descriptor.Kind&&r.Available))&&
                 (center!=null?available+AiTechnologyFunding.CoveredAmount(budget,b.Descriptor.Kind,p)>=b.Descriptor.Cost(p):available+AiTechnologyFunding.CoveredAmount(budget,b.Descriptor.Kind,p)>=Math.Ceiling(missing)))
-                .OrderBy(b=>doctrine?.ResearchRank(b.Descriptor.Kind)??int.MaxValue).ThenByDescending(b=>b.Utility).ThenBy(b=>b.Descriptor.Cost(p)).ThenBy(b=>b.Descriptor.Kind).FirstOrDefault();
-            if(best==null&&fundingGoal==null&&centers.Length==0&&!emergency&&doctrine?.NeedsArtilleryScience(o,ai)==true)
+                .OrderBy(b=>massAirThreat&&b.Descriptor.Kind==PlayableResearchKind.ExplorerRocketLauncher?-1:doctrine?.ResearchRank(b.Descriptor.Kind)??int.MaxValue).ThenByDescending(b=>b.Utility).ThenBy(b=>b.Descriptor.Cost(p)).ThenBy(b=>b.Descriptor.Kind).FirstOrDefault();
+            if(best==null&&fundingGoal==null&&centers.Length==0&&!emergency&&
+                doctrine?.ScienceSupportDemand(o,ai) is PlayableEntityKind support)
             {
                 // The existing descriptor identifies the shared science prerequisite
                 // and funding key only. Guidance is neither an unlock nor an order:
                 // once science exists, ordinary production/research eligibility owns it.
-                double value=PlayableUnitRules.Cost(p,PlayableEntityKind.Shkval)/Math.Max(1,missing)*
-                    horizon/(horizon+construction+PlayableUnitRules.Duration(p,PlayableEntityKind.Shkval))*(1-danger);
+                double value=PlayableUnitRules.Cost(p,support)/Math.Max(1,missing)*
+                    horizon/(horizon+construction+PlayableUnitRules.Duration(p,support))*(1-danger);
                 var science=new InfrastructureRequest(PlayableResearchKind.ShkvalGuidance,value);
                 bool affordable=available+AiTechnologyFunding.CoveredAmount(budget,science.Research,p)>=Math.Ceiling(missing);
-                return new AiTechnologyPlan(branches,affordable?science:null,null,"science for unmet ordinary Shkval production; Guidance optional",science);
+                return new AiTechnologyPlan(branches,affordable?science:null,null,"science for unmet ordinary "+support+" production; Guidance optional",science);
             }
             if(best==null)return new AiTechnologyPlan(branches,null,null,emergency?"visible center threat: defer new technology":branches.Any(b=>b.Utility>0)&&!branches.Any(b=>b.Utility>0&&ProductivePrerequisiteReady(o,b.Descriptor,catalog))?"compatible productive prerequisite unresolved":"no affordable useful available research",fundingGoal,priority);
             if(center==null)return new AiTechnologyPlan(branches,centers.Length==0?new InfrastructureRequest(best.Descriptor.Kind,best.Utility):null,null,centers.Length==0?"request science prerequisite through shared macro":"science construction pending",fundingGoal,priority);
             if(best.Progress==AiResearchProgress.Waiting)return new AiTechnologyPlan(branches,null,null,"ordinary waiting research owns its existing order/receipt");
+            if(best.Descriptor.Kind==PlayableResearchKind.ExplorerRocketLauncher)
+                center=centers.FirstOrDefault(b=>b.Phase==ConstructionPhase.Ready&&b.ScientificCenterUpgraded);
+            if(center==null)return new AiTechnologyPlan(branches,null,null,"rocket launchers need an upgraded science center",fundingGoal,priority);
             var action=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.QueueResearch,new[]{center.Id},researchKind:best.Descriptor.Kind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
             return new AiTechnologyPlan(branches,null,action,"highest gameplay payoff research",fundingGoal,priority);
         }

@@ -2,6 +2,7 @@
 The adjacent provenance JSON keeps commit subjects for review; internal IDs do not enter notes.
 """
 import json,subprocess,re
+from decimal import Decimal
 AREAS=[
  ('Presentation/NativeSettings','Настройки экрана и интерфейса','Display and interface settings'),
  ('Presentation/NativeDevicePreferences','Настройки управления и отображения','Controls and display preferences'),
@@ -42,13 +43,23 @@ def with_installer_downloads(body, version, repository, windows_name, mac_name):
     return block + clean.lstrip('\n')
 
 def git(root,*args):return subprocess.check_output(['git',*args],cwd=root,text=True).strip()
-def generate(root,head,baseline=None):
+def source_range(root,head,baseline=None):
  if baseline:
   # A source revision from the previous channel release must belong to this history.
   subprocess.run(['git','merge-base','--is-ancestor',baseline,head],cwd=root,check=True,capture_output=True)
  span=f'{baseline}..{head}' if baseline else head
  commits=git(root,'log','--no-merges','--format=%H%x09%s',span).splitlines()
  paths=git(root,'diff','--name-only',baseline,head).splitlines() if baseline else git(root,'ls-tree','-r','--name-only',head).splitlines()
+ return {
+  'baseline':baseline,
+  'head':head,
+  'commits':[dict(zip(('sha','subject'),row.split('\t',1))) for row in commits],
+  'paths':paths,
+ }
+
+def generate(root,head,baseline=None):
+ provenance=source_range(root,head,baseline)
+ paths=provenance['paths']
  labels=[]
  for path in paths:
   if '/Tests/' in path or '/test_' in path or path.endswith('.meta'):continue
@@ -73,7 +84,8 @@ def generate(root,head,baseline=None):
  russian=[ru for ru,en in details]+['Обновлены: '+ru[0].lower()+ru[1:]+'.' for ru,en in labels]
  english=[en for ru,en in details]+['Updated '+en[0].lower()+en[1:]+'.' for ru,en in labels]
  notes='## Русский\n\n### Улучшения\n'+'\n'.join('- '+line for line in russian)+'\n\n## English\n\n### Improved\n'+'\n'.join('- '+line for line in english)+'\n'
- return notes,{'baseline':baseline,'head':head,'commits':[{'sha':row.split('\t',1)[0],'subject':row.split('\t',1)[1]} for row in commits],'paths':paths,'summary_policy':'Conservative area summaries; no inferred gameplay outcomes.'}
+ provenance['summary_policy']='Conservative area summaries; no inferred gameplay outcomes.'
+ return notes,provenance
 def previous_release(releases,channel):
  selected=[r for r in releases if not r['draft'] and r['prerelease']==(channel=='test')]
  selected=[r for r in selected if re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',r['tag_name'])]
@@ -104,40 +116,138 @@ def validate_png(content):
  if len(raw)!=height*stride or not stream.eof or stream.unused_data or any(raw[row*stride]>4 for row in range(height)):raise ValueError('invalid PNG pixels')
  return width,height
 
+LANGUAGES = {'ru': 'Русский', 'en': 'English'}
+HIGHLIGHTS = {'ru': 'Главное для игроков', 'en': 'Highlights for players'}
+OTHER_CHANGES = {'ru': 'Всё остальное', 'en': 'Other changes'}
+ABSENT = {'ru': 'нет', 'en': 'absent'}
+
+
+def words(value):
+    if not isinstance(value, str) or not value.strip() or any(
+        marker in value for marker in ('\n', '\r', '![', '](', '<', '>')
+    ):
+        raise ValueError('notes text must be a nonempty plain line')
+    return value.strip()
+
+
+def localized(value):
+    if not isinstance(value, dict) or value.keys() != LANGUAGES.keys():
+        raise ValueError('notes require both ru and en text')
+    return {lang: words(value[lang]) for lang in LANGUAGES}
+
+
+def balance_transition(change):
+    if not isinstance(change, dict) or not {'before', 'after'} <= change.keys():
+        raise ValueError('balance changes require before and after')
+    before, after = change['before'], change['after']
+    if isinstance(before, dict) and isinstance(after, dict):
+        previous, current = localized(before), localized(after)
+        if any(previous[lang] == current[lang] for lang in LANGUAGES):
+            raise ValueError('describe the changed rule in both languages')
+    else:
+        for value in (before, after):
+            if value is None or type(value) is int or isinstance(value, Decimal) and value.is_finite():
+                continue
+            raise ValueError('balance values must be finite numbers or bilingual rule states')
+        if before == after:
+            raise ValueError('balance before and after must differ')
+        unit = localized(change.get('unit'))
+        previous = {lang: ABSENT[lang] if before is None else f'{before} {unit[lang]}' for lang in LANGUAGES}
+        current = {lang: ABSENT[lang] if after is None else f'{after} {unit[lang]}' for lang in LANGUAGES}
+    return {lang: f'{previous[lang]} → {current[lang]}' for lang in LANGUAGES}
+
+
+def render_notes(sections, comparison):
+    split = bool(sections[True] and sections[False])
+    baseline = (
+        f'Сравнение с {comparison}.' if comparison else 'Первый релиз канала.',
+        f'Compared with {comparison}.' if comparison else 'First release in this channel.',
+    )
+    bodies = []
+    for index, (lang, title) in enumerate(LANGUAGES.items()):
+        parts = [f'## {title}', baseline[index]]
+        for highlighted, heading in ((True, HIGHLIGHTS), (False, OTHER_CHANGES)):
+            categories = sections[highlighted]
+            if not categories:
+                continue
+            if split:
+                parts.append(f'### {heading[lang]}')
+            level = '####' if split else '###'
+            for names, items in categories.items():
+                parts.append(f'{level} {names[index]}\n' + '\n'.join(item[lang] for item in items))
+        bodies.append('\n\n'.join(parts))
+    return '\n\n'.join(bodies) + '\n'
+
+
 # Authored notes are committed inputs. Images are release assets, never local URLs.
-def authored(root, head, manifest, version, assets):
- import pathlib, hashlib, struct
- root=pathlib.Path(root)
- def blob(path):
-  path=str(path)
-  if not path or pathlib.PurePosixPath(path).is_absolute() or '..' in pathlib.PurePosixPath(path).parts or '\\' in path:
-   raise ValueError('notes paths must be repository-relative')
-  return subprocess.check_output(['git','show',f'{head}:{path}'],cwd=root,stderr=subprocess.PIPE)
- def words(value):
-  if not isinstance(value,str) or not value.strip() or any(x in value for x in ('\n','\r','![','](', '<','>')):
-   raise ValueError('notes text must be a nonempty plain line')
-  return value.strip()
- if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',version):raise ValueError('notes require release version')
- data=json.loads(blob(manifest));entries=data['entries']
- if data.get('schema')!=1 or not isinstance(entries,list) or not entries or len(entries)>100:raise ValueError('invalid notes manifest')
- sections={'ru':{},'en':{}};media={}
- for entry in entries:
-  rendered={lang:['- '+words(entry[lang])] for lang in sections}
-  for image in entry.get('images',[]):
-   source=image['source_commit']
-   if not re.fullmatch(r'[a-f0-9]{40}',source):raise ValueError('image needs exact source revision')
-   subprocess.run(['git','merge-base','--is-ancestor',source,head],cwd=root,check=True,capture_output=True)
-   content=blob(image['path'])
-   validate_png(content)
-   digest=hashlib.sha256(content).hexdigest();name='notes-'+digest+'.png'
-   media[name]={'sha256':digest,'path':image['path'],'source_commit':source,'bytes':content}
-   for lang in sections:
-    caption=words(image[lang]).replace('[','').replace(']','')
-    rendered[lang].append(f'\n  ![{caption}](https://github.com/afonasev/spacewars/releases/download/v{version}/{name})')
-  for lang in sections:
-   category=words(entry['category_'+lang]);sections[lang].setdefault(category,[]).append('\n'.join(rendered[lang]))
- # Validate all inputs before touching output. Asset names include their full content hash.
- assets=pathlib.Path(assets);assets.mkdir(parents=True,exist_ok=True)
- for name,item in media.items():(assets/name).write_bytes(item['bytes'])
- body='\n\n'.join('## '+title+'\n\n'+'\n\n'.join('### '+category+'\n'+'\n'.join(items) for category,items in sections[lang].items()) for lang,title in [('ru','Русский'),('en','English')])+'\n'
- return body,{'manifest':str(manifest),'head':head,'images':[{k:v for k,v in item.items() if k!='bytes'}|{'asset':name} for name,item in media.items()]}
+def authored(root, head, manifest, version, assets, comparison):
+    import hashlib
+    import pathlib
+
+    def blob(path):
+        path = str(path)
+        if not path or pathlib.PurePosixPath(path).is_absolute() or '..' in pathlib.PurePosixPath(path).parts or '\\' in path:
+            raise ValueError('notes paths must be repository-relative')
+        return subprocess.check_output(['git', 'show', f'{head}:{path}'], cwd=root, stderr=subprocess.PIPE)
+
+    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+        raise ValueError('notes require release version')
+    if comparison is not None and not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', comparison):
+        raise ValueError('notes require a semantic comparison release tag')
+    data = json.loads(blob(manifest), parse_float=Decimal)
+    if not isinstance(data, dict) or data.get('schema') != 2 or data.get('balance_reviewed') is not True:
+        raise ValueError('release requires schema 2 notes with a completed balance review')
+    if 'baseline' not in data or data['baseline'] != comparison:
+        raise ValueError(f'notes baseline must match the previous release of this channel: {comparison!r}')
+    entries = data.get('entries')
+    if not isinstance(entries, list) or not entries:
+        raise ValueError('release notes require at least one categorized item')
+
+    sections = {True: {}, False: {}}
+    media = {}
+    translations = {lang: {} for lang in LANGUAGES}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError('release notes require structured entries')
+        highlight = entry.get('highlight', False)
+        if type(highlight) is not bool:
+            raise ValueError('notes highlight must be a boolean')
+        names = tuple(words(entry.get('category_' + lang)) for lang in LANGUAGES)
+        for index, lang in enumerate(LANGUAGES):
+            if translations[lang].setdefault(names[index], names) != names:
+                raise ValueError('each notes category must have a consistent translation')
+        transition = balance_transition(entry['balance']) if 'balance' in entry else {}
+        rendered = {lang: ['- ' + words(entry.get(lang))] for lang in LANGUAGES}
+        if transition:
+            for lang in LANGUAGES:
+                rendered[lang][0] += f' — {transition[lang]}.'
+
+        for image in entry.get('images', []):
+            source = image['source_commit']
+            if not re.fullmatch(r'[a-f0-9]{40}', source):
+                raise ValueError('image needs exact source revision')
+            subprocess.run(['git', 'merge-base', '--is-ancestor', source, head], cwd=root, check=True, capture_output=True)
+            content = blob(image['path'])
+            validate_png(content)
+            digest = hashlib.sha256(content).hexdigest()
+            name = 'notes-' + digest + '.png'
+            media[name] = {'sha256': digest, 'path': image['path'], 'source_commit': source, 'bytes': content}
+            url = f'https://github.com/afonasev/spacewars/releases/download/v{version}/{name}'
+            for lang in LANGUAGES:
+                caption = words(image[lang]).replace('[', '').replace(']', '')
+                rendered[lang].append(f'  ![{caption}]({url})')
+        sections[highlight].setdefault(names, []).append({lang: '\n'.join(lines) for lang, lines in rendered.items()})
+
+    body = render_notes(sections, comparison)
+    # Validate all inputs before touching output. Asset names include their full content hash.
+    assets = pathlib.Path(assets)
+    assets.mkdir(parents=True, exist_ok=True)
+    for name, item in media.items():
+        (assets / name).write_bytes(item['bytes'])
+    return body, {
+        'manifest': str(manifest),
+        'head': head,
+        'baseline_release': comparison,
+        'balance_reviewed': True,
+        'images': [{k: v for k, v in item.items() if k != 'bytes'} | {'asset': name} for name, item in media.items()],
+    }

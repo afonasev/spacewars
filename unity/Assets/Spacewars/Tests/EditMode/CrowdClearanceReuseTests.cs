@@ -34,14 +34,101 @@ namespace Spacewars.Tests.EditMode
         }
         static void Switch(bool reuse){NavCrowdMotion.DisableSelectClearanceReuseForQa=!reuse;NavCrowdMotion.CountSelectClearanceForQa=true;NavCrowdMotion.SelectClearanceCallsForQa=NavCrowdMotion.SelectClearanceHitsForQa=0;}
         [TearDown] public void Reset(){NavCrowdMotion.DisableSelectClearanceReuseForQa=false;NavCrowdMotion.CountSelectClearanceForQa=false;}
+        [Test] public void OwnerQualifiedShortReverseMovesOnFirstTickWithoutTurningTheHull()
+        {
+            var geometry=new NavGeometry(64,Array.Empty<NavObstacle>(),1);
+            var crowd=new NavCrowd(geometry,PlayableProfile.Default.Navigation);
+            try
+            {
+                var backed=crowd.Add(1,new NavPoint(0,0),.72,4,4.5);
+                var ordinary=crowd.Add(2,new NavPoint(0,5),.72,4,4.5);
+                foreach(var unit in new[]{backed,ordinary})
+                {
+                    unit.Heading=0;
+                    unit.ReverseSpeedRatio=.45;
+                    unit.ReverseConeRadians=.4;
+                    var goal=new NavPoint(-1,unit.Position.Z);
+                    Assert.True(crowd.SetRoute(unit.Id,goal,new[]{goal}));
+                }
+                crowd.OwnedShortReverseDistance=unit=>unit.Id==1?1.5:0;
+                crowd.Step(Dt);
+                Assert.Less(backed.Position.X,0);
+                Assert.AreEqual(0,backed.Heading);
+                Assert.AreEqual(0,ordinary.Position.X);
+                Assert.AreNotEqual(0,ordinary.Heading);
+                Assert.AreEqual(0,backed.ReverseDistance,"The owner input is transient.");
+            }
+            finally{crowd.ReleaseCrowdStorage();}
+        }
+
+        sealed class OpenMotorClearance : INavMotionClearance
+        {
+            public bool ClearMotion(int actor,NavPoint end)=>true;
+        }
+
+        [Test] public void ShortReverseCanUseAnIntermediateGuideOnItsSegment()
+        {
+            var p=PlayableProfile.Default.Navigation;
+            var goal=new NavPoint(-1.4,0);
+            var body=new NavMotionBody{Id=1,Position=default,Target=new NavPoint(-.7,0),Heading=0,
+                Radius=.72,Speed=4,TurnSpeed=4.5,Active=true,ReverseSpeedRatio=.45,ReverseConeRadians=.4,
+                OwnedShortReverseDistance=1.5};
+            NavMotionProposal Move(NavMotionBody candidate)=>NavCrowdMotion.Select(new[]{candidate},0,Array.Empty<int>(),0,p,Dt,new OpenMotorClearance(),goal);
+            Assert.Less(Move(body).Position.X,0);
+            Assert.AreEqual(0,Move(body).Heading);
+            body.Target=new NavPoint(-.7,.2);
+            Assert.AreEqual(default(NavPoint),Move(body).Position);
+            body.Target=new NavPoint(-.7,0);
+            body.OwnedShortReverseDistance=1;
+            Assert.AreEqual(default(NavPoint),Move(body).Position);
+        }
+
         [Test] public void CapabilityIsClosedAndTestCallbacksDisableReuse()
         {
             var g=new NavGeometry(144,Array.Empty<NavObstacle>(),1);var p=PlayableProfile.Default.Navigation;
             Assert.True(new NavCrowd(g,p).StableSelectClearance);var a=new NavCrowd(g,p,new AiTestMap());Assert.True(a.StableSelectClearance);
             var crossings=new NavCrowd(g,p,new ThreeCrossingsMap(new ThreeCrossingsProfileData()));Assert.True(crossings.StableSelectClearance);
             var proving=new NavCrowd(g,p,new ProvingGroundMap());Assert.True(proving.StableSelectClearance);
-            Assert.False(new NavCrowd(g,p,new NullDockMap()).StableSelectClearance,"uncertified terrain remains an ordinary callback");
-            var before=TerrainLocations.IndexedCutCandidateForTests;try{TerrainLocations.IndexedCutCandidateForTests=_=>{};Assert.False(a.StableSelectClearance);Assert.False(crossings.StableSelectClearance);Assert.False(proving.StableSelectClearance);}finally{TerrainLocations.IndexedCutCandidateForTests=before;}
+            var dock=new NavCrowd(g,p,new NullDockMap());Assert.True(dock.StableSelectClearance);
+            Assert.False(new NavCrowd(g,p,new StackedRampQualificationMap()).StableSelectClearance,"uncertified terrain remains an ordinary callback");
+            var before=TerrainLocations.IndexedCutCandidateForTests;try{TerrainLocations.IndexedCutCandidateForTests=_=>{};Assert.False(a.StableSelectClearance);Assert.False(crossings.StableSelectClearance);Assert.False(proving.StableSelectClearance);Assert.False(dock.StableSelectClearance);}finally{TerrainLocations.IndexedCutCandidateForTests=before;}
+        }
+        [Test] public void NullDockRampMovementMatchesTheUncachedPath()
+        {
+            var map = new NullDockMap();
+            var geometry = new NavGeometry(map.HalfExtent, map.MovementBlockers.ToArray(), map.Revision);
+            NavigationSession CreateRampColumn()
+            {
+                var session = new NavigationSession(1, geometry, PlayableProfile.Default.Navigation, terrain: map);
+                for (int column = 0; column < 3; column++)
+                for (int row = 0; row < 4; row++)
+                {
+                    var start = map.Point(27 + 3 * column, 61 + 3 * row);
+                    var goal = map.Point(27 + 3 * column, 50);
+                    int id = column * 4 + row + 1;
+                    session.Crowd.Add(id, start, .72, 4, 4.5);
+                    Assert.True(session.Crowd.SetRoute(id, goal, new[] { goal }));
+                }
+                return session;
+            }
+            var savedHook = TerrainLocations.IndexedCutCandidateForTests;
+            NavigationSession original = null, optimized = null;
+            try {
+                original = CreateRampColumn();
+                optimized = CreateRampColumn();
+                for (int step = 0; step < 60; step++) {
+                    TerrainLocations.IndexedCutCandidateForTests = _ => { };
+                    original.Crowd.Step(Dt);
+                    TerrainLocations.IndexedCutCandidateForTests = null;
+                    optimized.Crowd.Step(Dt);
+                    CollectionAssert.AreEqual(Bytes(original), Bytes(optimized), "Ramp step " + step);
+                }
+                Assert.True(optimized.Crowd.Units.Any(unit => unit.Location.SurfaceId == "R1"));
+            } finally {
+                TerrainLocations.IndexedCutCandidateForTests = savedHook;
+                Destroy(optimized);
+                Destroy(original);
+            }
         }
         [Test] public void ProvingGroundQueriesMatchAuthoredPartitionAcrossEdgesAndCorners()
         {

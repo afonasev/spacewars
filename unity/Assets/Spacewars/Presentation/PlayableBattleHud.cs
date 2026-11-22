@@ -14,7 +14,9 @@ namespace Spacewars.Presentation
     {
         private VisualElement armyComposition,selectionRoster;
         private readonly Dictionary<int,Button> selectionTiles=new Dictionary<int,Button>();
-        private readonly Label[] armyCounts=new Label[4];
+        private readonly Label[] armyCounts=new Label[7];
+        private IReadOnlyList<PlayableEntitySnapshot> countedArmyEntities;
+        private PlayableOwner countedArmyOwner;
         private OrbitalBattleRing battleRing;
         private OfflinePadAction[] battleActions=Array.Empty<OfflinePadAction>();
         private NativeLocalInputProfile battleInputProfile;
@@ -25,6 +27,7 @@ namespace Spacewars.Presentation
         private int battleContextClosedFrame=-1;
         private void CreateArmyComposition()
         {
+            countedArmyEntities = null;
             // Use the existing resource-row height, font and glyph grid; this is fixed HUD packing.
             armyComposition=new VisualElement{name="army-composition"};armyComposition.style.position=Position.Absolute;
             armyComposition.style.flexDirection=FlexDirection.Row;armyComposition.style.flexWrap=Wrap.NoWrap;armyComposition.style.alignItems=Align.Center;
@@ -36,7 +39,7 @@ namespace Spacewars.Presentation
                 count.style.marginLeft=count.style.marginRight=count.style.marginTop=count.style.marginBottom=0;
                 count.style.paddingTop=count.style.paddingBottom=0;count.style.whiteSpace=WhiteSpace.NoWrap;count.style.unityTextAlign=TextAnchor.MiddleLeft;
                 count.style.color=Ink;count.style.unityTextOutlineWidth=.15f;count.style.unityTextOutlineColor=PanelColor;
-                var icon=new OrbitalGlyph(i==0?"explorer":i==1?"tank":i==2?"shkval":"hawk");icon.style.position=Position.Absolute;icon.style.left=0;icon.style.top=0;
+                var icon=new OrbitalGlyph(i==0?"explorer":i==1?"tank":i==2?"shkval":i==3?"hawk":i==4?"skat":i==5?"igla":"cerberus");icon.style.position=Position.Absolute;icon.style.left=0;icon.style.top=0;
                 icon.Q<ModelPortrait>("glyph-model").SetOutlineColor(Ink);count.Add(icon);armyComposition.Add(count);
             }
             hudFocusButton.RegisterCallback<PointerEnterEvent>(_=>{armyCompositionHovered=true;ShowArmyComposition(true);});
@@ -47,13 +50,46 @@ namespace Spacewars.Presentation
         private void UpdateArmyCompositionCounts()
         {
             if(view==null)return;
-            var kinds=new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval,PlayableEntityKind.Hawk};
-            for(int i=0;i<kinds.Length;i++){int count=view.Entities.Count(e=>e.Owner==view.Owner&&e.Kind==kinds[i]);armyCounts[i].text=count.ToString();armyCounts[i].style.display=count>0?DisplayStyle.Flex:DisplayStyle.None;}
+            var entities = view.Entities;
+            var owner = view.Owner;
+            if (!ReferenceEquals(countedArmyEntities, entities) || countedArmyOwner != owner)
+            {
+                int explorers = 0, tanks = 0, shkvals = 0, hawks = 0, skats = 0, cerberus = 0, igla = 0;
+                for (int i = 0; i < entities.Count; i++)
+                {
+                    var entity = entities[i];
+                    if (entity.Owner != owner) continue;
+                    switch (entity.Kind)
+                    {
+                        case PlayableEntityKind.Explorer: explorers++; break;
+                        case PlayableEntityKind.Tank: tanks++; break;
+                        case PlayableEntityKind.Shkval: shkvals++; break;
+                        case PlayableEntityKind.Hawk: hawks++; break;
+                        case PlayableEntityKind.Igla: igla++; break;
+                        case PlayableEntityKind.Cerberus: cerberus++; break;
+                        case PlayableEntityKind.Skat: skats++; break;
+                    }
+                }
+                SetArmyCount(0, explorers);
+                SetArmyCount(1, tanks);
+                SetArmyCount(2, shkvals);
+                SetArmyCount(3, hawks);
+                SetArmyCount(4, skats);
+                SetArmyCount(5, igla);
+                SetArmyCount(6, cerberus);
+                countedArmyEntities = entities;
+                countedArmyOwner = owner;
+            }
             LayoutArmyComposition();
+        }
+        private void SetArmyCount(int index, int count)
+        {
+            armyCounts[index].text = count.ToString();
+            armyCounts[index].style.display = count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
         }
         private void LayoutArmyComposition()
         {
-            if(root==null||armyComposition==null||root.resolvedStyle.width<=0)return;
+            if(root==null||armyComposition==null||armyComposition.style.display.value==DisplayStyle.None||root.resolvedStyle.width<=0)return;
             bool resourcesLeft=localHumanCount>1&&localViewportIndex%2==0;
             float left=6,right=root.resolvedStyle.width-6,y=6;
             if(top.worldBound.width>0)
@@ -62,16 +98,20 @@ namespace Spacewars.Presentation
                 if(resourcesLeft)left=Mathf.Max(left,top.worldBound.xMax-root.worldBound.xMin+8);
                 else right=Mathf.Min(right,top.worldBound.xMin-root.worldBound.xMin-8);
             }
-            var fps=root.panel?.visualTree.Q<Label>("device-fps");
-            if(NativeDevicePreferences.ShowFps&&fps!=null&&fps.worldBound.height>0)
+            var diagnostics=root.panel?.visualTree;
+            void ReserveCounter(string name)
             {
-                var bounds=fps.worldBound;bounds.position-=root.worldBound.position;
+                var label=diagnostics?.Q<Label>(name);
+                if(label==null||label.style.display.value==DisplayStyle.None||label.worldBound.height<=0)return;
+                var bounds=label.worldBound;bounds.position-=root.worldBound.position;
                 if(bounds.yMin<y+26&&bounds.yMax>y)
                 {
                     if(resourcesLeft)right=Mathf.Min(right,bounds.xMin-8);
                     else left=Mathf.Max(left,bounds.xMax+8);
                 }
             }
+            ReserveCounter("device-fps");
+            ReserveCounter("device-tps");
             // Reuse normal 24 px icons, or the existing 16 px resource glyph size when space is tight.
             float textWidth=0;int visibleCount=0;
             foreach(var count in armyCounts)
@@ -107,13 +147,24 @@ namespace Spacewars.Presentation
         {
             if(battleContextClosedFrame==Time.frameCount)return true;
             if(battleRally){battleContextClosedFrame=Time.frameCount;CancelRallyPlacement(battleController);return true;}
+            if(inspectionEntityId!=0)
+            {
+                inspectionEntityId=0;battleContextClosedFrame=Time.frameCount;
+                battleGestures.Cancel();root.Focus();return true;
+            }
             if(battleRing==null||battleRing.style.display.value!=DisplayStyle.Flex)return false;
             battleContextClosedFrame=Time.frameCount;battleDismissed=true;selection.Clear();selectedSite=selectedSlot=0;confirmSaleBuilding=0;battleRing.style.display=DisplayStyle.None;battleGestures.Cancel();root.Focus();return true;
         }
         private OfflinePadAction[] CurrentBattleActions()
         {
             if(spectatorMode||view==null||paused||restarting||quitting||mapOpen||view.Outcome!=PlayableMatchOutcome.Playing)return Array.Empty<OfflinePadAction>();
-            if(selectedSite!=0)return OfflinePadWorldActions.Build(view,profile,selectedSite,selectedSlot,freeEconomy:provingGround!=null);
+            if(selectedSite!=0)
+            {
+                if(view.Sites.Any(s=>s.Site.Id==selectedSite&&s.Site.Kind==PlayableBuildingKind.RelayTower))
+                    return OfflinePadWorldActions.RelayTransfer(view,selectedSite,
+                        i=>matchSetup?.ParticipantName(i)??view.Participants[i].Id,o=>LobbyPaint(o));
+                return OfflinePadWorldActions.Build(view,profile,selectedSite,selectedSlot,freeEconomy:provingGround!=null);
+            }
             if(selection.Count!=1)return Array.Empty<OfflinePadAction>();
             return OfflinePadWorldActions.Building(view,profile,selection.First(),battleController,freeEconomy:provingGround!=null);
         }
@@ -131,7 +182,9 @@ namespace Spacewars.Presentation
             foreach(var button in researchButtons)button.style.display=DisplayStyle.None;
             sellBuilding.style.display=repairBuilding.style.display=DisplayStyle.None;
             noticeLabel.text=notice;noticeLabel.style.display=string.IsNullOrEmpty(notice)?DisplayStyle.None:DisplayStyle.Flex;noticeLabel.style.maxWidth=Mathf.Min(320,root.resolvedStyle.width-12);
-            UpdatePrecisionContext(building);
+            var inspectedBuilding=!spectatorMode&&inspectionEntityId!=0?
+                view.Buildings.FirstOrDefault(b=>b.Id==inspectionEntityId):null;
+            UpdatePrecisionContext(inspectedBuilding??building);
             int anchor=building?.Id??0;if(anchor!=battleAnchor||selectedSite!=battleSite||selectedSlot!=battleSlot){battleDismissed=false;battleAnchor=anchor;battleSite=selectedSite;battleSlot=selectedSlot;confirmSaleBuilding=0;battleGestures.SetMode("buildingWheel");}
             battleActions=CurrentBattleActions();foreach(var action in battleActions)if(action.Sector.Hold=="sell"&&confirmSaleBuilding==battleAnchor&&battleAnchor!=0)action.Label=provingGround!=null?"✓ Подтвердить удаление":"✓ Подтвердить продажу";bool show=battleActions.Length>0&&!battleDismissed&&!battleRally;
             battleRing.style.display=show?DisplayStyle.Flex:DisplayStyle.None;
@@ -161,12 +214,15 @@ namespace Spacewars.Presentation
             // Reserve a complete side-by-side pair before positioning the card; no overlap fallback.
             if(w>=diameter+254){float reserve=Mathf.Min(battleRing.PreferredDetailWidth+12,w-diameter-12);bool cardLeft=left>w-left-diameter;left=cardLeft?Mathf.Max(left,reserve):Mathf.Min(left,w-diameter-reserve);battleRing.style.left=left;}
             battleRing.ConfigureInput(battleController,SeatPad);
-            battleRing.Set(battleActions,building==null?"Строительство":BuildingName(building.Kind),battleController?battleSector:null,battleGestures.Progress,building==null?"building":OrbitalPrecision.BuildingArtwork(building));battleRing.PositionDetail(left>w-left-diameter,left>w-left-diameter?left:w-left-diameter,deck-6,battleRing.style.top.value.value,minY);
+            bool relayMenu=battleActions[0].Command?.Kind==PlayableCommandKind.TransferRelay;
+            battleRing.Set(battleActions,relayMenu?"Вышка связи":building==null?"Строительство":BuildingName(building.Kind),
+                battleController?battleSector:null,battleGestures.Progress,
+                relayMenu?"relay-tower":building==null?"building":OrbitalPrecision.BuildingArtwork(building));battleRing.PositionDetail(left>w-left-diameter,left>w-left-diameter?left:w-left-diameter,deck-6,battleRing.style.top.value.value,minY);
             if(!MouseBuildingMenuVisible(at,new Rect(left,battleRing.style.top.value.value,diameter,diameter)))battleRing.style.display=DisplayStyle.None;
         }
         private int primarySelection;
         private bool battleHudUnattended;
-        private static string UnitSymbol(PlayableEntityKind kind)=>kind==PlayableEntityKind.Hawk?"✣":kind==PlayableEntityKind.Explorer?"◇":kind==PlayableEntityKind.Shkval?"△":"▣";
+        private static string UnitSymbol(PlayableEntityKind kind)=>kind==PlayableEntityKind.Skat?"◈":kind==PlayableEntityKind.Hawk?"✣":kind==PlayableEntityKind.Explorer?"◇":kind==PlayableEntityKind.Shkval?"△":"▣";
         private void ExecuteBattleAction(string id,bool hold,bool controller)
         {
             if(spectatorMode)return;
@@ -179,10 +235,11 @@ namespace Spacewars.Presentation
             if(command==null)return;
             if(action.Sector.Hold!="sell")confirmSaleBuilding=0;
             if(BotSeat||runtime==null)return;
-            var intent=new PlayableCommand(generation,++sequence,LocalOwnerId,command.Kind,command.Entities,command.Point,targetId:command.Target,siteId:command.Site,slotId:command.Slot,parentId:command.Parent,buildingKind:command.Building,unitKind:command.Unit,researchKind:command.Research);
-            var result=runtime.TrySubmit(intent);AudioCommand(intent,result.Accepted);
-            noticeSequence=sequence;notice=result.Accepted?"":Friendly(result.Status);Record("radial "+id+" kind="+command.Kind+" admission="+result.Status);
+            var intent=new PlayableCommand(generation,0,LocalOwnerId,command.Kind,command.Entities,command.Point,targetId:command.Target,siteId:command.Site,slotId:command.Slot,parentId:command.Parent,buildingKind:command.Building,unitKind:command.Unit,researchKind:command.Research);
+            QueueHumanIntent(intent,(sent,result)=>{
+            noticeSequence=sent.Sequence;notice=result.Accepted?"":Friendly(result.Status);Record("radial "+id+" kind="+command.Kind+" admission="+result.Status);
             if(command.Kind==PlayableCommandKind.BuildAt&&result.Accepted){selection.Clear();selectedSite=selectedSlot=0;battleDismissed=true;battleRing.style.display=DisplayStyle.None;battleGestures.Cancel();}
+            });
             root.Focus();
         }
         private Vector2 battleCursor;

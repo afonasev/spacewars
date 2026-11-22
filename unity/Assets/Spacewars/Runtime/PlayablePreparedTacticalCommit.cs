@@ -32,7 +32,7 @@ namespace Spacewars.Runtime
         internal Action<PreparedTacticalCommit> AfterTacticalPreparationForQa;
         internal bool MeasureTacticalCommitForQa;internal long LastTacticalCommitAllocatedBytesForQa;
         private static readonly bool PerformanceReadoutsRequestedForQa=Array.IndexOf(Environment.GetCommandLineArgs(),"-q10Readouts")>=0;
-        private PlayableCommandStatus ApplyTacticalPrepared(PlayableCommand command,out string message,out bool committed)
+        private PlayableCommandStatus ApplyTacticalPrepared(PlayableCommand command,out string message,out bool committed,bool exactMove=false)
         {
             message="Tactical preparation refused.";committed=false;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -45,7 +45,7 @@ namespace Spacewars.Runtime
                 if(payload==null){message="Tactical preparation refused: "+(navigation.LastCommandAdmissionRefusal??"domain admission unavailable");return PlayableCommandStatus.Overflow;}
                 navigation.PrepareCommandGroup(command,nextOrderRevision,Tick,TeamOf(OwnerFor(command.PlayerId)));payload.CaptureNavigationInputs();
                 HashSet<int> followed=null;PlayableCommandStatus status;
-                try{status=command.Kind==PlayableCommandKind.Follow?Follow(command.CopyEntityIds(),command.TargetId,command.Sequence,OwnerFor(command.PlayerId),out message,out followed,payload):ApplyCore(command,out message,payload);}
+                try{status=command.Kind==PlayableCommandKind.Follow?Follow(command.CopyEntityIds(),command.TargetId,command.Sequence,OwnerFor(command.PlayerId),out message,out followed,payload):ApplyCore(command,out message,payload,exactMove);}
                 finally{payload.CaptureProposalAndRestore();}
                 if(status!=PlayableCommandStatus.Applied){navigation.AbortTacticalPreparation();return status;}
                 var ids=(command.Kind==PlayableCommandKind.Follow?(IEnumerable<int>)followed:command.EntityIds).Distinct().OrderBy(id=>id).ToArray();
@@ -62,24 +62,35 @@ namespace Spacewars.Runtime
                 if(payload!=null){if(payload.Phase==TacticalCommitPhase.NotCommitted)payload.RejectPreparation();try{payload.Dispose();}catch(Exception cleanup){if(primary!=null)PreserveTacticalSecondary(primary is TacticalCommitFailure f?f.Original:primary,cleanup);else if(payload.Phase!=TacticalCommitPhase.NotCommitted)throw new TacticalCommitFailure(payload.Phase,cleanup);else throw;}}
             }
         }
-        private enum InternalTacticalKind { Deferred,Skipped,Park,Combat,WreckWait }
-        private bool CommitInternalTactical(QueueIssuance original,int[] ids,InternalTacticalKind kind,NavPoint goal=default,long activationRevision=0)
+        private enum InternalTacticalKind { Deferred,Skipped,Park,Combat,WreckWait,WreckResume,CancelRepair,RelocateArrival }
+        private bool CommitInternalTactical(QueueIssuance original,int[] ids,InternalTacticalKind kind,NavPoint goal=default,long activationRevision=0,NavLocation? wreckSlot=null)
         {
-            var command=RecipientCommand(original.Command,ids);long revision=kind==InternalTacticalKind.Deferred||kind==InternalTacticalKind.Skipped?nextOrderRevision:activationRevision>0?activationRevision:original.Revision;
+            var command=RecipientCommand(original.Command,ids);
+            bool resolveDestination=kind==InternalTacticalKind.Deferred&&IsSingleHumanMove(original.Command);
+            if(resolveDestination)command=ResolveSingleHumanMove(command);
+            long revision=kind==InternalTacticalKind.Deferred||kind==InternalTacticalKind.Skipped?nextOrderRevision:activationRevision>0?activationRevision:original.Revision;
             PreparedTacticalCommit payload=null;Exception primary=null;
             try{
                 try{payload=PreparedTacticalCommit.Create(this);}catch(InvalidOperationException e)when(e.Message=="Physical storage exceeds prepared reservation."){return false;}if(payload==null)return false;
                 navigation.PrepareCommandGroup(command,revision,Tick,TeamOf(units[ids[0]].Owner),original.GroupId,original.Revision,original.Tick);payload.CaptureNavigationInputs();
                 bool staged;
                 if(kind==InternalTacticalKind.Skipped){navigation.StageTacticalMetadata(ids,payload.NavigationInputs);staged=payload.BeginProposal();}
-                else if(kind==InternalTacticalKind.Combat){
-                    // Rebind the original active issuance context, not the failed replacement's legacy membership.
-                    staged=navigation.StageTacticalMove(ids,new[]{goal},payload.NavigationInputs);if(staged)staged=payload.BeginProposal();
+                else if(kind==InternalTacticalKind.Combat||kind==InternalTacticalKind.WreckResume||kind==InternalTacticalKind.RelocateArrival){
+                    // The original issuance stays active. A wreck retry retains
+                    // the member's assigned endpoint through route admission.
+                    staged=navigation.StageTacticalMove(ids,new[]{goal},payload.NavigationInputs,
+                        single:kind==InternalTacticalKind.RelocateArrival,fixedEndpoint:kind!=InternalTacticalKind.Combat);
+                    if(staged)staged=payload.BeginProposal();
                 }
-                else if(kind==InternalTacticalKind.Park||kind==InternalTacticalKind.WreckWait||command.Kind==PlayableCommandKind.Attack){
+                else if(kind==InternalTacticalKind.Park||kind==InternalTacticalKind.CancelRepair||kind==InternalTacticalKind.WreckWait||command.Kind==PlayableCommandKind.Attack){
                     staged=navigation.StageTacticalStop(ids,false,payload.NavigationInputs);if(staged)staged=payload.BeginProposal();
-                    if(staged)foreach(int id in ids){var u=units[id];u.WreckWaiting=kind==InternalTacticalKind.WreckWait;InterruptBurst(u);u.Target=kind==InternalTacticalKind.Park?0:command.TargetId;u.ExplicitTarget=kind!=InternalTacticalKind.Park;u.HasAttackMove=false;u.CurrentOrder=kind==InternalTacticalKind.Park?null:Order(u,original);}
-                }else staged=ApplyCore(command,out _,payload)==PlayableCommandStatus.Applied;
+                    if(staged)foreach(int id in ids){
+                        var u=units[id];bool clear=kind==InternalTacticalKind.Park||kind==InternalTacticalKind.CancelRepair;
+                        u.WreckWaiting=kind==InternalTacticalKind.WreckWait;InterruptBurst(u);u.Target=clear?0:command.TargetId;
+                        u.ExplicitTarget=!clear;u.HasAttackMove=false;u.CurrentOrder=clear?null:Order(u,original);
+                    }
+                }else staged=ApplyCore(command,out _,payload,
+                    preserveFormation:kind==InternalTacticalKind.Deferred&&original.Command.EntityIds.Count>1)==PlayableCommandStatus.Applied;
                 payload.CaptureProposalAndRestore();
                 if(!staged){navigation.AbortTacticalPreparation();return false;}
                 var candidate=navigation.PreparedTacticalCandidate;if(candidate==null)throw new InvalidOperationException("Internal tactical operation did not stage Nav.");
@@ -87,13 +98,41 @@ namespace Spacewars.Runtime
                     QueueIssuance issuance=null;
                     if(kind==InternalTacticalKind.Deferred||kind==InternalTacticalKind.Skipped){
                         var first=tacticalQueues[ids[0]];if(first.Deferred.Count==0||first.Deferred[0].Id!=original.Id)throw new InvalidOperationException("Deferred source issuance changed.");
-                        issuance=first.Deferred[0];issuance.GroupId=candidate.Groups[candidate.MemberGroups[ids[0]]].GroupId;nextOrderRevision=revision+1;
+                        issuance=first.Deferred[0];
+                        if(resolveDestination)issuance.Command=DomainCommand(command);
+                        issuance.GroupId=candidate.Groups[candidate.MemberGroups[ids[0]]].GroupId;nextOrderRevision=revision+1;
                     }
                     foreach(int id in ids){
                         var u=units[id];var q=tacticalQueues[id];
-                        if(kind==InternalTacticalKind.Combat){foreach(var request in candidate.Issued){ObserveSpatialRequest(request,true);if(OriginalGroupDiagnostics.Active&&tacticalQueues.TryGetValue(request.Entity,out var diagnosticQueue))StageOriginalQueue(command,request.Entity,diagnosticQueue);}break;}
+                        if(kind==InternalTacticalKind.Combat||kind==InternalTacticalKind.WreckResume){foreach(var request in candidate.Issued){ObserveSpatialRequest(request,true);if(OriginalGroupDiagnostics.Active&&tacticalQueues.TryGetValue(request.Entity,out var diagnosticQueue))StageOriginalQueue(command,request.Entity,diagnosticQueue);}break;}
                         InvalidateSpatialCompletion(id);
-                        if(kind==InternalTacticalKind.WreckWait){var waitMember=candidate.Groups[candidate.MemberGroups[id]].Members.Single(m=>m.Entity==id);q.Active=new QueueExecution{Issuance=original,Stamp=u.LastOrder,Incarnation=waitMember.Incarnation,Assigned=DomainLocation(command.TargetLocation),ActivationTick=Tick};q.Pending=null;u.WreckWaiting=true;u.CurrentOrder=Order(u,original);u.Target=0;u.ExplicitTarget=false;u.HasAttackMove=command.Kind==PlayableCommandKind.AttackMove;StageOriginalQueue(command,id,q);continue;}
+                        if (kind == InternalTacticalKind.RelocateArrival)
+                        {
+                            var request = candidate.Pending[id];
+                            var previous = q.Active;
+                            q.Active = null;
+                            q.Pending = new QueueExecution
+                            {
+                                Issuance = previous.Issuance, Stamp = previous.Stamp, Incarnation = previous.Incarnation,
+                                Assigned = DomainLocation(request.GoalLocation), AttemptLocation = DomainLocation(request.GoalLocation),
+                                AttemptRequest = request.Request, AttemptOrder = request.Order,
+                            };
+                            q.OldMotionSuspended = false;
+                            AdmitSpatialExecution(u, candidate);
+                            u.CurrentOrder = null;
+                            u.HasAttackMove = false;
+                            u.Target = 0;
+                            u.ExplicitTarget = false;
+                            StageOriginalQueue(command,id,q);
+                            continue;
+                        }
+                        if(kind==InternalTacticalKind.WreckWait){var waitMember=candidate.Groups[candidate.MemberGroups[id]].Members.Single(m=>m.Entity==id);q.Active=new QueueExecution{Issuance=original,Stamp=u.LastOrder,Incarnation=waitMember.Incarnation,Assigned=DomainLocation(wreckSlot),ActivationTick=Tick};q.Pending=null;u.WreckWaiting=true;u.CurrentOrder=Order(u,original);u.Target=0;u.ExplicitTarget=false;u.HasAttackMove=command.Kind==PlayableCommandKind.AttackMove;StageOriginalQueue(command,id,q);continue;}
+                        if(kind==InternalTacticalKind.CancelRepair){
+                            q.Pending=null;q.OldMotionSuspended=false;
+                            ClearActiveTacticalOrder(u,q);
+                            StageOriginalQueue(command,id,q);
+                            continue;
+                        }
                         if(kind==InternalTacticalKind.Park){q.Active=null;u.CurrentOrder=null;u.HasAttackMove=false;u.Target=0;u.ExplicitTarget=false;CancelSpatialExecution(id,candidate.Pending.ContainsKey(id)||candidate.Allocating.ContainsKey(id));StageOriginalQueue(command,id,q);continue;}
                         if(q.Deferred.Count==0||q.Deferred[0].Id!=original.Id)throw new InvalidOperationException("Deferred source issuance changed.");
                         q.Deferred.RemoveAt(0);u.LastOrder=Stamp(u,issuance,revision);
@@ -200,7 +239,7 @@ namespace Spacewars.Runtime
             }
             private static SpatialExecution CloneExecution(SpatialExecution e)=>new SpatialExecution{Order=e.Order,OriginalTarget=e.OriginalTarget,AssignedGoal=e.AssignedGoal,OriginalLocation=e.OriginalLocation,AssignedLocation=e.AssignedLocation,GroupId=e.GroupId,Incarnation=e.Incarnation,ActivationTick=e.ActivationTick,RouteRequest=e.RouteRequest,RouteOrder=e.RouteOrder};
             private static bool PointSame(NavPoint a,NavPoint b)=>a.X.Equals(b.X)&&a.Z.Equals(b.Z);
-            private static bool BehaviorSame(TacticalBehavior a,Unit u)=>ReferenceEquals(a.Default,u.DefaultCombat)&&(a.Default==null||a.DefaultPhase==u.DefaultCombat.Phase&&PointSame(a.DefaultAnchor,u.DefaultCombat.Anchor)&&a.DefaultDeadline==u.DefaultCombat.Deadline&&a.DefaultEngaged==u.DefaultCombat.Engaged&&a.DefaultReturnRequested==u.DefaultCombat.ReturnRequested)&&ReferenceEquals(a.Order,u.CurrentOrder)&&a.WreckWaiting==u.WreckWaiting&&a.Target==u.Target&&a.Explicit==u.ExplicitTarget&&a.AttackMove==u.HasAttackMove&&PointSame(a.Anchor,u.AttackMove)&&a.Repath==u.Repath&&a.Stopped==u.StoppedSeconds&&a.Reload==u.Reload&&a.BurstRemaining==u.BurstRemaining&&a.BurstTarget==u.BurstTarget&&a.BurstSequence==u.BurstSequence&&a.BurstSize==u.BurstSize&&a.BurstSpread==u.BurstSpread&&a.BurstDelay==u.BurstDelay;
+            private static bool BehaviorSame(TacticalBehavior a,Unit u)=>ReferenceEquals(a.Default,u.DefaultCombat)&&(a.Default==null||a.DefaultPhase==u.DefaultCombat.Phase&&PointSame(a.DefaultAnchor,u.DefaultCombat.Anchor)&&PointSame(a.DefaultWithdrawalGoal,u.DefaultCombat.WithdrawalGoal)&&a.DefaultDeadline==u.DefaultCombat.Deadline&&a.DefaultEngaged==u.DefaultCombat.Engaged&&a.DefaultMovementRequested==u.DefaultCombat.MovementRequested)&&ReferenceEquals(a.Order,u.CurrentOrder)&&a.WreckWaiting==u.WreckWaiting&&a.Target==u.Target&&a.Explicit==u.ExplicitTarget&&a.AttackMove==u.HasAttackMove&&PointSame(a.Anchor,u.AttackMove)&&a.Repath==u.Repath&&a.Stopped==u.StoppedSeconds&&a.Reload==u.Reload&&a.BurstRemaining==u.BurstRemaining&&a.BurstTarget==u.BurstTarget&&a.BurstSequence==u.BurstSequence&&a.BurstSize==u.BurstSize&&a.BurstSpread==u.BurstSpread&&a.BurstDelay==u.BurstDelay;
             private static bool IssuanceSame(QueueIssuance a,QueueIssuance b)=>ReferenceEquals(a,b)||a!=null&&b!=null&&a.Id==b.Id&&a.Revision==b.Revision&&a.Tick==b.Tick&&a.GroupId==b.GroupId&&ReferenceEquals(a.Command,b.Command);
             private static bool LocationSame(NavLocation? a,NavLocation? b)=>a.HasValue==b.HasValue&&(!a.HasValue||PointSame(a.Value.Position,b.Value.Position)&&a.Value.SurfaceId==b.Value.SurfaceId&&ReferenceEquals(a.Value.NameReference.Owner,b.Value.NameReference.Owner)&&a.Value.NameReference.Role==b.Value.NameReference.Role&&a.Value.NameReference.Index==b.Value.NameReference.Index);
             private static bool FailureSame(TerminalRouteFailure a,TerminalRouteFailure b)=>ReferenceEquals(a,b)||a!=null&&b!=null&&a.Request==b.Request&&a.Order==b.Order&&a.GroupId==b.GroupId&&a.Revision==b.Revision&&a.Incarnation==b.Incarnation&&a.Tick==b.Tick&&LocationSame(a.Location,b.Location)&&a.Outcome==b.Outcome;

@@ -40,13 +40,18 @@ namespace Spacewars.Runtime
         internal PlayableAuthorityTick(PlayableDomain domain,AiAuthorityScheduler scheduler,int seed,OfflineMatchConfiguration configuration=null,bool asynchronousRoutes=false)
         {this.domain=domain;this.scheduler=scheduler;this.seed=seed;domain.BindMatchSeed(seed);savedConfiguration=configuration;SetRouteDeliveryPolicy(asynchronousRoutes);}
         private void SetRouteDeliveryPolicy(bool asynchronous)
-        {domain.ConfigureCombatExecutionOwners(()=>scheduler.Owners);asynchronousRoutes=asynchronous;domain.NonblockingNavigationPreparation=asynchronous;domain.Navigation.SuspendPendingMovement=asynchronous||tickQuanta;domain.Navigation.TickQuantaEnabled=tickQuanta;}
+        {
+            domain.ConfigureCombatExecutionOwners(()=>scheduler.Owners);
+            domain.ConfigureAiProductionRepeat((owner,producer,kind)=>scheduler.AiProductionRepeat(domain,owner,producer,kind));
+            if(scheduler.Owners.Any(owner=>AiProfile.UsesExpertPolicy(owner.Difficulty)))domain.ConfigureAiIncome(scheduler.IncomeMultiplier);
+            asynchronousRoutes=asynchronous;domain.NonblockingNavigationPreparation=asynchronous;domain.Navigation.SuspendPendingMovement=asynchronous||tickQuanta;domain.Navigation.TickQuantaEnabled=tickQuanta;
+        }
         public PlayableAuthorityTick(OfflineMatchConfiguration configuration,long generation,AiProfile aiProfile=null,AiDifficulty difficulty=AiDifficulty.Fighter,bool asynchronousRoutes=false)
         {
             if(configuration==null)throw new ArgumentNullException(nameof(configuration));
             domain=new PlayableDomain(configuration.Profile,generation,configuration);seed=configuration.Seed;domain.BindMatchSeed(seed);savedConfiguration=configuration;
             scheduler=new AiAuthorityScheduler(configuration.Roster.Where(p=>p.Control==OfflineControl.Ai).Select(p=>
-                new PlayableAiOwnerLoop(configuration.Profile,PlayableAiOpeningComposition.Initialize(seed,p.Id,aiProfile:aiProfile??AiProfile.Initial),generation,null,aiProfile??AiProfile.Initial,difficulty)));
+                new PlayableAiOwnerLoop(configuration.Profile,PlayableAiOpeningComposition.Initialize(seed,p.Id,aiProfile:aiProfile??AiProfile.Initial,difficulty:difficulty),generation,null,aiProfile??AiProfile.Initial,difficulty)));
             SetRouteDeliveryPolicy(asynchronousRoutes);
             Latest=domain.PlayerSnapshot(0,RuntimeStatus.Starting,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,seed);
         }
@@ -61,6 +66,18 @@ namespace Spacewars.Runtime
             try{
             var detachedScheduler=new AiAuthorityScheduler(scheduler.Owners.Select(o=>o.CreateStartupWarmup()));
             detached=new PlayableAuthorityTick(detachedDomain,detachedScheduler,seed,savedConfiguration,asynchronousRoutes:true);
+            // Human-only worlds have no opening policy to exercise a first Move.
+            // Use a public reachable objective on this detached world as well.
+            if(detachedScheduler.Owners.Count==0){
+                var human=savedConfiguration.Roster.FirstOrDefault(p=>p.Control==OfflineControl.Human);
+                if(human!=null){
+                    var view=detachedDomain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,seed,detachedDomain.OwnerFor(human.Id));
+                    var actor=view.Entities.FirstOrDefault(e=>e.Owner==view.Owner&&e.Kind==PlayableEntityKind.Explorer);
+                    var goal=actor==null?null:view.PublicScoutObjectives.Where(o=>o.Reachable&&o.SiteId!=view.HomeSiteId)
+                        .OrderBy(o=>Math.Pow(o.Approach.X-actor.Position.X,2)+Math.Pow(o.Approach.Z-actor.Position.Z,2)).FirstOrDefault();
+                    if(goal!=null)detached.Apply(new PlayableCommand(Generation,1,human.Id,PlayableCommandKind.Move,new[]{actor.Id},goal.Approach));
+                }
+            }
             // The first review only schedules opening actions. Warm their first
             // delivery as well; otherwise first-use motion/publication code runs
             // on the live clock when the explorers receive their initial order.
@@ -111,7 +128,7 @@ namespace Spacewars.Runtime
                 ()=>new PlayableRuntimeMetrics(0,0,0,0,0,domain.Navigation.PendingCount),out var snapshot))return false;
             Latest=snapshot;return true;
         }
-        internal bool TryAdvance(bool paused,long publication,Func<string,long> human,Func<PlayableRuntimeMetrics> metrics,out PlayableSnapshot snapshot,bool publishWaiting=true)
+        internal bool TryAdvance(bool paused,long publication,Func<string,long> human,Func<PlayableRuntimeMetrics> metrics,out PlayableSnapshot snapshot,bool publishWaiting=true,bool deferRows=false,PlayableDomain.ProjectionScope projection=null)
         {
             using var measured=PerformanceProfile.Measure(ProfileStage.Authority);
             long begin=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0,delivered=begin,stepped=begin;
@@ -121,9 +138,9 @@ namespace Spacewars.Runtime
             if(!paused)
             {
                 bool maintenanceReady=true;
-                if(asynchronousRoutes){scheduler.Deliver(domain,human,false);domain.Navigation.PrepareDeliveryBarrier();}
+                if(asynchronousRoutes){if(!domain.ProvingOpeningPending)scheduler.Deliver(domain,human,false);domain.Navigation.PrepareDeliveryBarrier();}
                 else{
-                    if(barrierPhase==RouteBarrierPhase.Idle){scheduler.Deliver(domain,human,false);barrierPhase=RouteBarrierPhase.MaintenancePending;}
+                    if(barrierPhase==RouteBarrierPhase.Idle){if(!domain.ProvingOpeningPending)scheduler.Deliver(domain,human,false);barrierPhase=RouteBarrierPhase.MaintenancePending;}
                     maintenanceReady=barrierPhase!=RouteBarrierPhase.MaintenancePending||domain.Navigation.PrepareDeliveryBarrier(this);
                 }
                 delivered=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
@@ -134,17 +151,26 @@ namespace Spacewars.Runtime
                 {
                     // Applied commands and terminal receipts are observable while routing;
                     // publishing does not step or review the scheduler again.
-                    if(publishWaiting)Latest=snapshot=domain.PlayerSnapshot(publication,RuntimeStatus.Running,false,metrics(),null,seed);
+                    if(publishWaiting)Latest=snapshot=domain.PrimaryFrameSnapshot(publication,RuntimeStatus.Running,false,metrics(),null,seed,deferRows:deferRows,projection:projection);
                     return false;
                 }
                 domain.Navigation.OriginalDiagnosticBarrier(domain.Tick+1);
-                domain.StepWithAiRepairAccounting(1d/30d,scheduler.Owners.Select(o=>o.Budget));barrierPhase=RouteBarrierPhase.Idle;
+                // The fixed boundary also admits direct terminal receipts before
+                // composed motion. Waiting for motion to consume a legacy prefix
+                // leaves that prefix pending even after its quantum completed.
+                if(!asynchronousRoutes)using(domain.Navigation.RoutePort.AcquireResultPreparation(null))domain.Navigation.ApplyResults();
+                barrierPhase=RouteBarrierPhase.Idle;
+                if(domain.AdvanceProvingOpening())
+                {
+                    domain.StepWithAiRepairAccounting(1d/30d,scheduler.Owners.Select(o=>o.Budget));
+                    scheduler.ShareRelays(domain);
+                }
                 stepped=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
             }
             if(paused){domain.Navigation.RoutePort.CancelResultPreparation();scheduler.Deliver(domain,human,true);}
-            using(PerformanceProfile.Measure(ProfileStage.PlayerView))snapshot=domain.PlayerSnapshot(publication,paused?RuntimeStatus.Paused:RuntimeStatus.Running,paused,metrics(),null,seed);
+            using(PerformanceProfile.Measure(ProfileStage.PlayerView))snapshot=domain.PrimaryFrameSnapshot(publication,paused?RuntimeStatus.Paused:RuntimeStatus.Running,paused,metrics(),null,seed,deferRows:deferRows,projection:projection);
             long projected=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
-            scheduler.Review(domain,publication,snapshot.Status,paused,snapshot.Metrics,seed,human);
+            if(!domain.ProvingOpeningPending)scheduler.Review(domain,publication,snapshot.Status,paused,snapshot.Metrics,seed,human);
             if(performanceTrace){
                 long end=System.Diagnostics.Stopwatch.GetTimestamp();double scale=1000d/System.Diagnostics.Stopwatch.Frequency;
                 if((end-begin)*scale>=20)Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,

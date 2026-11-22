@@ -80,15 +80,18 @@ namespace Spacewars.Simulation
         internal sealed partial class OwnedBuffers : INavPhysicalBody
         {
             internal override bool IsImmutableCaptureRoot=>Facade!=null;
-            public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.Geometry);
+            public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.Geometry,value:Facade?.ownedSpatial!=null?NavPhysicalValueKind.GeometryQueriesV1:NavPhysicalValueKind.None);
             public void WritePhysicalBody(NavPhysicalBodyWriter writer)
-            {if(Facade==null)throw new ArgumentException("Missing physical geometry facade.");writer.Output.Write(Facade.HalfExtent);writer.Output.Write(Facade.Revision);writer.Edge(Obstacles);}
-            internal static OwnedBuffers ReadPhysicalBody(NavPhysicalBodyReader reader)
+            {if(Facade==null||StorageBytes!=NavStorageLayout.Charge(192+Facade.SpatialIndexRetainedBytes))throw new ArgumentException("Missing physical geometry facade or layout.");writer.Output.Write(Facade.HalfExtent);writer.Output.Write(Facade.Revision);writer.Edge(Obstacles);}
+            internal static OwnedBuffers ReadPhysicalBody(NavPhysicalBodyReader reader,bool queries=false)
             {
                 double extent=NavPhysicalGeometryValue.Number(reader);int revision=reader.Input.ReadInt32();
                 if(extent<=0||revision<1)throw new ArgumentException("Invalid physical geometry identity.");var obstacles=reader.Edge<NavRetainedArray<NavObstacle>>();if(obstacles==null)throw new ArgumentException("Missing physical obstacle array.");
+                if(queries&&(obstacles.Count<8||obstacles.Count>4096))throw new ArgumentException("Invalid indexed obstacle count.");
+                using(var scratch=queries?NavStorageScratch.Reserve(reader.Reservation,2048):null)
                 using(var allocation=new NavStorageAllocation(reader.Reservation.TryReserve)){
-                    allocation.Reserve(192);var result=allocation.Register(new OwnedBuffers());result.RequireEdge(obstacles);obstacles.Retain();result.Obstacles=obstacles;result.Facade=new NavGeometry(result,extent,revision);return result;
+                    long extra=queries?NavQueryGrid.Measure(extent,obstacles.Count,i=>{var o=obstacles[i];return new NavQueryBox(new NavPoint(o.MinX,o.MinZ),new NavPoint(o.MaxX,o.MaxZ));}):0;
+                    allocation.Reserve(192+extra);var result=allocation.Register(new OwnedBuffers(192+extra));result.RequireEdge(obstacles);obstacles.Retain();result.Obstacles=obstacles;result.Facade=new NavGeometry(result,extent,revision);if(queries)result.Facade.InitializeOwnedSpatial();return result;
                 }
             }
         }

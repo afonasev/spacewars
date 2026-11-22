@@ -12,12 +12,13 @@ Shader "Spacewars/BasaltCrownSurface"
   _RoadSlabs("Slab length width joint contrast",Vector)=(2.75,2,.03,.3)
   _RoadFinish("Flush edging dust feather grain",Vector)=(.25,.35,.4,.18)
   _Geology("Strata spacing contrast",Vector)=(.4,.2,0,0)
-  _SiteFinish("Site links and feather",Vector)=(2,.4,0,0)
-  _SiteTint("Site paving tint",Vector)=(.27,.25,.23,1)
+  _SiteFeather("Site paving feather",Float)=.4
   _MineFinish("Apron radius feather",Vector)=(4.75,.85,0,0)
   _MineTint("Mine apron stone",Vector)=(.23,.21,.19,1)
   [PerRendererData] _DetailKind("Combined geometry kind",Float)=0
   [PerRendererData] _RoadSurface("Road-bearing terrain only",Float)=1
+  [PerRendererData] _CitadelSurface("Cliff, ramp, crest height",Vector)=(0,0,0,0)
+  _RelayPlaza("Relay plaza centre and radius",Vector)=(0,0,0,0)
   _NormalSlope("Finite normal slope",Float)=.075
   _ReceiverBias("Shadow receiver offset",Float)=.025
  }
@@ -39,13 +40,14 @@ Shader "Spacewars/BasaltCrownSurface"
  TEXTURE2D(_SandTex);TEXTURE2D(_SandTexB);TEXTURE2D(_SandTexC);SAMPLER(sampler_SandTex);
  CBUFFER_START(UnityPerMaterial)
  float4 _FogBounds,_FogColor,_DetailSettings,_DarkVariantGain,_StoneVariantGain,_SandVariantGain;
+ float4 _CitadelSurface,_RelayPlaza;
  float4 _RoleTints[7];float _NormalSlope,_ReceiverBias,_RoadSurface;
- float4 _RoadLayout,_RoadSlabs,_RoadFinish,_Geology,_MineFinish,_MineTint,_SiteFinish,_SiteTint;float _DetailKind;
+ float4 _RoadLayout,_RoadSlabs,_RoadFinish,_Geology,_MineFinish,_MineTint;float _DetailKind,_SiteFeather;
  float4 _MineCenters[4],_SitePads[32],_SiteHubs[32];int _SitePadCount;
  CBUFFER_END
- struct A {float4 positionOS:POSITION;float3 normalOS:NORMAL;};
- struct V {float4 positionCS:SV_POSITION;float3 p:TEXCOORD0;float3 n:TEXCOORD1;};
- V vert(A a){V v;v.p=TransformObjectToWorld(a.positionOS.xyz);v.positionCS=TransformWorldToHClip(v.p);v.n=TransformObjectToWorldNormal(a.normalOS);return v;}
+ struct A {float4 positionOS:POSITION;float3 normalOS:NORMAL;float4 rockPaint:COLOR;};
+ struct V {float4 positionCS:SV_POSITION;float3 p:TEXCOORD0;float3 n:TEXCOORD1;float3 rockPaint:TEXCOORD2;};
+ V vert(A a){V v;v.p=TransformObjectToWorld(a.positionOS.xyz);v.positionCS=TransformWorldToHClip(v.p);v.n=TransformObjectToWorldNormal(a.normalOS);v.rockPaint=a.rockPaint.rgb;return v;}
  float hash(float2 p){return frac(sin(dot(p,float2(127.1,311.7)))*43758.5453);}
  float noise(float2 p){float2 c=floor(p),f=frac(p);f=f*f*(3-2*f);return lerp(lerp(hash(c),hash(c+float2(1,0)),f.x),lerp(hash(c+float2(0,1)),hash(c+1),f.x),f.y);}
  float3 variants(float2 w){float2 p=w/_DetailSettings.y;p+=float2(noise(p*.73+19),noise(p*.81+43))-.5;
@@ -61,32 +63,48 @@ Shader "Spacewars/BasaltCrownSurface"
    float inner=max(q.x+_RoadLayout.w,q.y+_RoadLayout.w);
    float ring=max(outer,-inner);
    float central=max(abs(p.x)-_RoadLayout.x,abs(p.y)-_RoadLayout.z);
+   central=min(central,length(p-_RelayPlaza.xy)-_RelayPlaza.z);
    return float2(min(ring,central),central<ring?0:step(q.y,q.x));
  }
  float lineAA(float distance,float width,float aa){return saturate((width-distance)/aa+.5)-saturate((-width-distance)/aa+.5);}
+ float siteDistance(float2 p){
+   float distance=1000;
+   [loop] for(int i=0;i<_SitePadCount;i++){
+     float2 edge=abs(p-_SitePads[i].xy)-_SiteHubs[i].zw;
+     distance=min(distance,max(max(edge.x,edge.y),(edge.x+edge.y+_SitePads[i].z)*.70710678));
+   }
+   return distance;
+ }
  float3 dressedRoad(float3 natural,float3 stone,float3 sand,float3 p,float upward){
    float2 field=roadField(p.xz);float aa=max(fwidth(field.x),.008);
-   float coverage=(1-smoothstep(-_RoadFinish.z,_RoadFinish.z,field.x))*upward*_RoadSurface;
-   // Swap slab axes on north/south lanes. Courses continue across ramp/flat joins.
-   float2 course=lerp(p.xz,p.zx,field.y);
+   float site=siteDistance(p.xz);
+   float roadCoverage=1-smoothstep(-_RoadFinish.z,_RoadFinish.z,field.x);
+   float siteCoverage=1-smoothstep(-_SiteFeather,0,site);
+   float coverage=max(roadCoverage,siteCoverage)*upward*_RoadSurface;
+   float siteJoints=1-smoothstep(-_SiteFeather-_RoadSlabs.z,-_RoadSlabs.z,site);
+   // All apron slabs run east-west. Soften the joints only at the perpendicular entrance.
+   float entranceBlend=field.y*roadCoverage*(1-smoothstep(0,_SiteFeather,abs(site)));
+   float jointWeight=(site<0?max(roadCoverage,siteJoints):1)*(1-entranceBlend);
+   float2 course=lerp(p.xz,p.zx,site<0?0:field.y);
    float row=floor(course.y/_RoadSlabs.y);
    float2 cell=float2(course.x/_RoadSlabs.x+frac(row*.5),course.y/_RoadSlabs.y);
    float2 inCell=frac(cell),metres=min(inCell,1-inCell)*_RoadSlabs.xy;
    float seam=lineAA(min(metres.x,metres.y),_RoadSlabs.z,max(fwidth(course.x),fwidth(course.y)));
-   float slabTone=lerp(.93,1.07,hash(floor(cell)));
-   float3 paving=_RoleTints[2].rgb*lerp(1,stone,_RoadFinish.w)*slabTone;
-   seam*=lerp(.35,1,noise(p.xz*1.7+5));
+   float slabTone=lerp(lerp(.93,1.07,hash(floor(cell))),1,entranceBlend);
+   float3 roadTint=lerp(_RoleTints[2].rgb,_RoleTints[5].rgb,_CitadelSurface.y);
+   float3 paving=roadTint*lerp(1,stone,_RoadFinish.w)*slabTone;
+   seam*=lerp(.35,1,noise(p.xz*1.7+5))*jointWeight;
    paving*=1-seam*_RoadSlabs.w;
    // Sparse hairline cracks, weathered rather than a second regular tile selector.
    float crack=abs(inCell.x-(.35+.18*noise(float2(row,inCell.y*5))));
    float crackMask=lineAA(crack*_RoadSlabs.x,_RoadSlabs.z*.32,max(fwidth(course.x),.008))*step(.78,hash(floor(cell)+73));
-   paving*=1-crackMask*_RoadSlabs.w*.5;
+   paving*=1-crackMask*_RoadSlabs.w*.5*jointWeight;
    float edge=1-smoothstep(_RoadFinish.x,_RoadFinish.x+aa,abs(field.x+_RoadFinish.x));
    float groove=lineAA(abs(field.x+_RoadFinish.x*2.2),_RoadSlabs.z,aa);
    float edgeSegment=step(.14,frac(course.x/(_RoadSlabs.x*.5)));
-   paving=lerp(paving,_RoleTints[2].rgb*lerp(1,sand,.25)*1.12,edge*edgeSegment*.8);
-   paving*=1-groove*_RoadSlabs.w*.6;
-   float dust=_RoadFinish.y*saturate(noise(p.xz*.45+17)*.6+.45+field.x*.3);
+   paving=lerp(paving,_RoleTints[2].rgb*lerp(1,sand,.25)*1.12,edge*edgeSegment*.8*(1-siteCoverage));
+   paving*=1-groove*_RoadSlabs.w*.6*(1-siteCoverage);
+   float dust=_RoadFinish.y*saturate(noise(p.xz*.45+17)*.6+.45+(site<0?min(field.x,site):field.x)*.3);
    paving=lerp(paving,_RoleTints[3].rgb*lerp(1,sand,.45),dust);
    return lerp(natural,paving,coverage);
  }
@@ -103,29 +121,13 @@ Shader "Spacewars/BasaltCrownSurface"
    apron*=1-rim*.28;
    return lerp(natural,apron,mask);
  }
- float3 siteApron(float3 natural,float3 stone,float3 p,float upward){
-   float d=1000;
-   [loop] for(int i=0;i<_SitePadCount;i++){
-     float2 q=abs(p.xz-_SitePads[i].xy);
-     float pad=max(max(q.x,q.y),(q.x+q.y)*.70710678)-_SitePads[i].z;
-     float2 a=p.xz-_SiteHubs[i].xy,b=_SitePads[i].xy-_SiteHubs[i].xy;
-     float t=saturate(dot(a,b)/max(dot(b,b),.0001));
-     d=min(d,min(pad,length(a-t*b)-_SiteFinish.x*.5));
-   }
-   float mask=(1-smoothstep(-_SiteFinish.y,0,d))*upward*_RoadSurface;
-   float2 cell=p.xz/_RoadSlabs.xy;float2 joints=min(frac(cell),1-frac(cell))*_RoadSlabs.xy;
-   float seam=lineAA(min(joints.x,joints.y),_RoadSlabs.z,max(fwidth(p.x),fwidth(p.z)));
-   float rim=lineAA(abs(d+_SiteFinish.y*2),_RoadSlabs.z,max(fwidth(d),.01));
-   float3 paving=_SiteTint.rgb*lerp(1,stone,_RoadFinish.w);
-   paving*=1-max(seam,rim)*_RoadSlabs.w;
-   return lerp(natural,paving,mask);
- }
  half4 frag(V v):SV_Target {
  float2 mapUV=v.p.xz/(2*_FogBounds.xy)+.5;float4 a=SAMPLE_TEXTURE2D(_PaintA,sampler_PaintA,mapUV),b=SAMPLE_TEXTURE2D(_PaintB,sampler_PaintB,mapUV);
- float total=max(dot(a,1)+b.x+b.y+b.z,.001);a/=total;b/=total;
+ float total=max(dot(a,1)+b.x+b.y+b.z,.001);a/=total;b.rgb/=total;
  float2 uv=detailUV(v.p);float3 weights=variants(v.p.xz),dark=1,stone=1,sand=1;
  // Mostly one sibling pattern is visible; blending occurs only at region edges.
- if(a.x+b.x>.001)dark=FAMILY(Dark,sampler_DarkTex,uv,weights);
+ bool borderRock=_DetailKind>3.5;
+ if(a.x+b.x>.001||(borderRock&&v.rockPaint.r>.5))dark=FAMILY(Dark,sampler_DarkTex,uv,weights);
  stone=FAMILY(Stone,sampler_StoneTex,uv,weights);
  sand=FAMILY(Sand,sampler_SandTex,uv,weights);
  dark=lerp(1,clamp(dark,.2,2.5),_DetailSettings.w);stone=lerp(1,clamp(stone,.2,2.5),_DetailSettings.w);sand=lerp(1,clamp(sand,.2,2.5),_DetailSettings.w);
@@ -133,11 +135,25 @@ Shader "Spacewars/BasaltCrownSurface"
  float3 n=normalize(v.n);
  albedo=mineApron(albedo,stone,sand,v.p,smoothstep(.7,.9,n.y));
  albedo=dressedRoad(albedo,stone,sand,v.p,smoothstep(.7,.9,n.y));
- albedo=siteApron(albedo,stone,v.p,smoothstep(.7,.9,n.y));
- if(_DetailKind>.5){
+ if(borderRock){
+   albedo=v.rockPaint.r*_RoleTints[0].rgb*dark
+     +stone*(v.rockPaint.g*_RoleTints[1].rgb+v.rockPaint.b*_RoleTints[5].rgb);
+ }
+ else if(_DetailKind>.5){
    if(_DetailKind<1.5)albedo=_RoleTints[2].rgb*lerp(1,stone,.35);
    else if(_DetailKind<2.5)albedo=_RoleTints[1].rgb*lerp(1,stone,.7);
    else albedo=lerp(_RoleTints[5].rgb,_RoleTints[2].rgb,.3)*lerp(1,sand,.5);
+ }
+ // The deck keeps its painted cap. Exposed faces read as rock, with a broken lip along the crest.
+ if((_CitadelSurface.x+_CitadelSurface.y)>.5&&n.y<.5){
+   float weather=noise(v.p.xz/_Geology.x);
+   float crest=1-smoothstep(0,_Geology.x*(.5+weather),_CitadelSurface.z-v.p.y);
+   float3 rock=lerp(_RoleTints[1].rgb,_RoleTints[5].rgb,weather)*stone;
+   albedo=lerp(rock,_RoleTints[2].rgb*stone,crest*_CitadelSurface.x);
+ }
+ if(_CitadelSurface.x>.5&&n.y>.5){
+   float fractured=b.a*lerp(.65,1,noise(v.p.xz/_Geology.x));
+   albedo=lerp(albedo,_RoleTints[2].rgb*stone,fractured);
  }
  // Horizontal strata wrap cliff corners continuously in world space.
  float layer=v.p.y/_Geology.x+noise(v.p.xz*.35)*.35;

@@ -278,9 +278,30 @@ public sealed class ProvingGroundContractTests
             Assert.AreEqual(155,v.Entities.Single().MaxHealth,1e-6);
             Assert.AreEqual(0,a.View("enemy-1").OwnerResearch.Count);
             setup.SetResearch(0,PlayableResearchKind.ImprovedDefensiveSystems,false);Assert.False(setup.Research(0).Contains(PlayableResearchKind.AdvancedDefensiveSystems));Assert.AreEqual(3,config.ProvingGround.Research(0).Count,"Running recipe is a snapshot");
-            var map=(ProvingGroundMap)setup.Profile.AuthoredMap;Assert.Greater(map.AttackDestination(PlayableOwner.Player).X,map.Headquarters(PlayableOwner.Enemy).X);Assert.Less(map.AttackDestination(PlayableOwner.Enemy).X,map.Headquarters(PlayableOwner.Player).X);
+            var map=(ProvingGroundMap)setup.Profile.AuthoredMap;Assert.AreEqual(map.Headquarters(PlayableOwner.Enemy),map.AttackDestination(PlayableOwner.Player));Assert.AreEqual(map.Headquarters(PlayableOwner.Player),map.AttackDestination(PlayableOwner.Enemy));
         }finally{Destroy(a);}
         var reset=new OfflineParticipantAuthority(config,83);try{Assert.AreEqual(0,reset.Tick);Assert.AreEqual(0,reset.View("player-1").Credits);Assert.AreEqual(3,reset.View("player-1").OwnerResearch.Count);Assert.AreEqual(new NavPoint(-10,0),reset.View("player-1").Entities.Single().Position);}finally{Destroy(reset);}
+    }
+    [Test] public void ResetRestoresAHawkAboveAGroundUnit()
+    {
+        var setup=new ProvingGroundSetup(PlayableProfile.Default);
+        var point=new NavPoint(-10,0);
+        var authority=new OfflineParticipantAuthority(setup.Configuration(),110);
+        try{
+            Assert.IsNull(ResearchChainCall(authority,"PlaceProvingUnit",0,PlayableEntityKind.Explorer,point));
+            Assert.IsNull(ResearchChainCall(authority,"PlaceProvingUnit",0,PlayableEntityKind.Hawk,point));
+            var captured=(ProvingGroundSetup)ResearchChainCall(authority,"CaptureProvingSetup");
+            var restored=new OfflineParticipantAuthority(captured.Configuration(),111);
+            try{
+                var units=restored.View("player-1").Entities;
+                Assert.AreEqual(point,units.Single(u=>u.Kind==PlayableEntityKind.Explorer).Position);
+                Assert.AreEqual(point,units.Single(u=>u.Kind==PlayableEntityKind.Hawk).Position);
+            }finally{Destroy(restored);}
+
+            captured.Units.Add(new OfflineScenarioUnit(1,PlayableEntityKind.Explorer,point));
+            Assert.Throws<ArgumentException>(()=>captured.Configuration(),
+                "Units in the same collision layer still require clearance");
+        }finally{Destroy(authority);}
     }
     [Test] public void BothSideFreeInstantUpgradesRemainInFrozenResetRecipe()
     {
@@ -319,21 +340,75 @@ public sealed class ProvingGroundContractTests
             }
         }finally{Destroy(a);}
     }
-    [Test] public void RearAttackLaneKeepsRearObjectiveAndClearGroundApproach()
+    [TestCase(0,PlayableEntityKind.Tank)] [TestCase(1,PlayableEntityKind.Tank)]
+    [TestCase(0,PlayableEntityKind.Explorer)] [TestCase(1,PlayableEntityKind.Explorer)]
+    [TestCase(0,PlayableEntityKind.Shkval)] [TestCase(1,PlayableEntityKind.Shkval)]
+    public void HeadquartersGoalUsesFreeSharedApproachSlots(int side,PlayableEntityKind kind)
     {
         var setup=new ProvingGroundSetup(PlayableProfile.Default);var map=(ProvingGroundMap)setup.Profile.AuthoredMap;
-        var authority=new OfflineParticipantAuthority(setup.Configuration(),88);
-        try{for(int side=0;side<2;side++){
-            var owner=(PlayableOwner)side;var goal=map.AttackDestination(owner,setup.Profile);var enemy=map.Headquarters((PlayableOwner)(1-side));
-            Assert.Greater(Math.Abs(goal.X),Math.Abs(enemy.X),"Objective remains behind opposing headquarters");
-            for(int i=0;i<3;i++){
-                var start=new NavPoint(side==0?-12:12,-9+6*i);var radius=PlayableUnitRules.Radius(setup.Profile,(PlayableEntityKind)i);
-                Assert.False(authority.NavigationBinding.Geometry.SegmentFree(start,map.AttackDestination(owner,PlayableProfile.Create(LegacyRearLane())),radius),"Old collinear goal intersects HQ footprint");
-                Assert.True(authority.NavigationBinding.Geometry.SegmentFree(start,goal,radius),"Rear lane has a clear direct approach for ground kind "+i);
-            }
-        }}finally{Destroy(authority);}
+        Assert.IsNull(setup.PlaceUnit(side,kind,new NavPoint(side==0?-12:12,0)));
+        var config=setup.Configuration();var authority=new OfflineParticipantAuthority(config,88);OfflineParticipantAuthority restored=null;
+        try
+        {
+            string player=side==0?"player-1":"enemy-1";var owner=(PlayableOwner)side;
+            var goal=map.Headquarters((PlayableOwner)(1-side));var radius=PlayableUnitRules.Radius(setup.Profile,kind);
+            Assert.AreEqual(goal,map.AttackDestination(owner,setup.Profile));
+            var legacy=PlayableProfile.Default.CopyData();legacy.provingGroundAttackRearLaneOffset=0;
+            Assert.AreEqual(goal,map.AttackDestination(owner,PlayableProfile.Create(legacy)),"Historical serialized lane offsets no longer move the goal");
+            Assert.False(authority.NavigationBinding.Geometry.IsFree(goal,radius),"HQ center is solid; navigation must choose an approach");
+            int id=authority.View(player).Entities.Single().Id;
+            var exact=new PlayableCommand(88,1,player,PlayableCommandKind.AttackMove,new[]{id},goal,origin:PlayableOrderOrigin.Ai,source:"exact-combat-test",jobId:1,actionId:1);
+            Assert.AreEqual(PlayableCommandStatus.InvalidTarget,(PlayableCommandStatus)ResearchChainCall(authority,"ApplyLocalCombatMove",exact,null),"Exact combat motion keeps its existing blocked-endpoint contract");
+            Assert.Zero(authority.Navigation.Requests.Count);
+            Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(88,2,player,PlayableCommandKind.AttackMove,new[]{id},goal)).Status);
+            var order=authority.View(player).Entities.Single().Queue.Pending;
+            Assert.NotNull(order,"Accepted opening waits for its ordinary route");
+            Assert.AreEqual(PlayableCommandKind.AttackMove,order.Kind);Assert.AreEqual(goal,order.Anchor.Value.Position);
+            restored=OfflineParticipantAuthority.Restore(authority.CaptureBytes(),config);
+            Assert.AreEqual(goal,restored.View(player).Entities.Single().Queue.Pending.Anchor.Value.Position,"Current save format retains the logical HQ objective");
+            Assert.True(authority.Navigation.Requests.TryDequeue(out var request));
+            Assert.True(authority.NavigationBinding.Geometry.IsFree(request.Goal,radius));
+            Assert.AreNotEqual(goal,request.Goal,"Physical approach stays outside the HQ footprint");
+        }
+        finally{if(restored!=null)Destroy(restored);Destroy(authority);}
     }
-    private static PlayableProfileData LegacyRearLane(){var data=PlayableProfile.Default.CopyData();data.provingGroundAttackRearLaneOffset=0;return data;}
+    [Test] public void RetiredRearOffsetIsHiddenAndPreservedInProfiles()
+    {
+        var field=PlayableProfileMetadata.Fields.Single(f=>f.FieldName=="provingGroundAttackRearLaneOffset");
+        Assert.False(NativeBalanceFields.Editable(field));Assert.False(NativeBalanceFields.LabEditable(field));
+        var data=PlayableProfile.Default.CopyData();double original=data.provingGroundAttackRearLaneOffset;
+        Assert.AreEqual(original,PlayableProfile.Create(data).CopyData().provingGroundAttackRearLaneOffset,"Historical authored values remain intact");
+    }
+    [Test] public void StartAssignsHeadquartersAttackMoveToBothMixedArmies()
+    {
+        var setup=new ProvingGroundSetup(PlayableProfile.Default);var kinds=new[]{PlayableEntityKind.Tank,PlayableEntityKind.Explorer,PlayableEntityKind.Shkval,PlayableEntityKind.Hawk};
+        for(int side=0;side<2;side++)for(int i=0;i<kinds.Length;i++)Assert.IsNull(setup.PlaceUnit(side,kinds[i],new NavPoint(side==0?-12:12,-9+6*i)));
+        var authority=new OfflineParticipantAuthority(setup.Configuration(),110);
+        try
+        {
+            ResearchChainCall(authority,"StartProvingGroundBattle");
+            for(int side=0;side<2;side++)
+            {
+                var owner=(PlayableOwner)side;var view=authority.View(side==0?"player-1":"enemy-1");
+                var goal=((ProvingGroundMap)setup.Profile.AuthoredMap).Headquarters((PlayableOwner)(1-side));
+                foreach(var unit in view.Entities.Where(e=>e.Owner==owner))
+                {
+                    if(unit.Kind==PlayableEntityKind.Hawk)
+                    {
+                        Assert.NotNull(unit.CurrentOrder);Assert.AreEqual(PlayableTacticalOrderKind.AttackMove,unit.CurrentOrder.Kind);
+                        Assert.AreEqual(goal,unit.CurrentOrder.Destination);
+                    }
+                    else
+                    {
+                        Assert.NotNull(unit.Queue.Pending);Assert.AreEqual(PlayableCommandKind.AttackMove,unit.Queue.Pending.Kind);
+                        Assert.AreEqual(goal,unit.Queue.Pending.Anchor.Value.Position,"Start preserves the ordinary group objective for "+unit.Kind);
+                        Assert.True(authority.Navigation.IsPending(unit.Id));
+                    }
+                }
+            }
+        }
+        finally{Destroy(authority);}
+    }
     [UnityTest] public IEnumerator LaboratoryLaunchRetainsUnsavedDraftWithoutWritingVersion()
     {
         var folder=Path.Combine(Application.temporaryCachePath,"proving-lab-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);

@@ -162,11 +162,13 @@ namespace Spacewars.Tests.EditMode
 
         [Test] public void ConversionAcceptedReplacementRestoresExactPendingAndPaidSuffix()
         {
-            var c=Config(true);var a=new PlayableAuthorityTick(c,71);
+            // Keep a ready producer so a competing rebuild of the sold science center is legal.
+            var c=PartialConfig();var a=new PlayableAuthorityTick(c,71);
             using(var host=new UnityHostRouteService())
             {
                 for(int i=0;i<500&&!Ledger(a).Capture().Unpaid.Any(e=>e.Action.Kind==PlayableCommandKind.BuildAt&&e.Purpose=="infrastructure");i++)Step(a,host);
                 var payment=Ledger(a).Capture().Unpaid.Single(e=>e.Action.Kind==PlayableCommandKind.BuildAt&&e.Purpose=="infrastructure");
+                Assert.AreEqual(PlayableBuildingKind.Refinery,payment.Action.BuildingKind);
                 Assert.True(Planner(a).Capture().SaleSettled);Assert.False(Ledger(a).Capture().Reserved.Any(e=>e.Purpose=="infrastructure-conversion"));
                 var o=PlayableAiObservation.From(View(a,c));var state=Planner(a).Capture();
                 var sourceRebuild=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:state.SiteId,slotId:state.SlotId,parentId:state.ParentId,buildingKind:state.SourceKind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
@@ -178,7 +180,7 @@ namespace Spacewars.Tests.EditMode
                 var bytes=a.CaptureBytes();var b=PlayableAuthorityTick.RestoreBytes(bytes,c);CollectionAssert.AreEqual(bytes,b.CaptureBytes());
                 for(int i=0;i<120;i++){Step(a,host);Step(b,host);CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());}
                 Assert.True(Checkpoint(a).Records.Any(r=>r.ReceiptIdentity.Id==payment.Receipt.Id&&r.Status==PlayableAiDeliveryStatus.Applied));
-                Assert.AreEqual(c.Profile.FactoryCreditCost,Ledger(a).Capture().Paid.Single(e=>e.Receipt.Id==payment.Receipt.Id).Amount);
+                Assert.AreEqual(c.Profile.RefineryCreditCost,Ledger(a).Capture().Paid.Single(e=>e.Receipt.Id==payment.Receipt.Id).Amount);
                 TestContext.WriteLine("conversion pending receipt="+payment.Receipt.Id+" amount="+payment.Amount+" slot="+payment.Action.SlotId+" actual suffix paid="+Ledger(a).PaidTotal);
             }
         }
@@ -187,12 +189,24 @@ namespace Spacewars.Tests.EditMode
             var c=Config(true);var a=new PlayableAuthorityTick(c,71);
             using(var host=new UnityHostRouteService())
             {
-                for(int i=0;i<200&&!Planner(a).Capture().SaleSettled;i++)Step(a,host);
-                var original=Planner(a).Capture();Assert.True(original.SaleSettled);double bank=View(a,c).ExactCredits;
+                bool Demolished()
+                {
+                    var state=Planner(a).Capture();
+                    return state.SaleSettled&&!View(a,c).Buildings.Any(b=>b.Id==state.VictimId);
+                }
+                for(int i=0;i<200&&!Demolished();i++)Step(a,host);
+                Assert.True(Demolished(),"Apply the profile after the original sale settles and frees its slot.");
+                var original=Planner(a).Capture();
+                var before=Ledger(a).Capture().Reserved.Single(e=>e.Purpose=="infrastructure-conversion");
+                Assert.AreEqual(c.Profile.FactoryCreditCost,before.Amount);
+                double bank=View(a,c).ExactCredits;
                 var data=c.Profile.CopyData();data.revision++;data.factoryCreditCost+=10;var p=PlayableProfile.Create(data);
                 var aiData=AiProfile.Initial.CopyData();aiData.revision++;aiData.fields.Single(f=>f.path=="economy.reservationExpirySeconds").value=10;var ai=new AiProfile(aiData);
                 Assert.Null(a.ApplyProfile(p,ai));Assert.AreEqual(bank,View(a,c).ExactCredits);
                 Assert.AreEqual(original.CreatedTick+300,Planner(a).Capture().ExpiresTick);
+                var repriced=Ledger(a).Capture().Reserved.Single(e=>e.Id==before.Id);
+                Assert.AreEqual(before.CreatedTick,repriced.CreatedTick);
+                Assert.AreEqual(p.Revision,repriced.Action.ProfileRevision);
                 var rebound=new OfflineMatchConfiguration(p,c.SourceIdentity,c.MapIdentity,c.RouteProvenance,c.Seed,c.Roster.ToArray(),c.Starts.ToArray(),c.Sites.ToArray(),c.Obstacles.ToArray(),new double[,]{{0,100},{100,0}},scenarioBuildings:c.ScenarioBuildings.ToArray());
                 var bytes=a.CaptureBytes();var b=PlayableAuthorityTick.RestoreBytes(bytes,rebound,ai);CollectionAssert.AreEqual(bytes,b.CaptureBytes());
                 for(int i=0;i<120;i++){Step(a,host);Step(b,host);CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());}
@@ -224,7 +238,13 @@ namespace Spacewars.Tests.EditMode
                     var kind=conversion?PlayableCommandKind.SellBuilding:PlayableCommandKind.StartBuildingRepair;
                     for(int i=0;i<700&&!Checkpoint(a).Records.Any(r=>r.Kind==kind&&r.Status==PlayableAiDeliveryStatus.Applied);i++)Step(a,host);
                     var receipt=Checkpoint(a).Records.First(r=>r.Kind==kind&&r.Status==PlayableAiDeliveryStatus.Applied);
-                    Assert.AreEqual(AiProfile.SecondsToTicks(AiProfile.Initial.DifficultyValue(difficulty,"reactionSeconds"),30),receipt.ApplicationTick-long.Parse(receipt.ObservationIdentity.Split(':')[5]));
+                    var scheduled=Checkpoint(a).Records.Single(r=>r.ReceiptIdentity?.Id==receipt.ReceiptIdentity.Id&&r.Status==PlayableAiDeliveryStatus.Scheduled);
+                    long observedTick=long.Parse(scheduled.ObservationIdentity.Split(':')[^2]);
+                    long minimum=AiProfile.SecondsToTicks(AiProfile.Initial.DifficultyValue(difficulty,"reactionSeconds"),30);
+                    long maximum=AiProfile.SecondsToTicks(AiProfile.Initial.DifficultyValue(difficulty,"control.reactionMaxSeconds"),30);
+                    Assert.That(scheduled.DueTick-observedTick,Is.InRange(minimum,maximum));
+                    Assert.AreEqual(scheduled.DueTick,receipt.DueTick);
+                    Assert.GreaterOrEqual(receipt.ApplicationTick,scheduled.DueTick);
                     Assert.AreEqual(difficulty,Checkpoint(a).Difficulty);TestContext.WriteLine("difficulty="+difficulty+" kind="+kind+" tick="+receipt.ApplicationTick+" due="+receipt.DueTick);
                 }
             }
@@ -274,6 +294,45 @@ namespace Spacewars.Tests.EditMode
             }
         }
 
+        [Test]
+        public void PendingFactoryConversionAcceptsItsSeparateStartupReserve()
+        {
+            var configuration=PartialConfig();
+            var profile=configuration.Profile;
+            var authority=new PlayableAuthorityTick(configuration,71);
+            var planner=Planner(authority);
+            var budget=Ledger(authority);
+            var observation=PlayableAiObservation.From(View(authority,configuration));
+            var original=observation.Buildings.First(b=>b.Kind==PlayableBuildingKind.ScientificCenter);
+            var home=observation.Sites.Single(s=>s.Site.Id==original.SiteId);
+            var sale=new PlayableAiAction(1,observation.OwnerId,observation.ProfileId,observation.ProfileRevision,71,
+                observation.SnapshotSequence,PlayableCommandKind.SellBuilding,new[]{original.Id},siteId:original.SiteId,
+                slotId:original.SlotId,buildingKind:PlayableBuildingKind.Factory,parentId:home.CenterId,seed:observation.Seed,
+                sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            var acceptedSale=planner.Admit(observation,sale,budget);
+            planner.ObserveReceipt(new PlayableAiTraceRecord(observation.Identity,acceptedSale.ActionId,0,1,0,
+                PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"paid",ownerId:observation.OwnerId,
+                sourceIdentity:sale.SourceIdentity,receiptIdentity:new AiReceiptIdentity(71,observation.OwnerId,1,1),
+                policy:"infrastructure",kind:PlayableCommandKind.SellBuilding));
+            var build=planner.Admit(observation,new PlayableAiAction(1,observation.OwnerId,observation.ProfileId,
+                observation.ProfileRevision,71,observation.SnapshotSequence,PlayableCommandKind.BuildAt,
+                siteId:original.SiteId,slotId:original.SlotId,buildingKind:PlayableBuildingKind.Factory,
+                parentId:home.CenterId,unitKind:PlayableEntityKind.Tank,seed:observation.Seed,sourceIdentity:sale.SourceIdentity),budget);
+            string slot=$"slot:{original.SiteId}:{original.SlotId}";
+            string terms=$"{profile.ProfileId}@{profile.Revision}";
+            int startup=profile.TankCreditCost;
+            var receipt=new AiReceiptIdentity(71,observation.OwnerId,2,1);
+            var intent=new AiIntent("replacement","infrastructure",build,90,profile.FactoryCreditCost,0,new[]{slot},
+                startupFund:startup,reservationId:$"infrastructure-conversion:{original.SiteId}:{original.SlotId}");
+            budget.ObserveBank(profile.FactoryCreditCost+startup+1000);
+            Assert.True(budget.Accept(new AiBudgetEntry(intent.Id,intent.Policy,build,intent.Credits,1,0,90,
+                "replacement payment",intent.Claims,terms,receipt)));
+            Assert.Throws<ArgumentException>(()=>planner.ValidateFunding(budget,new[]{intent},profile,0));
+            Assert.True(budget.Reserve(new AiBudgetEntry($"factory-startup:{original.SiteId}:{original.SlotId}","factory-startup",
+                build,startup,1,0,90,"initial production cycle",Array.Empty<string>(),terms)));
+            Assert.DoesNotThrow(()=>planner.ValidateFunding(budget,new[]{intent},profile,0));
+        }
+
         private static OfflineMatchConfiguration PartialConfig()
         {
             var c=Config(true);var p=c.Profile;var home=new TerritorySite(1,PlayableBuildingKind.Headquarters,c.Starts[0].Position,p);
@@ -308,7 +367,9 @@ namespace Spacewars.Tests.EditMode
                         var production=new AiEconomyPlanner().Plan(PlayableAiObservation.From(v),c.Profile).Candidates.FirstOrDefault(x=>x.Legal&&x.Policy=="production");
                         if(production!=null)
                         {
-                            competitor=true;var proposed=(AiIntent)Call(Owner(a),"Proposal","production",production.Action,PlayableAiObservation.From(v),0);
+                            competitor=true;
+                            var proposed=(AiIntent)Call(Owner(a),"Proposal","production",production.Action,PlayableAiObservation.From(v),0,false,false);
+                            Assert.NotNull(proposed,"Individually legal production reaches budget arbitration.");
                             var arbiter=new AiDecisionArbiter(AiProfile.Initial);Assert.IsEmpty(arbiter.Select(new[]{proposed},v.Tick,v.Credits,Math.Max(0,v.Population.Capacity-v.Population.Living-v.Population.Reserved),1,ledger));Assert.AreEqual("ledger budget unavailable",arbiter.Rejections[proposed.Id]);
                         }
                         if(last!=fund.Amount){TestContext.WriteLine("partial conversion tick="+a.Tick+" bank="+v.ExactCredits+" actual refund="+refund+" held="+fund.Amount+" quote="+c.Profile.RefineryCreditCost+" income="+v.SettledIncome+" available="+ledger.Available);last=fund.Amount;}

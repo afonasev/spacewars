@@ -162,6 +162,14 @@ namespace Spacewars.Runtime
                 o.Sites.Where(s=>(excludedSites==null||!excludedSites.Contains(s.Site.Id))&&(justExpired==null||!justExpired.Same(Finger(s)))&&
                     TerritoryRules.Cost(p,s.Site.Kind)>0&&Witness(o,p,ai,s,expansion,caller)&&(!m.Expired.TryGetValue(s.Site.Id,out var expired)||!expired.Same(Finger(s)))),
                 AiIncomeSiteSelection.DrawRemote(o,ai,m.NextSelectionOrdinal));
+        internal bool HasOutpostProspect(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDecisionArbiter a,AiExpansionPlanner expansion)
+        {
+            if(o.Sites.Any(s=>s.Site.Kind==PlayableBuildingKind.Outpost&&s.Owner==o.Owner&&s.Ready&&!s.Contested&&s.Site.Slots.Count>0))return true;
+            var memo=Load(a);
+            return o.Sites.Any(s=>s.Site.Kind==PlayableBuildingKind.Outpost&&s.Site.Slots.Count>0&&
+                (memo==null||!memo.Expired.TryGetValue(s.Site.Id,out var expired)||!expired.Same(Finger(s)))&&
+                Witness(o,p,ai,s,expansion,"OutpostProspect"));
+        }
         internal int LocalSite(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDecisionArbiter a,AiExpansionPlanner expansion)
         {
             var m=Load(a);
@@ -203,6 +211,18 @@ namespace Spacewars.Runtime
         internal int PriorityCost(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDecisionArbiter a,AiExpansionPlanner expansion,AiBudgetEntry previous,bool allowed)
         {
             var m=Load(a);if(m==null||!FirstIncomePriorityActive(a)||!allowed||expansion.Capture().SiteId!=0)return 0;
+            return CurrentGrowthCost(o,p,ai,m,expansion,previous);
+        }
+        // First-income history remains sticky. A later safe capture that is
+        // already affordable may still protect its actual quote from new
+        // discretionary research/position savings; this starts no empty clock.
+        internal int FundedGrowthCost(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDecisionArbiter a,AiExpansionPlanner expansion,AiBudgetEntry previous,bool allowed,long available)
+        {
+            var m=Load(a);if(m==null||!allowed||expansion.Capture().SiteId!=0||available<=0)return 0;
+            int cost=CurrentGrowthCost(o,p,ai,m,expansion,previous);return cost<=available?cost:0;
+        }
+        private static int CurrentGrowthCost(PlayableAiObservation o,PlayableProfile p,AiProfile ai,Memo m,AiExpansionPlanner expansion,AiBudgetEntry previous)
+        {
             TerritorySiteSnapshot site=null;
             if(m.Active!=null&&previous!=null&&previous.Action.SiteId==m.Active.Site&&o.Tick<previous.ExpiresTick)
             {
@@ -366,7 +386,7 @@ namespace Spacewars.Runtime
                     }
                 }
             }
-            if(m.Active==null&&allowed&&!bootstrapActive)
+            if(m.Active==null&&allowed&&!bootstrapActive&&b.Available>protectedFunds)
             {
                 var best=BestCurrent(o,p,ai,expansion,m,"Observe.Best");
                 if(best!=null){RecordSelection(m,o,ai);m.Active=Finger(best);targetChanged=true;}

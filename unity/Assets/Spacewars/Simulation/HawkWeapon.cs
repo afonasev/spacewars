@@ -106,15 +106,15 @@ namespace Spacewars.Simulation
             if(Math.Abs(Length(direction)-1)>1e-9)throw new ArgumentException("Saved rocket direction must be normalized.");
             result.Direction=direction;return result;
         }
-        public void Advance(double dt, BallisticPoint? target, BallisticPoint targetVelocity = default)
+        public void Advance(double dt, BallisticPoint? target, BallisticPoint targetVelocity = default,bool turnOnlyWhileReceding = true)
         {
             if (!Finite(dt) || dt < 0 || (target.HasValue && !Finite(target.Value)) || !Finite(targetVelocity)) throw new ArgumentException("Invalid rocket step");
             dt = Math.Min(dt, RemainingLife);
-            if (target.HasValue)
+            if (turn > 0 && target.HasValue)
             {
                 var delta = Sub(target.Value, Position);
                 // Positive radial target motion means it is moving away; missile closing speed is irrelevant.
-                if (Length(delta) > 1e-12 && Dot(targetVelocity, delta) > 0)
+                if (Length(delta) > 1e-12 && (!turnOnlyWhileReceding || Dot(targetVelocity, delta) > 0))
                 {
                     var desired = Normal(delta);
                     double dot = Math.Max(-1, Math.Min(1, Dot(Direction, desired)));

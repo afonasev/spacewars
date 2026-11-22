@@ -111,12 +111,36 @@ namespace Spacewars.Runtime
         private bool commandMoveRefused;
         private NavigationCommandSlots<TKey,TValue> CopyCommandMap<TKey,TValue>(IDictionary<TKey,TValue> map,int added,NavigationRetentionBudget.Scope scope,long operation,Func<TValue,NavOwnedStorage> owner=null,int exactCapacity=-1)
         {
-            int layoutLength;using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new NavigationCommandRefused("Map source operation changed.");layoutLength=NavigationCommandLayout.Length(map);}
-            using(NavStorageScratch.Reserve(scope.OwnedReservation(),checked(128L+2*(32L+4L*layoutLength)))){
-                using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new NavigationCommandRefused("Map source operation changed.");}
-                int capacity=exactCapacity<0?Math.Max(4,checked(NavigationCommandLayout.Capture(map)[0]+added)):exactCapacity;
+            var storage=map as NavigationCommandSlots<TKey,TValue>;
+            int layoutLength,revision;
+            using(EnterTransport()){
+                if(operation!=authorityOperationIdentity)throw new NavigationCommandRefused("Map source operation changed.");
+                layoutLength=NavigationCommandLayout.Length(map);revision=storage?.Revision??0;storage?.Retain();
+            }
+            try{
+              using(NavStorageScratch.Reserve(scope.OwnedReservation(),checked(128L+2*(32L+4L*layoutLength)))){
+                int capacity;
+                using(EnterTransport()){
+                    ValidateSource();
+                    capacity=exactCapacity<0?Math.Max(4,checked(NavigationCommandLayout.Capture(map)[0]+added)):exactCapacity;
+                }
                 var result=NavigationCommandSlots<TKey,TValue>.CreateOwned(capacity,scope.OwnedReservation());
-                try{using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new NavigationCommandRefused("Map source operation changed.");}result.CopyLayoutFrom(map,owner);return result;}catch{result.ReleaseStorage();throw;}
+                try {
+                    using(EnterTransport()){
+                        ValidateSource();
+                        if(storage!=null&&owner==null)result.CopyPreparedFrom(storage);
+                        else result.CopyLayoutFrom(map,owner);
+                    }
+                    return result;
+                }catch{result.ReleaseStorage();throw;}
+              }
+            }
+            finally{storage?.Release();}
+            void ValidateSource()
+            {
+                if(operation!=authorityOperationIdentity||(storage?.Revision??0)!=revision||
+                    NavigationCommandLayout.Length(map)!=layoutLength)
+                    throw new NavigationCommandRefused("Map source operation or layout changed.");
             }
         }
         private static NavigationLiveGroup CopyCommandGroup(GroupOrderState record,NavigationRetentionBudget.Scope scope,bool collectFormation=false)
@@ -184,7 +208,7 @@ namespace Spacewars.Runtime
                 // tick, AI step or route credit has been replayed or advanced.
             }
         }
-        private bool? TryPreparedOrdinaryMoveGroup(int[] ids,NavPoint[] goals,bool legacySingle=false,MovementReadSet sourceInputs=null)
+        private bool? TryPreparedOrdinaryMoveGroup(int[] ids,NavPoint[] goals,bool legacySingle=false,MovementReadSet sourceInputs=null,bool fixedEndpoint=false)
         {
             NavigationRetentionBudget budget;NavigationHostRoot observedHost;NavigationAuthorityOwners observedAuthority;
             IDictionary<long,GroupOrderState> oldGroups;IDictionary<int,long> oldMembers,oldOrders;
@@ -237,7 +261,7 @@ namespace Spacewars.Runtime
                         var retiredRows=nextLedger.Where(row=>row.Value.State==NavArrivalReservationKind.PendingRequest&&Array.IndexOf(ids,(int)row.Value.Entity)>=0).Select(row=>row.Key).ToArray();
                         foreach(long key in retiredRows)nextLedger.Remove(key);
                     }
-                    long groupId=legacySingle&&oldMembers.TryGetValue(ids[0],out var existingGroup)?existingGroup:context?.GroupId??checked(oldGroupSequence+1);bool arrival=!UsesRecastGroundRoutes&&!legacySingle&&context!=null&&(context.Kind==PlayableCommandKind.Move||context.Kind==PlayableCommandKind.AttackMove);
+                    long groupId=legacySingle&&oldMembers.TryGetValue(ids[0],out var existingGroup)?existingGroup:context?.GroupId??checked(oldGroupSequence+1);bool arrival=!UsesRecastGroundRoutes&&!legacySingle&&!fixedEndpoint&&context!=null&&(context.Kind==PlayableCommandKind.Move||context.Kind==PlayableCommandKind.AttackMove);
                     long oldMemberCount=0;foreach(var row in oldGroups)oldMemberCount=checked(oldMemberCount+row.Value.Members.Length);
                     long projectionScratch=checked(1024L+NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+32L+ids.Length*(NavStorageLayout.ObjectBytesBound(typeof(GroupMemberState))+128L)+(oldMemberCount+ids.Length)*64L+(oldGroups.Count+1)*256L+(oldPending.Count+probes.Count+ids.Length)*64L);
                     using(NavStorageScratch.Reserve(scope.OwnedReservation(),projectionScratch)){
@@ -270,9 +294,7 @@ namespace Spacewars.Runtime
                             foreach(var member in next.Members){member.ProgressVersion=next.MarchVersion==2?2:0;if(next.MarchVersion==2)member.Progress=member.ProgressOffset=Math.Max(0,remaining.MarchAnchor);}
                             next.Members=remaining.Members.Concat(next.Members).OrderBy(m=>m.Entity).ToArray();next.MembershipRevision=remaining.MembershipRevision+1;
                         }else {int slot=0;foreach(var member in SpatialSlotOrder(next.Members,next.OriginalGoal))member.Slot=slot++;}
-                        bool compatible=UsesRecastGroundRoutes&&marchConfigured&&!legacySingle&&ids.Length>=2;
-                        if(compatible){Crowd.TryGet(ids[0],out var first);foreach(int id in ids){Crowd.TryGet(id,out var a);if(a.Radius!=first.Radius||a.MobilityRevision!=first.MobilityRevision)compatible=false;}}
-                        var live=CopyCommandGroup(next,scope,compatible);liveBirths.Add(live);next=live.PreparedRecord(scope);nextGroups.SetPreparing(groupId,next,live);
+                        var live=CopyCommandGroup(next,scope);liveBirths.Add(live);next=live.PreparedRecord(scope);nextGroups.SetPreparing(groupId,next,live);
                         foreach(int id in ids)nextMembers.SetPreparing(id,groupId);
                         candidate=NavigationGroupCommand.CreateOwned(Requests.InstanceCapacity,ids.Length,scope.OwnedReservation());
                         candidate.Groups=nextGroups;candidate.MemberGroups=nextMembers;candidate.Orders=nextOrders;candidate.Pending=nextPending;candidate.Allocating=nextAllocating;candidate.Reservations=nextReservations;candidate.Goals=nextGoals;candidate.Identities=nextIdentities;candidate.Failures=nextFailures;candidate.Ledger=nextLedger;candidate.OwnMaps();
@@ -875,7 +897,7 @@ namespace Spacewars.Runtime
             else if(!c.Arrival){for(int i=0;i<c.Issued.Length;i++){var request=c.Issued[i];Attempt(()=>payload.NotifyExternalRequest(RouteRequested,request));}}
             if(failure!=null)System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         }
-        internal bool StageTacticalMove(int[] ids,NavPoint[] goals,MovementReadSet inputs,bool single=false)=>TryPreparedOrdinaryMoveGroup(ids,goals,single,inputs)??false;
+        internal bool StageTacticalMove(int[] ids,NavPoint[] goals,MovementReadSet inputs,bool single=false,bool fixedEndpoint=false)=>TryPreparedOrdinaryMoveGroup(ids,goals,single,inputs,fixedEndpoint)??false;
         internal void StageTacticalMetadata(int[] ids,MovementReadSet inputs)=>FinishOwnedMetadataGroup(ids,out _,true,inputs);
         internal NavigationGroupCommand PreparedTacticalCandidate=>preparedCommandGroup;
         internal Action AfterTacticalPublishForQa,BeforeTacticalResolveForQa,AfterTacticalCleanupForQa;

@@ -46,11 +46,32 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void PendingReplacementCannotReceiveOldArrivalOrStaleAnswer()
         {
-            int id=Spawn(-12,-12);Send(id,new NavPoint(-10,-12));var old=Drain();nav.Answers.TryEnqueue(new NavigationAnswer(old[0],new[]{old[0].Goal}));nav.ApplyResults();
-            Send(id,new NavPoint(-12,-10));var replacement=Drain();Step(200);Assert.Null(Receipt(id));Assert.True(nav.IsPending(id));
-            nav.Answers.TryEnqueue(new NavigationAnswer(old[0],new[]{old[0].Goal}));nav.ApplyResults();Assert.Null(Receipt(id));
-            // Valid late answer is attached from the actor's actual position by the navigation contract.
-            nav.Answers.TryEnqueue(new NavigationAnswer(replacement[0],new[]{replacement[0].Goal}));Arrive(id);Assert.AreEqual(2,Receipt(id).Order.Sequence);
+            int id = Spawn(-12, -12);
+            Assert.AreEqual(PlayableCommandStatus.Applied, Send(id, new NavPoint(-10, -12)));
+            var old = Drain().Single();
+            // A delayed worker owns the request until it hands the answer back.
+            // Keep that ownership across retirement of the authority's first answer.
+            var workerRequest = old.StorageOwner;
+            workerRequest?.Retain();
+            try
+            {
+                Assert.True(nav.Answers.TryEnqueue(new NavigationAnswer(old, new[] { old.Goal })));
+                nav.ApplyResults();
+                Assert.AreEqual(PlayableCommandStatus.Applied, Send(id, new NavPoint(-12, -10)));
+                var replacement = Drain().Single();
+                Step(200);
+                Assert.Null(Receipt(id));
+                Assert.True(nav.IsPending(id));
+
+                Assert.True(nav.Answers.TryEnqueue(new NavigationAnswer(old, new[] { old.Goal })));
+                nav.ApplyResults();
+                Assert.Null(Receipt(id));
+                // The current answer attaches from the actor's actual position.
+                Assert.True(nav.Answers.TryEnqueue(new NavigationAnswer(replacement, new[] { replacement.Goal })));
+                Arrive(id);
+                Assert.AreEqual(2, Receipt(id).Order.Sequence);
+            }
+            finally { workerRequest?.Release(); }
         }
         [TestCase(PlayableCommandKind.Stop)][TestCase(PlayableCommandKind.Hold)][TestCase(PlayableCommandKind.Move)][TestCase(PlayableCommandKind.AttackMove)][TestCase(PlayableCommandKind.Attack)][TestCase(PlayableCommandKind.Follow)]
         public void AcceptedReplacementClearsOnlyRecipient(PlayableCommandKind kind)

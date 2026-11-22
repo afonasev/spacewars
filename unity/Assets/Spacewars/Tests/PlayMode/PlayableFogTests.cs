@@ -8,6 +8,38 @@ using UnityEngine;
 public sealed class PlayableFogTests
 {
     private static readonly KnownBuilding[] Empty=Array.Empty<KnownBuilding>();
+    [Test] public void SharedInputRasterPreservesIndependentFadesAndTeamSwitch()
+    {
+        var profile=PlayableProfile.Default;
+        var ally=new PlayableVision(1,32,16,4,profile.FogEdgeFeather);
+        var enemy=new PlayableVision(2,32,16,4,profile.FogEdgeFeather);
+        using(var source=new PlayableFogMask(profile))
+        using(var shared=new PlayableFogMask(profile))
+        using(var reference=new PlayableFogMask(profile))
+        {
+            for(int step=0;step<5;step++)
+            {
+                ally.Refresh(new[]{new VisionSource(new NavPoint(step*4-8,0),7)},Empty);
+                var view=ally.Snapshot();
+                source.Update(view,1);
+                shared.Update(view,.016f,source);
+                reference.Update(view,.016f);
+                CollectionAssert.AreEqual(reference.Texture.GetPixels32(),shared.Texture.GetPixels32());
+            }
+            Assert.AreEqual(5,shared.RasterReuses);
+            Assert.Zero(shared.TargetSourceSamples);
+            Assert.AreNotSame(source.Texture,shared.Texture);
+
+            enemy.Refresh(new[]{new VisionSource(new NavPoint(-20,8),3)},Empty);
+            var hostile=enemy.Snapshot();
+            shared.Update(hostile,.05f,source);
+            reference.Update(hostile,.05f);
+            Assert.AreEqual(5,shared.RasterReuses);
+            Assert.Greater(shared.TargetSourceSamples,0);
+            CollectionAssert.AreEqual(reference.Texture.GetPixels32(),shared.Texture.GetPixels32());
+        }
+    }
+
     [Test] public void MaskTransitionsAndStopsAllSettledRebuildsScansAndUploads()
     {
         var profile=PlayableProfile.Default;var vision=new PlayableVision(0,32,16,4,profile.FogEdgeFeather);
@@ -160,6 +192,55 @@ public sealed class PlayableFogTests
             Assert.Less(fog.TransitionPixels,32L*size*size/4,"Only unsettled pixels should fade.");
             Assert.Less(fog.TargetPixels,8L*size*size/2,"Unchanged input colors must be reused.");
             Assert.Less(map.PaintedPixels,32L*size*size/2,"Unchanged map colors must be reused.");
+        }
+    }
+    [Test]
+    public void FourSeatFogUnionKeepsExactPixelsWithSkippedUploadsAndResets()
+    {
+        var profile = PlayableProfile.ThreeCrossingsDefault;
+        var masks = Enumerable.Range(0, 4).Select(_ => new PlayableFogMask(profile)).ToArray();
+        var visions = Enumerable.Range(0, 4)
+            .Select(seat => new PlayableVision(seat, 64, 64, 4, profile.FogEdgeFeather)).ToArray();
+        using var incremental = new PlayableMapTerrain(profile);
+        using var full = new PlayableMapTerrain(profile);
+        var unionPaint = typeof(PlayableMapTerrain).GetField("unionPaint",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        try
+        {
+            for (int step = 0; step < 28; step++)
+            {
+                if (step == 8)
+                {
+                    masks[2].Dispose();
+                    masks[2] = new PlayableFogMask(profile);
+                }
+                if (step == 12)
+                {
+                    incremental.ShowPublicTerrain();
+                    full.ShowPublicTerrain();
+                }
+                if (step == 16) masks[3].Reset();
+                if (step == 24) masks[0].ShowPublic();
+                for (int seat = 0; seat < masks.Length; seat++)
+                {
+                    if (seat == 0 && step >= 24) continue;
+                    var point = new NavPoint(-32 + seat * 19 + step % 17 * .44, -8 + seat * 5);
+                    visions[seat].Refresh(new[] { new VisionSource(point, 8) }, Empty);
+                    var view = visions[seat].Snapshot();
+                    masks[seat].Update(view, .016f);
+                    if (step == 5) masks[seat].Update(view, .016f);
+                }
+                unionPaint.SetValue(full, false);
+                full.UpdateUnion(masks);
+                bool uploaded = incremental.UpdateUnion(masks);
+                if (step > 24) Assert.False(uploaded, "The public mask already contributes minimum opacity.");
+                CollectionAssert.AreEqual(full.Texture.GetPixels32(), incremental.Texture.GetPixels32(), $"Union step {step}");
+            }
+            Assert.AreEqual(full.Uploads, incremental.Uploads);
+        }
+        finally
+        {
+            foreach (var mask in masks) mask.Dispose();
         }
     }
     [TestCase(PlayableBuildingKind.Factory)] [TestCase(PlayableBuildingKind.Mine)] public void RememberedModelHasNoLiveFeedbackAndIsRemovedOnVisibleConfirmation(PlayableBuildingKind kind)

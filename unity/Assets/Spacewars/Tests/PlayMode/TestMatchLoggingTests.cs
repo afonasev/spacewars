@@ -78,11 +78,23 @@ public sealed class TestMatchLoggingTests
             runtime.RequestStop();while(!runtime.IsStopped&&Time.realtimeSinceStartupAsDouble<end)yield return null;Assert.True(runtime.IsStopped);
             yield return Drained(journal);
             var summary=JObject.Parse(File.ReadAllText(Path.Combine(journal.DirectoryPath,"summary.json")));Assert.AreEqual("complete",(string)summary["Status"]);Assert.Zero((long)summary["Dropped"]);
-            var receipts=Events(journal.DirectoryPath).Select(JObject.Parse).Where(x=>(string)x["Type"]=="ai-receipt").Select(x=>x["Record"].ToString(Newtonsoft.Json.Formatting.None)).ToArray();
+            var events=Events(journal.DirectoryPath).Select(JObject.Parse).ToArray();
+            var timings=events.Where(e=>(string)e["Type"]=="ai-decision-timing").ToArray();
+            Assert.True(timings.Any(e => (string)e["Status"] == "adopted" && (double)e["ComputeMilliseconds"] >= 0 &&
+                (double)e["QueueMilliseconds"] >= 0 && (double)e["ReadyToPollMilliseconds"] >= 0 &&
+                (double)e["AdoptionMilliseconds"] >= 0 && (double)e["WallMilliseconds"] >= 0));
+            foreach(var row in timings){
+                long tick=(long)row["Tick"],observed=(long)row["ObservationTick"];
+                Assert.AreEqual("player-1",(string)row["OwnerId"]);
+                Assert.AreEqual(observed+1,(long)row["DueTick"]);
+                Assert.AreEqual(tick-observed,(long)row["AgeTicks"]);
+                Assert.AreEqual(Math.Max(0,tick-observed-1),(long)row["LateTicks"]);
+            }
+            var receipts=events.Where(x=>(string)x["Type"]=="ai-receipt").Select(x=>x["Record"].ToString(Newtonsoft.Json.Formatting.None)).ToArray();
             Assert.IsNotEmpty(receipts,"ordinary detached AI must produce actual trace receipts");
             Assert.AreEqual(receipts.Distinct(StringComparer.Ordinal).Count(),receipts.Length,"New immutable owner copies must not replay already-recorded historical receipts.");
         }finally{
-            runtime.RequestStop();routes.Dispose();Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped&&domain.ObservedPathWorkerStopped,5000));runtime.Dispose();domain.DestroyOwnedNavigation();
+            runtime.RequestStop();routes.Dispose();Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped&&domain.ObservedPathWorkerStopped&&!domain.Navigation.HasCertifiedHost,5000));runtime.Dispose();domain.DestroyOwnedNavigation();
         }
     }
     [UnityTest] public IEnumerator RejectedIngressIsLoggedWithoutChangingPausedWorld()

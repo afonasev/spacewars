@@ -9,6 +9,9 @@ namespace Spacewars.Simulation
     public enum NavTypedLegKind { Surface, Portal }
     public sealed partial class NavTypedLeg : NavOwnedStorage
     {
+        // Motion sweeps usually emit one or a few legs. This is a physical page
+        // shape, not a leg limit: longer traces allocate further admitted pages.
+        internal const int TracePageSlots=16;
         // Includes two 40-byte locations with non-owning name selectors plus
         // scalar fields, owning edges and intrusive fields; capture adds 16.
         internal const long StorageCharge=208;
@@ -72,7 +75,35 @@ namespace Spacewars.Simulation
             if(subscription==null||legs==null)throw new ArgumentNullException();if(subscription.MetadataOwner!=null)NavMetadataOwnership.Require(subscription,reservation);
             if(legs is NavOwnedStorage root)NavStorageAdmission.RequireOwned(reservation,root);else foreach(var leg in legs)NavStorageAdmission.RequireOwned(reservation,leg);
             var copied=subscription.MetadataOwner==null?NavRouteSubscription.CopyOwned(subscription,reservation):null;
-            try{var route=new NavTypedRoute(copied??subscription,legs,cost,NavStorageLayout.Before(reservation.TryReserve,128),true);try{if(recastPlan!=null){recastPlan.Validate(route);route.RecastPlan=NavPhysicalMacro.Acquire(route,recastPlan);}return route;}catch{route.ReleaseStorage();throw;}}finally{copied?.MetadataOwner.Release();}
+            try{var route=new NavTypedRoute(copied??subscription,legs,cost,NavStorageLayout.Before(reservation.TryReserve,128),true);try{if(recastPlan!=null){recastPlan.Validate(route);route.BindRecastPlan(recastPlan);}return route;}catch{route.ReleaseStorage();throw;}}finally{copied?.MetadataOwner.Release();}
+        }
+        // Derived from immutable route/provider inputs on birth and restore. Zero
+        // denotes a route for which the ordinary partition traversal is required.
+#if UNITY_INCLUDE_TESTS
+        [ThreadStatic] internal static bool DisableClearSectionForTests;
+#endif
+        private int clearSupport;
+        internal void BindRecastPlan(NavRecastMemberPlan plan)
+        {
+            RecastPlan=NavPhysicalMacro.Acquire(this,plan);
+            if(Legs.Count>0 && Legs[0].RecastAuthorityProvider is PartitionNavigationProvider provider &&
+                provider.StorageRoot!=null && provider.StorageRoot.IsImmutableCaptureRoot)
+                clearSupport=1+provider.ClearSectionSupport(Subscription.Origin,Subscription.AssignedEndpoint,plan.Spine.Radius);
+        }
+        internal bool TrySection(PartitionNavigationProvider provider,NavLocation from,NavPoint target,out NavLocation reached)
+        {
+            reached=default;
+#if UNITY_INCLUDE_TESTS
+            if(DisableClearSectionForTests)return false;
+#endif
+            if(clearSupport==0 || from.SurfaceId!=Subscription.Origin.SurfaceId ||
+                !ReferenceEquals(provider,Legs[0].RecastAuthorityProvider))return false;
+            var a=Subscription.Origin.Position;var b=Subscription.AssignedEndpoint.Position;
+            double radius=RecastPlan.Spine.Radius;
+            bool Inside(double x,double y,double lo,double hi) =>
+                Math.Min(x,y)>=Math.Min(lo,hi)-radius && Math.Max(x,y)<=Math.Max(lo,hi)+radius;
+            if(!Inside(from.Position.X,target.X,a.X,b.X) || !Inside(from.Position.Z,target.Z,a.Z,b.Z))return false;
+            reached=provider.SectionLocation(clearSupport-1,target);return true;
         }
         private bool released;
         internal void ReleaseStorage(){if(released)return;released=true;Release();}

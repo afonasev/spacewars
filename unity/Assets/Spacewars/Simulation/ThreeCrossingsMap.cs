@@ -8,7 +8,7 @@ namespace Spacewars.Simulation
     public sealed partial class ThreeCrossingsProfileData
     {
         public string id="three-crossings-greybox-v1";
-        public int revision=6;
+        public int revision=8;
         public double halfExtent=64, riverHalfWidth=8, crossingZ=38, sideBridgeWidth=10, centralBridgeWidth=20, centralBridgeHalfSpan=12;
         public double startAnchorInset=10;
         public double baseCoordinate=46, mineX=22, mineZ=50, pocketX=40;
@@ -48,7 +48,7 @@ namespace Spacewars.Simulation
             new ThreeCrossingsField("mineX","Sites","Outer mine X","Lateral coordinate of start and flank mines.",16,36,1),
             new ThreeCrossingsField("mineZ","Sites","Outer mine Z","North/south coordinate of start and flank mines.",32,76,1),
             new ThreeCrossingsField("pocketX","Pockets","Pocket center X","Lateral pocket center and mine position.",28,64,1),
-            new ThreeCrossingsField("directFireHeight","Combat height","Direct fire height","Tank and Explorer launch and target height above local support.",.5,2,.05),
+            new ThreeCrossingsField("directFireHeight","Combat height","Direct fire height","Высота выстрела и точки прицеливания Вепря и Исследователя над поверхностью.",.5,2,.05),
             new ThreeCrossingsField("waterDepth","Height","Water depth","Visible water surface below the common support plane.",1,6,.25),
             new ThreeCrossingsField("deckThickness","Height","Deck thickness","Bridge structural thickness below its support plane.",.5,2,.25),
             new ThreeCrossingsField("railHeight","Bridge silhouette","Rail height","Presentation-only rail above support.",.4,1.2,.05),
@@ -73,6 +73,11 @@ namespace Spacewars.Simulation
         public string Id{get;} public int Revision{get;}
         public double SurfaceHeight(NavPoint p)=>SupportAt(p)?.HeightAt(p)??-WaterDepth;
         public NavPoint SurfaceGradient(NavPoint p)=>SupportAt(p)?.Gradient??default(NavPoint);
+        public (double Height, NavPoint Gradient) SamplePresentationSurface(NavPoint point)
+        {
+            var support = locations.Owner(point);
+            return support == null ? (-WaterDepth, default) : (support.HeightAt(point), support.Gradient);
+        }
         public double HalfExtent{get;} public double RiverHalfWidth{get;} public double CrossingZ{get;} public double SideBridgeWidth{get;} public double CentralBridgeWidth{get;} public double CentralBridgeHalfSpan{get;}
         public double StartAnchorInset{get;} public double BaseCoordinate{get;} public double MineX{get;} public double MineZ{get;} public double PocketX{get;}
         public double RailHeight{get;} public double RailThickness{get;} public double PostHeight{get;} public double PostWidth{get;}
@@ -106,14 +111,23 @@ namespace Spacewars.Simulation
             locations=new TerrainLocations(geometry,Supports,transitions);
 
         }
+        private TerritorySite CornerSite(int id,PlayableBuildingKind kind,NavPoint position,PlayableProfile profile)
+        {
+            // Preserve old slot bindings, including the southeast-only layout of revision 7.
+            bool alignOutpost=kind==PlayableBuildingKind.Outpost&&(Revision>=8||Revision==7&&id==4);
+            double phase=alignOutpost?-Math.PI/2:
+                position.X<0?0:Math.PI;
+            return new TerritorySite(id,kind,position,profile,phase);
+        }
+
         // Corner/site identities are geographic invariants; seed only changes occupancy.
         public TerritorySite[] ReservedSites(PlayableProfile p)=>MatchSites(p,new[]{1,2,3,4});
         public TerritorySite[] MatchSites(PlayableProfile p,IEnumerable<int> occupied)
         {
             var homes=new HashSet<int>(occupied);
-            return Sites(p).Select(s=>s.Id>4?s:new TerritorySite(s.Id,homes.Contains(s.Id)?PlayableBuildingKind.Headquarters:PlayableBuildingKind.Outpost,s.Position,p,s.Position.X<0?0:Math.PI)).ToArray();
+            return Sites(p).Select(s=>s.Id>4?s:CornerSite(s.Id,homes.Contains(s.Id)?PlayableBuildingKind.Headquarters:PlayableBuildingKind.Outpost,s.Position,p)).ToArray();
         }
-        public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster)
+        public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster,bool domination=false)
         {
             var corners=Sites(p).Take(4).ToArray();
             var starts=corners.Select(s=>new OfflineStart("crossings-corner-"+s.Id,s.Id,s.Position,
@@ -122,18 +136,25 @@ namespace Spacewars.Simulation
             starts=starts.Select((s,i)=>new OfflineStart(s.Id,s.SiteId,s.Position,s.ExplorerAnchor,s.Heading,
                 Array.IndexOf(assignment,i)<0?(int?)null:roster[Array.IndexOf(assignment,i)].LogicalPlayer)).ToArray();
             var sites=MatchSites(p,assignment.Select(i=>starts[i].SiteId));
-            return new OfflineMatchConfiguration(p,"native-crossings-lobby-v1",Id,"crossings-team-banks-v1",seed,roster,starts,sites,MovementBlockers.ToArray(),new double[4,4],terrain:Id);
+            return new OfflineMatchConfiguration(p,"native-crossings-lobby-v1",Id,"crossings-team-banks-v1",seed,roster,starts,sites,MovementBlockers.ToArray(),new double[4,4],terrain:Id,domination:domination);
         }
         public NavPoint Headquarters(PlayableOwner owner)=>new NavPoint(owner==PlayableOwner.Player?-BaseCoordinate:BaseCoordinate,owner==PlayableOwner.Player?-BaseCoordinate:BaseCoordinate);
         public static ThreeCrossingsMap Default=>new ThreeCrossingsMap(new ThreeCrossingsProfileData());
-        public MapSupport SupportAt(NavPoint point)=>Supports.FirstOrDefault(s=>s.Contains(point));
+        public MapSupport SupportAt(NavPoint point)
+        {
+            for(int i=0;i<Supports.Count;i++){
+                var support=Supports[i];
+                if(support.Contains(point))return support;
+            }
+            return null;
+        }
         public bool SupportsFootprint(NavPoint point,double radius)=>geometry.IsFree(point,radius);
         public bool SupportsSweep(NavPoint from,NavPoint to,double radius)=>geometry.SegmentFree(from,to,radius);
         public TerritorySite[] Sites(PlayableProfile p)=>new[]{
             new TerritorySite(1,PlayableBuildingKind.Headquarters,new NavPoint(-BaseCoordinate,-BaseCoordinate),p),
             new TerritorySite(2,PlayableBuildingKind.Headquarters,new NavPoint(BaseCoordinate,BaseCoordinate),p,Math.PI),
-            new TerritorySite(3,PlayableBuildingKind.Outpost,new NavPoint(-BaseCoordinate,BaseCoordinate),p),
-            new TerritorySite(4,PlayableBuildingKind.Outpost,new NavPoint(BaseCoordinate,-BaseCoordinate),p,Math.PI),
+            CornerSite(3,PlayableBuildingKind.Outpost,new NavPoint(-BaseCoordinate,BaseCoordinate),p),
+            CornerSite(4,PlayableBuildingKind.Outpost,new NavPoint(BaseCoordinate,-BaseCoordinate),p),
             new TerritorySite(5,PlayableBuildingKind.Mine,new NavPoint(-MineX,-MineZ),p),new TerritorySite(6,PlayableBuildingKind.Mine,new NavPoint(MineX,MineZ),p),
             new TerritorySite(7,PlayableBuildingKind.RelayTower,new NavPoint(-PocketX,0),p),new TerritorySite(8,PlayableBuildingKind.RelayTower,new NavPoint(PocketX,0),p),
             new TerritorySite(9,PlayableBuildingKind.Mine,new NavPoint(-MineX,MineZ),p),new TerritorySite(10,PlayableBuildingKind.Mine,new NavPoint(MineX,-MineZ),p)};

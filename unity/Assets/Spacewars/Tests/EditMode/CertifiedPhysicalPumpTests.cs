@@ -47,6 +47,57 @@ namespace Spacewars.Tests.EditMode
                 CollectionAssert.AreEqual(bytes,Bytes(session));Shared();
             }finally{kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);}
         }
+        [Test] public void StageOnlyPublicationRetainsSealedCatalogsAndMatchesColdFork()
+        {
+            var map=new FoundryMap(new FoundryProfileData());
+            var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);
+            var session=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation,terrain:map);
+            var kernel=new CertifiedRouteKernel();
+            NavigationSession cold=null;
+            CertifiedRouteKernel coldKernel=null;
+            void PumpTo(CertifiedRouteKernel k,NavigationSession s,CertifiedRouteKernel.PumpStage stage)
+            {
+                k.PauseAtPhysicalBoundary=()=>k.CapturePumpFrontier().Stage==stage;
+                try{k.Pump(Binding(s,geometry),4);}finally{k.PauseAtPhysicalBoundary=null;}
+            }
+            try{
+                PumpTo(kernel,session,CertifiedRouteKernel.PumpStage.Transfer);
+                Assert.NotNull(session.Probe(7,1,PlayableProfile.Default.Navigation,new NavPoint(-4,2),new NavPoint(4,2)));
+                Assert.True(kernel.TryRegisterPhysicalOrdinary(Binding(session,geometry)));
+                var prefix=Bytes(session);
+                var before=session.PinCommittedHostRoot();
+                NavigationHostRoot after=null;
+                try{
+                    Assert.AreEqual(1,before.Rows.Count);
+                    long physical=session.PhysicalHostBudget.PhysicalBytes;
+                    PumpTo(kernel,session,CertifiedRouteKernel.PumpStage.Solve);
+                    after=session.PinCommittedHostRoot();
+                    Assert.AreEqual(CertifiedRouteKernel.PumpStage.Solve,after.Frontier.Stage);
+                    Assert.AreEqual(CertifiedRouteKernel.PumpStage.Transfer,before.Frontier.Stage);
+                    Assert.AreSame(before.Scheduler,after.Scheduler);
+                    Assert.AreSame(before.Rows,after.Rows);
+                    Assert.AreSame(before.Providers,after.Providers);
+                    Assert.AreSame(before.Scan,after.Scan);
+                    Assert.AreEqual(physical+after.StorageBytes,session.PhysicalHostBudget.PhysicalBytes);
+                }finally{after?.Release();before.Release();}
+                var expected=Bytes(session);
+                cold=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation,terrain:map);
+                using(var state=WorldWire.Unpack(prefix,WorldWire.ReadNavigationSessionState))cold.RestoreState(state);
+                coldKernel=new CertifiedRouteKernel();
+                // Fault-observable scopes keep the original allocation sequence.
+                cold.PhysicalHostBudget.AllocationAdmission=_=>true;
+                try{PumpTo(coldKernel,cold,CertifiedRouteKernel.PumpStage.Solve);}
+                finally{cold.PhysicalHostBudget.AllocationAdmission=null;}
+                CollectionAssert.AreEqual(expected,Bytes(cold));
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(cold),cold.PhysicalHostBudget.PhysicalBytes);
+            }finally{
+                coldKernel?.Clear();
+                if(cold!=null){cold.ReleaseCommittedHostRoot();cold.DestroyNavigationAuthority();Assert.Zero(cold.PhysicalHostBudget.PhysicalBytes);}
+                kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();
+                Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);
+            }
+        }
         [Test] public void TentativeInstallationProtectionReleasesOnDiscardWithoutHistory()
         {
             var budget=new NavigationRetentionBudget();Assert.True(budget.TryProtectLive(1000));

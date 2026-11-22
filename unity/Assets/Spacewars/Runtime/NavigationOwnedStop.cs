@@ -54,7 +54,13 @@ namespace Spacewars.Runtime
             foreach(int id in ids)Stop(id,hold);return true;
         }
         internal bool StageTacticalStop(int[] ids,bool hold,MovementReadSet inputs)=>TryOwnedStopGroup(ids,hold,false,inputs)??false;
-        private bool? TryOwnedStopGroup(int[] ids,bool hold,bool remove=false,MovementReadSet sourceInputs=null)
+        internal bool TryCommitControlTransferStop(PlayableCommand stop,long revision,long tick,int team)
+        {
+            PrepareCommandGroup(stop,revision,tick,team);
+            try{return TryOwnedStopGroup(stop.CopyEntityIds(),false,publishTransfer:true)??false;}
+            finally{if(commandGroup!=null)AbortTacticalPreparation();}
+        }
+        private bool? TryOwnedStopGroup(int[] ids,bool hold,bool remove=false,MovementReadSet sourceInputs=null,bool publishTransfer=false)
         {
             using(EnterTransport())if(!(groups is NavigationCommandSlots<long,GroupOrderState>)&&(groupCommandBacking!=null||!EmptyCommandStateForProbe()||Requests.Count!=0||!Requests.HasInitialPreparedBacking))return null;
             NavigationCommandSourcePins pins;NavigationHostRoot host;NavigationAuthorityOwners authority;long operation,publication,mailboxRevision;int mailboxCount;GroupOrderState context,observedContext;bool metadataContext;StopSource stopSource;
@@ -143,8 +149,8 @@ namespace Spacewars.Runtime
                         ids=null;
                         scope.Attach(candidate);
                         AfterStopPreparationForQa?.Invoke(scope);
-                        if(context!=null){using(EnterTransport()){ValidateStopSource(candidate,scope);if(operation!=authorityOperationIdentity||!ReferenceEquals(context,commandGroup))return false;preparedCommandGroup=candidate;preparedCommandScope=scope;staged=true;}return true;}
-                        PublishPreparedStop(candidate,scope,metadataContext);return true;
+                        if(context!=null&&!publishTransfer){using(EnterTransport()){ValidateStopSource(candidate,scope);if(operation!=authorityOperationIdentity||!ReferenceEquals(context,commandGroup))return false;preparedCommandGroup=candidate;preparedCommandScope=scope;staged=true;}return true;}
+                        PublishPreparedStop(candidate,scope,metadataContext,allowHostAdvance:publishTransfer);return true;
                     }catch(Exception error)when(NavigationCommandRefused.IsExpected(error,scope)){
                         if(candidate?.Published==true)throw;
                         // Remove has no refusal return path: preserve its public failure
@@ -156,10 +162,11 @@ namespace Spacewars.Runtime
                 }finally{inputs?.ReleaseOwner();if(!staged)scope.Dispose();}
             }
         }
-        private void ValidateStopSource(NavigationGroupCommand c,NavigationRetentionBudget.Scope scope)
+        private void ValidateStopSource(NavigationGroupCommand c,NavigationRetentionBudget.Scope scope,bool allowHostAdvance=false)
         {
             scope.AssertOwnerLive();
-            if(c.MovementInputs!=null&&(!c.MovementInputs.Current(this,c)||c.AllocationThread!=hostAllocationThread||!TacticalHostEnvelopeMatches(c)))throw new NavigationCommandRefused("Tactical stop semantic input or allocation changed.");
+            if(c.MovementInputs!=null&&(!c.MovementInputs.Current(this,c)||
+                !allowHostAdvance&&(c.AllocationThread!=hostAllocationThread||!TacticalHostEnvelopeMatches(c))))throw new NavigationCommandRefused("Tactical stop semantic input or allocation changed.");
             if(!c.IsStop||!ReferenceEquals(c.Budget,physicalHostBudget)||scope.Owner!=Generation||scope.Kind!=NavigationPreparationKind.Admission||scope.Publication!=c.ExpectedPublication||
                 c.Operation!=authorityOperationIdentity||c.ExpectedPublication!=admissionPublicationIdentity||!ReferenceEquals(c.ExpectedAuthority,authorityOwners)||
                 !ReferenceEquals(c.StopBacking,groupCommandBacking)||!ReferenceEquals(c.StopAdmission,admissionOwner)||!ReferenceEquals(c.StopLedger,arrivalLedger)||
@@ -178,12 +185,14 @@ namespace Spacewars.Runtime
                 installedExecutions.TryGetValue(actor.Id,out var installed);if(!ReferenceEquals(installed,c.Installed[i])||installedExecutions.IsDetached(actor.Id)!=c.InstalledDetached[i])throw new NavigationCommandRefused("Stop execution changed.");
             }
         }
-        private void PublishPreparedStop(NavigationGroupCommand candidate,NavigationRetentionBudget.Scope scope,bool preserveCommandContext=false)
+        private void PublishPreparedStop(NavigationGroupCommand candidate,NavigationRetentionBudget.Scope scope,bool preserveCommandContext=false,bool allowHostAdvance=false)
         {
             NavigationCommandAuthority retired=null;NavigationHostRoot retiredObservationHost=null;
             try{scope.Publish(candidate,_=>{using(EnterTransport())using(var mailbox=Requests.EnterPreparedWrite()){
                 candidate.DomainCommit?.StartValidationMeasureNoThrow();
-                ValidateStopSource(candidate,scope);ValidateCommandMailbox(candidate,mailbox);
+                // Capture consumes the stop read-set and mailbox, without adopting
+                // the worker's route frontier. Keep its independent progress.
+                ValidateStopSource(candidate,scope,allowHostAdvance);ValidateCommandMailbox(candidate,mailbox);
                 // Host frames may advance independently of ingress. Refresh only that immutable
                 // pin after the complete Stop read-set is proven current under the publication gate.
                 var current=committedHostRoot;

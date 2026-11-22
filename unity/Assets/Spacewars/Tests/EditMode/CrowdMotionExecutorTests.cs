@@ -22,6 +22,26 @@ namespace Spacewars.Tests.EditMode
             }}
             public void Dispose()=>entered.Dispose();
         }
+        private sealed class WorkerOnlyJob : INavMotionWork
+        {
+            internal readonly int Owner=Thread.CurrentThread.ManagedThreadId;
+            internal int OwnerCalls,HelperCalls;
+            public void RunRows()
+            {
+                if(Thread.CurrentThread.ManagedThreadId==Owner)Interlocked.Increment(ref OwnerCalls);
+                else Interlocked.Increment(ref HelperCalls);
+            }
+        }
+
+        [Test] public void WorkerOnlyDispatchJoinsHelpersWithoutRunningCalculationsOnOwner()
+        {
+            using var executor=new NavMotionExecutor(2);
+            var job=new WorkerOnlyJob();
+            executor.DispatchWorkers(job);
+            Assert.AreEqual(2,job.HelperCalls);
+            Assert.Zero(job.OwnerCalls);
+            Assert.True(executor.IsIdle);
+        }
         [Test] public void ClusteredExpensiveRowsAreStolenExactlyOnceAndExecutorClearsJobsBeforeStop()
         {
             var executor=new NavMotionExecutor(2);

@@ -27,6 +27,49 @@ public sealed class PlayableArtilleryPresentationTests
         foreach(string collection in new[]{"shells","impactMarkers","impactEffects"})foreach(GameObject effect in Get(collection).Values)
             foreach(var part in effect.GetComponentsInChildren<Transform>(true))Assert.AreEqual(layer,part.gameObject.layer,part.name);
     }
+    [TestCase(PlayableEntityKind.Tank,false,0)]
+    [TestCase(PlayableEntityKind.Tank,true,0)]
+    [TestCase(PlayableEntityKind.Explorer,false,0)]
+    [TestCase(PlayableEntityKind.Explorer,true,0)]
+    [TestCase(PlayableEntityKind.Explorer,true,1)]
+    public void DirectShotStartsAtTheRenderedMuzzleAndJoinsAuthoritativeFlight(PlayableEntityKind kind,bool upgraded,int barrel)
+    {
+        var actor=world.Tank(1,true,kind);
+        var entity=new PlayableEntitySnapshot(1,PlayableOwner.Player,kind,new NavPoint(4,5),60,false,0,0,0,upgraded:upgraded,weaponPitch:.6);
+        world.UpdateResearchModel(actor,entity);
+        actor.Root.SetPositionAndRotation(new Vector3(4,2,5),Quaternion.Euler(13,30,-9));
+        actor.Turret.localRotation=Quaternion.Euler(0,24,0);
+        world.AimExplorer(actor,entity);
+        var muzzle=kind==PlayableEntityKind.Tank?actor.Turret.Find("barrelRecoil/muzzle"):
+            actor.Launcher.Find(upgraded?(barrel==0?"muzzleLeft":"muzzleRight"):"muzzle");
+        Assert.NotNull(muzzle);
+
+        var first=new PlayableProjectileSnapshot(1,1,2,new NavPoint(5,6),kind,.5,3,.3,directLaunchTick:30,directBarrel:barrel);
+        Render(new[]{first});
+        var shell=((GameObject)Get("shells")[1]).transform;
+        var tail=kind==PlayableEntityKind.Explorer?shell.right*shell.localScale.x/2:Vector3.zero;
+        Assert.That(Vector3.Distance(shell.position-tail,muzzle.position),Is.LessThan(.00001f));
+        var launched=shell.position;
+        actor.Root.position+=Vector3.forward;
+        Render(new[]{first},paused:true);
+        Assert.AreEqual(launched,shell.position,"An observed launch must stay frozen while paused.");
+
+        var inFlight=new PlayableProjectileSnapshot(1,1,2,new NavPoint(7,8),kind,.5,4,.3,directLaunchTick:30,directBarrel:barrel);
+        Render(new[]{inFlight},tick:33);
+        Assert.AreEqual(new Vector3(7,4,8),shell.position);
+        Render(Array.Empty<PlayableProjectileSnapshot>(),tick:34);
+        Render(new[]{inFlight},tick:35);
+        Assert.AreEqual(new Vector3(7,4,8),((GameObject)Get("shells")[1]).transform.position,
+            "A shot becoming visible midflight must not jump back to the muzzle.");
+    }
+
+    [Test]public void DirectShotWithoutVisibleSourceUsesAuthoritativePosition()
+    {
+        var shot=new PlayableProjectileSnapshot(1,0,2,new NavPoint(4,6),PlayableEntityKind.Explorer,height:3,directLaunchTick:30);
+        Render(new[]{shot});
+        Assert.AreEqual(new Vector3(4,3,6),((GameObject)Get("shells")[1]).transform.position);
+    }
+
     [Test]public void MarkerOnlyNeverMaterializesHiddenMissileAndPausedTransformsStayFixed()
     {
         var marker=new PlayableImpactMarker(new NavPoint(3,4),1.6,.22);var shot=new PlayableProjectileSnapshot(7,0,0,default,PlayableEntityKind.Shkval,visible:false,marker:marker);
@@ -92,6 +135,23 @@ public sealed class PlayableArtilleryPresentationTests
                 yield return null;camera.Render();Save(texture,System.IO.Path.Combine(folder,"web-tick-"+tick.ToString("D2")+".png"));
             }
             camera.orthographicSize=(float)PlayableProfile.Default.CameraOrthoSize;yield return null;camera.Render();Save(texture,System.IO.Path.Combine(folder,"game-scale.png"));
+            world.Remove(3);
+            world.Actors[1].Root.SetPositionAndRotation(new Vector3(-1.2f,0,.55f),Quaternion.Euler(0,180,0));
+            world.Actors[2].Root.SetPositionAndRotation(new Vector3(1.2f,0,.55f),Quaternion.Euler(0,180,0));
+            camera.orthographicSize=1.7f;
+            camera.transform.position=new Vector3(1.6f,3.1f,-5);
+            camera.transform.LookAt(new Vector3(0,.4f,-.2f));
+            foreach(bool corrected in new[]{false,true})
+            {
+                long? launchTick=corrected?40L:(long?)null;
+                var tank=new PlayableProjectileSnapshot(31,1,10,new NavPoint(-1.2,.05),PlayableEntityKind.Tank,-Math.PI/2,.5,directLaunchTick:launchTick);
+                var explorer=new PlayableProjectileSnapshot(32,2,10,new NavPoint(1.2,-1.2167),PlayableEntityKind.Explorer,-Math.PI/2,.5,directLaunchTick:launchTick);
+                Render(Array.Empty<PlayableProjectileSnapshot>(),tick:40);
+                Render(new[]{tank,explorer},tick:40);
+                yield return null;
+                camera.Render();
+                Save(texture,System.IO.Path.Combine(folder,corrected?"direct-muzzles-after.png":"direct-muzzles-before.png"));
+            }
         }finally{camera.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);}
     }
     private static void Save(RenderTexture texture,string path){var previous=RenderTexture.active;var pixels=new Texture2D(texture.width,texture.height,TextureFormat.RGB24,false);try{RenderTexture.active=texture;pixels.ReadPixels(new Rect(0,0,texture.width,texture.height),0,0);pixels.Apply();System.IO.File.WriteAllBytes(path,pixels.EncodeToPNG());}finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(pixels);}}

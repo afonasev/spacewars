@@ -45,6 +45,25 @@ namespace Spacewars.Tests.EditMode
             v.Refresh(sources,buildings);long revision=v.Snapshot().Revision;
             v.Refresh(sources,buildings);Assert.AreEqual(revision+1,v.Snapshot().Revision);
         }
+        [Test] public void MovingSightReusesOnlyUnchangedHistoryAndPreservesOldSnapshots()
+        {
+            var v=Fresh();v.Refresh(new[]{S(0,100)},Array.Empty<KnownBuilding>());var old=v.Snapshot();
+            var oldCells=old.DiscoveredCells.ToArray();var oldCoverage=old.Coverage.ToArray();
+            v.Refresh(new[]{S(1)},Array.Empty<KnownBuilding>());var moved=v.Snapshot();
+            Assert.AreSame(old.DiscoveredCells,moved.DiscoveredCells);
+            Assert.AreSame(old.Coverage,moved.Coverage);
+            Assert.False(moved.IsVisible(new NavPoint(50,0)));Assert.True(old.IsVisible(new NavPoint(50,0)));
+            v.Refresh(new[]{S(120)},Array.Empty<KnownBuilding>());var expanded=v.Snapshot();
+            Assert.AreNotSame(moved.DiscoveredCells,expanded.DiscoveredCells);
+            Assert.AreNotSame(moved.Coverage,expanded.Coverage);
+            CollectionAssert.AreEqual(oldCells,old.DiscoveredCells);CollectionAssert.AreEqual(oldCoverage,old.Coverage);
+            var cold=Fresh();cold.RestoreState(v.CaptureState());var restored=cold.Snapshot();
+            CollectionAssert.AreEqual(expanded.DiscoveredCells,restored.DiscoveredCells);CollectionAssert.AreEqual(expanded.Coverage,restored.Coverage);
+            Assert.AreEqual(expanded.Revision,restored.Revision);Assert.AreEqual(expanded.FogRevision,restored.FogRevision);
+            var empty=Fresh();empty.Snapshot();empty.RestoreState(v.CaptureState());
+            CollectionAssert.AreEqual(expanded.DiscoveredCells,empty.Snapshot().DiscoveredCells);
+            CollectionAssert.AreEqual(expanded.Coverage,empty.Snapshot().Coverage);
+        }
         [Test] public void ReportRepeatedUnchangedRefreshWithoutTimingThreshold()
         {
             var v=Fresh();var sources=Enumerable.Range(0,64).Select(i=>new VisionSource(new NavPoint(i%8*8-28,i/8*8-28),6)).ToArray();

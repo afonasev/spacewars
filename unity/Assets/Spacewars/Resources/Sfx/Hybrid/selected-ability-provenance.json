@@ -1,0 +1,108 @@
+{
+  "generator": "Procedural local synthesis (numpy/scipy); no external recordings or Stable Audio output in replaced clips",
+  "human_choice": "User selected P4 S5 N4 U5 HK2 SF1 NU1 and authorized game integration 2026-11-14",
+  "runtime_acceptance": "Pending human listening in game",
+  "clips": [
+    {
+      "file": "ability-reinforcement-1.wav",
+      "selection": "P4",
+      "source": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-action-v1/audio/P4.wav",
+      "source_sha256": "a6b50c72cb1e1fcd7e15bdc3bb5ca21e8d7b3f7576d3dee7934a6bc96ffb01e4",
+      "sha256": "f2ece54e2c7ec9cf5e451bdabea862b4ed8116d7cc8b2b330111309622034ced",
+      "seconds": 3.0,
+      "processing": "PCM segment 0–3s; 5ms fade only at cut edge"
+    },
+    {
+      "file": "ability-reinforcement-ready-1.wav",
+      "selection": "P4",
+      "source": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-action-v1/audio/P4.wav",
+      "source_sha256": "a6b50c72cb1e1fcd7e15bdc3bb5ca21e8d7b3f7576d3dee7934a6bc96ffb01e4",
+      "sha256": "5929398a9a5393f71d5536bf441f525d1b90828c22391fd53bf3a6aa1b2ef025",
+      "seconds": 1.15,
+      "processing": "PCM segment 3–4.15s; 5ms fade only at cut edge"
+    },
+    {
+      "file": "ability-stasis-1.wav",
+      "selection": "S5",
+      "source": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-action-v1/audio/S5.wav",
+      "source_sha256": "0314356ecca2ccc4ddf19ae2f7a65f3a0053bbcd4c167d250227b7709067c450",
+      "sha256": "779316a26d7212e66332d1c3a6251a23d80749c1024c84aac369711fda61021a",
+      "seconds": 2.8,
+      "processing": "PCM segment 0–2.8s; 5ms fade only at cut edge"
+    },
+    {
+      "file": "ability-stasis-release-1.wav",
+      "selection": "S5",
+      "source": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-action-v1/audio/S5.wav",
+      "source_sha256": "0314356ecca2ccc4ddf19ae2f7a65f3a0053bbcd4c167d250227b7709067c450",
+      "sha256": "ea0002d070b3c0ca15bd05282a6eb70b1c717f8237b727dd984e20f6248dc8af",
+      "seconds": 0.95,
+      "processing": "PCM segment 2.8–3.75s; 5ms fade only at cut edge"
+    },
+    {
+      "file": "ability-nanobots-1.wav",
+      "selection": "N4",
+      "source": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-action-v1/audio/N4.wav",
+      "source_sha256": "ca7ff3dd3358fe19402b835c8bcba5904b608905d1cec17cc190dc79123e3fbb",
+      "sha256": "ca7ff3dd3358fe19402b835c8bcba5904b608905d1cec17cc190dc79123e3fbb",
+      "seconds": 3.6,
+      "processing": "exact selected WAV"
+    },
+    {
+      "file": "ability-production-boost-1.wav",
+      "selection": "U5",
+      "source": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-action-v1/audio/U5.wav",
+      "source_sha256": "3e825872cae2355cfe0cb02e56ce56ca2055f524c641d5f44f73039b665a5789",
+      "sha256": "3e825872cae2355cfe0cb02e56ce56ca2055f524c641d5f44f73039b665a5789",
+      "seconds": 3.1,
+      "processing": "exact selected WAV"
+    },
+    {
+      "file": "ability-hack-1.wav",
+      "selection": "HK2",
+      "source": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-full-abilities-v1/dry/HK2.wav",
+      "source_sha256": "1e165f0544e0cc24b7236164c2818cfe07394d521a6debdc40c6af8ed9e44794",
+      "sha256": "1e165f0544e0cc24b7236164c2818cfe07394d521a6debdc40c6af8ed9e44794",
+      "seconds": 0.72,
+      "processing": "exact selected WAV"
+    },
+    {
+      "file": "ability-system-failure-1.wav",
+      "selection": "SF1",
+      "source": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-full-abilities-v1/dry/SF1.wav",
+      "source_sha256": "fa7abc738e338136c44dbb1eb40b849fd1c3626c762264404aeb39987045f374",
+      "sha256": "fa7abc738e338136c44dbb1eb40b849fd1c3626c762264404aeb39987045f374",
+      "seconds": 1.1,
+      "processing": "exact selected WAV"
+    },
+    {
+      "file": "ability-nuclear-impact-1.wav",
+      "selection": "NU1",
+      "source": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-full-abilities-v1/dry/NU1.wav",
+      "source_sha256": "c833a0ee0e8919e0701ee3fdfe541e8f2de21f00a0fdf09e67ec74bea9e2429f",
+      "sha256": "c833a0ee0e8919e0701ee3fdfe541e8f2de21f00a0fdf09e67ec74bea9e2429f",
+      "seconds": 3.05,
+      "processing": "exact selected WAV"
+    }
+  ],
+  "unchanged": {
+    "scan": {
+      "code": "SC0",
+      "path": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-full-abilities-v1/originals/ability-scan-1.wav",
+      "sha256": "1202f2f41272a89604384689302863a6ca8b01bcc34db5110f35c4cbe95a817b",
+      "action": "retain_existing_original",
+      "packet": "2026-11-14-full-abilities-v1",
+      "audition_path": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-full-abilities-v1/dry/SC0.wav",
+      "audition_sha256": "abbf4f8232e1b0afa68aad079014cd541a8b7c92b5b7807909bff7a1995f58a5"
+    },
+    "mine": {
+      "code": "MI0",
+      "path": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-full-abilities-v1/originals/ability-mine-1.wav",
+      "sha256": "3b3ec1f51daaa2a5403b4c59d496c212e39e2fea4f22c23d044b036fd2d6ae33",
+      "action": "retain_existing_original",
+      "packet": "2026-11-14-full-abilities-v1",
+      "audition_path": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/escalation-audio-audition/2026-11-14-full-abilities-v1/dry/MI0.wav",
+      "audition_sha256": "2a84e2da6b7111ba42928d2d8c483c43840620fd27fc53af7d1eb7ccd814edb5"
+    }
+  }
+}

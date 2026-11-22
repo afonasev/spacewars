@@ -51,6 +51,18 @@ public sealed class NativeLobbyTeamUiTests
         for(int i=0;i<6;i++)Assert.AreEqual((i%2+1).ToString(),lobby.Q<DropdownField>("lobby-team-"+i).value);
     }
 
+    [Test] public void ExpertIsShownByNameAndSelectedForOnlyThatBot()
+    {
+        var setup=Get<NativeLobbyConfiguration>("lobbySetup");
+        var field=Get<VisualElement>("lobbyScreen").Q<DropdownField>("lobby-ai-difficulty");
+        CollectionAssert.AreEqual(new[]{"Кадет","Боец","Ветеран","Эксперт","Читер"},field.choices);
+        field.value="Эксперт";
+        Assert.AreEqual(AiDifficulty.Expert,setup.Participants[1].Difficulty);
+        field.value="Читер";
+        Assert.AreEqual(AiDifficulty.Cheater,setup.Participants[1].Difficulty);
+        Assert.AreEqual(AiDifficulty.Fighter,setup.Participants[0].Difficulty);
+    }
+
     private PlayableMapMark[] PreviewMarks()=>((IReadOnlyList<PlayableMapMark>)typeof(PlayableMapSurface)
         .GetField("marks",Flags).GetValue(Get<PlayableMapSurface>("lobbyPreview"))).ToArray();
     private IEnumerator Capture(string name,bool sceneVisible=false)

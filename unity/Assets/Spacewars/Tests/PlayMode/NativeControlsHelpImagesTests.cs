@@ -23,7 +23,7 @@ namespace Spacewars.Input.Tests
             {
                 var page=NativeControlsHelp.Open(root,navigation,()=>{closed=true;invoking.Focus();});
                 Assert.IsNull(page.Q("controller-diagram"),"The image replaces overlaid labels.");Assert.IsNull(page.Q("help-context-actions"),"The finished page replaces adjacent lists.");
-                string[] names={"field","buildings","groups","map","keyboard"};
+                string[] names={"field-events-up","buildings","groups","map","keyboard"};
                 foreach(var size in new[]{new Vector2Int(1280,720),new Vector2Int(1920,1080),new Vector2Int(640,720)})
                 {
                     var panel=host.GetComponent<UIDocument>().panelSettings;var target=new RenderTexture(size.x,size.y,24);target.Create();panel.targetTexture=target;

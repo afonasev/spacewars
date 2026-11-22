@@ -8,6 +8,40 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class HawkFlightTests
     {
+        [TestCase(false)]
+        [TestCase(true)]
+        public void LayeredMapAirInputTemplateMatchesFreshWire(bool antennaCity)
+        {
+            const BindingFlags hidden=BindingFlags.Instance|BindingFlags.NonPublic;
+            IPlayableTerrain map=antennaCity?(IPlayableTerrain)new AntennaCityMap():new MossHighlandMap();
+            var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);
+            var domain=new PlayableDomain(p,1,false);
+            var adopter=new AiCombatMicroAirMotionAuthority(domain,()=>Array.Empty<PlayableAiOwnerLoop>());
+            domain.BindAirMotionAuthority(adopter);
+            domain.VerifyAirInputReuseForTests=true;
+            try
+            {
+                var spawn=typeof(PlayableDomain).GetMethod("SpawnUnit",hidden);
+                int id=(int)spawn.Invoke(domain,new object[]{p.Headquarters(PlayableOwner.Player),PlayableOwner.Player,PlayableEntityKind.Hawk});
+                var advance=typeof(PlayableDomain).GetMethod("AdvanceHawks",hidden);
+                for(int tick=0;tick<3;tick++)advance.Invoke(domain,new object[]{1d/30});
+                Assert.AreEqual(3,adopter.Publications);
+                Assert.AreEqual(3,domain.VerifiedAirInputReusesForTests);
+                Assert.AreEqual(2,domain.VerifiedAirInputTemplatesForTests);
+                spawn.Invoke(domain,new object[]{p.Headquarters(PlayableOwner.Enemy),PlayableOwner.Enemy,PlayableEntityKind.Hawk});
+                advance.Invoke(domain,new object[]{1d/30});
+                Assert.AreEqual(4,adopter.Publications);
+                Assert.AreEqual(3,domain.VerifiedAirInputTemplatesForTests);
+                var view=domain.Snapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+                Assert.True(view.Entities.Any(e=>e.Id==id&&e.Kind==PlayableEntityKind.Hawk));
+            }
+            finally
+            {
+                domain.Navigation.ReleaseCommittedHostRoot();
+                domain.DestroyOwnedNavigation();
+                Assert.Zero(domain.Navigation.PhysicalHostBudget.PhysicalBytes);
+            }
+        }
         [TestCase(0d,.02d,1d/30)] [TestCase(0d,.3d,1d/30)]
         [TestCase(0d,1.5d,1d/30)] [TestCase(0d,-1.5d,1d/30)]
         [TestCase(3.1d,-3.1d,1d/30)] [TestCase(-3.1d,3.1d,1d/30)]
@@ -45,6 +79,36 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(p.ExplorerVision,PlayableUnitRules.Vision(p,PlayableEntityKind.Hawk));
             Assert.AreEqual(PlayableCommandKind.QueueHawk,PlayableUnitRules.ProductionCommand(PlayableEntityKind.Hawk));
             Assert.True(PlayableProfileMetadata.Fields.Any(x=>x.Path=="hawk.clearance"));
+        }
+        [Test] public void CruisingHawkSettlesAtCloseOffAxisWaypointWithSlowYaw()
+        {
+            var data=PlayableProfile.Default.CopyData();
+            data.hawkYawSpeed=1;
+            var p=PlayableProfile.Create(data);
+            var d=new PlayableDomain(p,1,false);
+            const BindingFlags hidden=BindingFlags.Instance|BindingFlags.NonPublic;
+            object Call(string name,params object[] args)=>typeof(PlayableDomain).GetMethod(name,hidden).Invoke(d,args);
+            try
+            {
+                var start=new NavPoint(-10,15);
+                var goal=new NavPoint(-9,13);
+                int id=(int)Call("SpawnUnit",start,PlayableOwner.Player,PlayableEntityKind.Hawk);
+                var units=(System.Collections.IDictionary)typeof(PlayableDomain).GetField("units",hidden).GetValue(d);
+                var air=units[id].GetType().GetField("Air").GetValue(units[id]);
+                var actor=(NavUnit)air.GetType().GetField("Actor").GetValue(air);
+                actor.Heading=1;
+                var velocity=air.GetType().GetField("Velocity");
+                velocity.SetValue(air,new NavPoint(p.HawkSpeed*Math.Cos(actor.Heading),p.HawkSpeed*Math.Sin(actor.Heading)));
+                Assert.AreEqual(PlayableCommandStatus.Applied,d.Apply(new PlayableCommand(1,1,"player-1",PlayableCommandKind.Move,new[]{id},goal),out _));
+
+                for(int tick=0;tick<210&&actor.Outcome!=NavigationOutcome.Arrived;tick++)
+                    Call("AdvanceHawks",1d/30);
+
+                Assert.AreEqual(NavigationOutcome.Arrived,actor.Outcome);
+                Assert.LessOrEqual(Math.Sqrt(Math.Pow(actor.Position.X-goal.X,2)+Math.Pow(actor.Position.Z-goal.Z,2)),p.Navigation.ArrivalTolerance);
+                Assert.AreEqual(default(NavPoint),velocity.GetValue(air));
+            }
+            finally{d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();}
         }
         [Test] public void TallBuildingProfileControlsLookaheadAndActualSafeClearance()
         {

@@ -24,7 +24,7 @@ namespace Spacewars.Tests.EditMode
             =>ActualFollowAroundTower(true,true);
         private void ActualFollowAroundTower(bool movingLeader,bool withdrawal=false)
         {
-            var basis=PendingReadbackConfiguration();var p=basis.Profile;var ai=AiProfile.Initial;
+            var basis=PendingReadbackConfiguration(includeRepairRoster:false);var p=basis.Profile;var ai=AiProfile.Initial;
             var from=new NavPoint(-9.14202072178326,2.033802542241749);
             var leaderFrom=movingLeader?new NavPoint(-11.378726304813966,6.917391112577249):new NavPoint(-11.073793140956237,8.332341400886904);
             var destination=new NavPoint(-14.99669103036344,3.6420231500973106);

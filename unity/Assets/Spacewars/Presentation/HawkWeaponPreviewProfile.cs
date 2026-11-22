@@ -9,7 +9,7 @@ namespace Spacewars.Presentation
     {
         public string id = "hawk-weapon-preview-v1";
         public int revision = 1;
-        [SurfaceSetting("Оружие", "Подготовка сверх танковой", "Добавляется к подготовке танка после остановки.", "с", .05f, 5, .05f)]
+        [SurfaceSetting("Оружие", "Дополнительная подготовка к выстрелу", "Добавляется к подготовке Вепря после остановки.", "с", .05f, 5, .05f)]
         public float preparationExtraSeconds = .8f;
         [SurfaceSetting("Оружие", "Интервал ракет", "Задержка между левым и правым пуском одного залпа.", "с", .05f, 1, .01f)]
         public float shotIntervalSeconds = .18f;

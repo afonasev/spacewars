@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using Spacewars.Runtime;
 using Spacewars.Simulation;
 namespace Spacewars.Tests.EditMode
 {
@@ -16,6 +17,42 @@ namespace Spacewars.Tests.EditMode
         private static bool Sweep(NavGeometry g,NavPoint a,NavPoint b,double r){
             if(!Free(g,a,r)||!Free(g,b,r))return false;
             foreach(var o in g.Obstacles)if(Math.Max(a.X,b.X)+r>=o.MinX&&Math.Min(a.X,b.X)-r<=o.MaxX&&Math.Max(a.Z,b.Z)+r>=o.MinZ&&Math.Min(a.Z,b.Z)-r<=o.MaxZ&&SegmentDistance(a,b,o)<=r*r)return false;return true;
+        }
+        [Test] public void UnindexedRebindDraftKeepsThePaidSweepIndexAndBlockers()
+        {
+            var map=new CrimsonGroveMap();
+            var obstacles=map.MovementBlockers.ToArray();
+            var ordinary=new NavGeometry(map.HalfExtent,obstacles,7);
+            var draft=NavGeometry.CreateRebindSource(map.HalfExtent,obstacles,7);
+            Assert.Greater(ordinary.SpatialIndexRetainedBytes,0);
+            Assert.Zero(draft.SpatialIndexRetainedBytes);
+            var budget=new NavigationRetentionBudget();
+            Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,1,1,out var scope));
+            using(scope){
+                NavGeometry before=null,after=null;
+                try{
+                    var r=scope.OwnedReservation();
+                    before=NavGeometry.CopyOwned(ordinary,r);
+                    after=NavGeometry.CopyOwned(draft,r);
+                    Assert.AreEqual(before.StorageRoot.StorageBytes,after.StorageRoot.StorageBytes);
+                    Assert.AreEqual(before.SpatialIndexRetainedBytes,after.SpatialIndexRetainedBytes);
+                    Assert.AreEqual(before.Revision,after.Revision);
+                    Assert.True(before.Obstacles.Zip(after.Obstacles,(a,b)=>a.GeometryEquals(b)).All(equal=>equal));
+                    Assert.AreEqual(before.Obstacles.Count,after.Obstacles.Count);
+                    var random=new Random(7121);
+                    NavPoint Point()=>new NavPoint((2*random.NextDouble()-1)*map.HalfExtent,(2*random.NextDouble()-1)*map.HalfExtent);
+                    for(int i=0;i<600;i++){
+                        var a=Point();
+                        var b=i%2==0?new NavPoint(a.X+.4,a.Z-.7):Point();
+                        double radius=i%3==0?0:.72;
+                        Assert.AreEqual(before.IsFree(a,radius),after.IsFree(a,radius));
+                        Assert.AreEqual(before.SegmentFree(a,b,radius,out int expected),after.SegmentFree(a,b,radius,out int actual));
+                        Assert.AreEqual(expected,actual);
+                    }
+                }finally{after?.StorageRoot.Release();before?.StorageRoot.Release();}
+            }
+            Assert.Zero(budget.PhysicalBytes);
+            Assert.Zero(budget.HeldBytes);
         }
         [Test] public void PolygonContainmentKeepsOriginalBoundaryToleranceAndRayParity(){
             bool Original(NavPolygon polygon,NavPoint p){
@@ -41,6 +78,66 @@ namespace Spacewars.Tests.EditMode
                 }
             }
         }
+        [Test]
+        public void RepairEndpointCacheStillTestsEachChord()
+        {
+            var points=new[]{
+                new NavPoint(0,0),new NavPoint(8,0),new NavPoint(0,6),new NavPoint(8,6),
+                new NavPoint(4,0),new NavPoint(24.7,0),new NavPoint(8,3)
+            };
+            var geometry=new NavGeometry(25,new[]{
+                new NavObstacle(3,-1,5,1),
+                new NavObstacle(new NavPoint(4,6),.8),
+                new NavObstacle(new NavPolygon(new[]{new NavPoint(2,2),new NavPoint(5,2),new NavPoint(2,4)}))
+            },1);
+            foreach(double radius in new[]{.35,.72})
+            {
+                var endpoints=new byte[points.Length];
+                int hint=-1;
+                for(int pass=0;pass<2;pass++)
+                for(int i=0;i<points.Length;i++)
+                {
+                    byte origin=0;
+                    for(int j=0;j<points.Length;j++)
+                    {
+                        bool expected=geometry.SegmentFree(points[i],points[j],radius);
+                        bool cached=geometry.SegmentFreeWithBlockerHint(points[i],points[j],radius,
+                            ref hint,ref origin,ref endpoints[j]);
+                        Assert.AreEqual(expected,cached,$"chord {i} -> {j}, radius {radius}");
+                    }
+                }
+            }
+        }
+
+        [Test] public void RepairBlockerHintRetestsEachChordAcrossChangedClearance()
+        {
+            var map=new AntennaCityMap();
+            var obstacles=map.MovementBlockers.Concat(new[]{
+                new NavObstacle(new NavPoint(-120,0),.58),
+                new NavObstacle(-116,-1,-115,1),
+                new NavObstacle(new NavPolygon(new[]{new NavPoint(-112,-2),new NavPoint(-110,0),new NavPoint(-112,2)}))
+            }).ToArray();
+            var geometry=new NavGeometry(map.HalfExtent,obstacles,1);
+            var random=new Random(1951);
+            int hint=-1,learned=0,clearAfterHint=0;
+            void Check(NavPoint from,NavPoint to,double radius)
+            {
+                int previous=hint;
+                bool expected=geometry.SegmentFree(from,to,radius,out int blocker);
+                Assert.AreEqual(expected,geometry.SegmentFreeWithBlockerHint(from,to,radius,ref hint));
+                if(hint!=previous&&hint>=0){Assert.AreEqual(blocker,hint);learned++;}
+                if(expected&&previous>=0)clearAfterHint++;
+            }
+            for(int i=0;i<8000;i++){
+                var a=new NavPoint(-128+25*random.NextDouble(),random.NextDouble()*30-15);
+                var b=new NavPoint(-124+100*random.NextDouble(),random.NextDouble()*100-50);
+                Check(a,b,i%4==0?0:.58);
+                Check(a,new NavPoint(a.X+.4,a.Z+.1),i%4==0?0:.58);
+            }
+            Assert.Greater(learned,0);
+            Assert.Greater(clearAfterHint,0);
+        }
+
         [Test] public void IndexedCandidatesKeepExactFootprintsSweepsAndBucketBoundaryTangency(){
             var random=new Random(7108);var solids=Enumerable.Range(0,40).Select(i=>{
                 double x=random.NextDouble()*100-50,z=random.NextDouble()*100-50;
